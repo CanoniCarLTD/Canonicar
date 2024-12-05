@@ -1,0 +1,5 @@
+# Ignore virtual environment
+carla_env/
+
+# Ignore Python bytecode files
+__pycache__/
