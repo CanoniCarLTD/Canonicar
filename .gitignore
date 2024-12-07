@@ -3,3 +3,8 @@ carla_env/
 
 # Ignore Python bytecode files
 __pycache__/
+
+# ignore .env
+.env
+
+
