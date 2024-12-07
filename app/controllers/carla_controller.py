@@ -18,12 +18,12 @@ def start():
         return jsonify({"status": "error", "message": str(e)}), 500
 
 # spawn car with a camera attached
-@carla_controller.route('/spawn_car', methods=['POST'])
-def spawn_car():
+@carla_controller.route('/random_spawn_car', methods=['POST'])
+def random_point_spawn_vehicle():
     try:
         # Use the extracted data to spawn the vehicle
         vehicle_model = carla_factory.create_vehicle()  # Adjust the factory method to accept coordinates
-        vehicle = vehicle_model.spawn_vehicle()
+        vehicle = vehicle_model.random_point_spawn_vehicle()
         camera_model = carla_factory.create_camera(vehicle)
         camera = camera_model.setup_camera()
         
