@@ -2,8 +2,6 @@ from flask import Blueprint, Response, jsonify
 from app.models.carla_factory import CarlaFactory
 from app.models.carla_model import CarlaModel
 
-
-
 carla_controller = Blueprint('carla_controller', __name__)
 
 # Initialize the CARLA model
@@ -23,11 +21,13 @@ def start():
 @carla_controller.route('/spawn_car', methods=['POST'])
 def spawn_car():
     try:
-        vehicle_model = carla_factory.create_vehicle()
-        vehicle = vehicle_model.spawn_vehicle() 
+        # Use the extracted data to spawn the vehicle
+        vehicle_model = carla_factory.create_vehicle()  # Adjust the factory method to accept coordinates
+        vehicle = vehicle_model.spawn_vehicle()
         camera_model = carla_factory.create_camera(vehicle)
         camera = camera_model.setup_camera()
-        return jsonify({"status": "success", "message": "Vehicle spawned.", "vehicle":{vehicle}}), 200
+        
+        return jsonify({"status": "success", "message": "Vehicle spawned."}), 200
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 

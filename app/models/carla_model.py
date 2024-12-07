@@ -1,8 +1,11 @@
 import time
 import carla
 
+ITAY = "5.29.228.0"
+KFIR = "147.235.223.65"
+
 class CarlaModel:
-    def __init__(self, host="5.29.228.0", port=2000, timeout=2.0):
+    def __init__(self, host=ITAY, port=2000, timeout=2.0):
         self.host = host
         self.port = port
         self.timeout = timeout
@@ -17,7 +20,7 @@ class CarlaModel:
         self.client.set_timeout(self.timeout)
         self.world = self.client.get_world()
         print("Connected to CARLA:", self.client.get_server_version())
-        self.destroy_all_actors()  # Destroy all actors in the simulation
+        # self.destroy_all_actors()  # Destroy all actors in the simulation
         time.sleep(2)  # Wait for the world to be ready
 
     def destroy_all_actors(self):

@@ -7,10 +7,14 @@ class CarlaFactory:
         self.carla_model = carla_model
         self.blueprint_library = None
 
+    def set_blueprint_library(self):
+        if not self.blueprint_library:
+            self.blueprint_library = self.carla_model.world.get_blueprint_library()
+            
     def create_vehicle(self):
         if not self.blueprint_library:
             self.blueprint_library = self.carla_model.world.get_blueprint_library()
-        vehicle = VehicleModel(self.blueprint_library)
+        vehicle = VehicleModel(self.blueprint_library, self.carla_model.world)
         self.carla_model.vehicles.append(vehicle)
         return vehicle
 
