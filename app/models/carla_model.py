@@ -1,7 +1,7 @@
 import time
 import carla
 
-ITAY = "5.29.228.0"
+ETAI = "5.29.228.0"
 KFIR = "109.67.132.31"
 KFIR_LOCAL = "10.0.0.16"
 class CarlaModel:
