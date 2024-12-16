@@ -2,7 +2,7 @@ import time
 import carla
 
 ITAY = "5.29.228.0"
-KFIR = "147.235.223.65"
+KFIR = "109.67.132.31"
 
 class CarlaModel:
     def __init__(self, host=ITAY, port=2000, timeout=2.0):
@@ -23,8 +23,8 @@ class CarlaModel:
         # self.destroy_all_actors()  # Destroy all actors in the simulation
         time.sleep(2)  # Wait for the world to be ready
 
-    def destroy_all_actors(self):
+    def destroy_all_vehicles(self):
         """Destroy all actors in the simulation."""
-        actors = self.world.get_actors()
+        actors = self.world.get_actors().filter('vehicle.*')
         for actor in actors:
             actor.destroy()

@@ -9,10 +9,10 @@ class CameraModel:
         self.camera = None
         self.frame = None
 
-    def setup_camera(self, camera_location=(1.5, 2.4, 0), camera_type='sensor.camera.rgb'):
+    def setup_camera(self, camera_location=(-7.2, 0 ,3), camera_type='sensor.camera.rgb'):
         blueprint_library = self.carla_model.world.get_blueprint_library()
         camera_bp = blueprint_library.find(camera_type)
-        camera_transform = carla.Transform(carla.Location(*camera_location))
+        camera_transform = carla.Transform(carla.Location(*camera_location), carla.Rotation(pitch=10))
         
         # Attach camera to vehicle if provided, else spawn standalone
         if self.vehicle:
@@ -22,6 +22,11 @@ class CameraModel:
 
         # Listen for the camera frames
         self.camera.listen(self.process_frame)
+
+    def change_camera_location(self, camera_location = (-15, 0, 3)):
+        """Change the location of the camera."""
+        camera_transform = carla.Transform(carla.Location(*camera_location), carla.Rotation(pitch=15))
+        self.camera.set_transform(camera_transform)
 
     def process_frame(self, image):
         """Process the frame from the camera."""

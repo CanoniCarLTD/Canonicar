@@ -7,9 +7,9 @@ def create_app():
     app.config.from_object('config.Config')
 
     # Initialize database
-    ans = input("Initailte database? (y/n): ")
-    if ans.lower() == 'y':
-        init_db(app)
+    # ans = input("Initailte database? (y/n): ")
+    # if ans.lower() == 'y':
+    #     init_db(app)
 
     @app.route('/')
     def index():
