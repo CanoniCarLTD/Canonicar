@@ -6,5 +6,7 @@ __pycache__/
 
 # ignore .env
 .env
-
-
+Canonicar_instructions.txt
+carla_fast_access.txt
+connTest.py
+.vscode
