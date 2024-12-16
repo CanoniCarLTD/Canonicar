@@ -1,4 +1,4 @@
-from flask import Blueprint, Response, jsonify
+from flask import Blueprint, Response, jsonify, request
 from app.models.carla_factory import CarlaFactory
 from app.models.carla_model import CarlaModel
 
@@ -39,6 +39,18 @@ def destroy_all_actors():
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
+
+@carla_controller.route('/control_vehicle', methods=['POST'])
+def control_vehicle():
+    try:
+        data = request.get_json()
+        throttle = data.get('throttle', 0.0)
+        steer = data.get('steer', 0.0)
+        brake = data.get('brake', 0.0)   
+        carla_model.vehicles[0].control_vehicle(throttle, steer, brake)
+        return jsonify({"status": "success", "message": "Vehicle controlled."}), 200
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 # For now show only the first camera
 @carla_controller.route('/video_feed')

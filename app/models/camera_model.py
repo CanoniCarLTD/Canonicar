@@ -9,7 +9,7 @@ class CameraModel:
         self.camera = None
         self.frame = None
 
-    def setup_camera(self, camera_location=(-7.2, 0 ,3), camera_type='sensor.camera.rgb'):
+    def setup_camera(self, camera_location=(-8, 0 ,3), camera_type='sensor.camera.rgb'):
         blueprint_library = self.carla_model.world.get_blueprint_library()
         camera_bp = blueprint_library.find(camera_type)
         camera_transform = carla.Transform(carla.Location(*camera_location), carla.Rotation(pitch=10))

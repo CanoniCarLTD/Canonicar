@@ -3,9 +3,9 @@ import carla
 
 ITAY = "5.29.228.0"
 KFIR = "109.67.132.31"
-
+KFIR_LOCAL = "10.0.0.16"
 class CarlaModel:
-    def __init__(self, host=ITAY, port=2000, timeout=2.0):
+    def __init__(self, host=KFIR_LOCAL, port=2000, timeout=2.0):
         self.host = host
         self.port = port
         self.timeout = timeout
@@ -26,8 +26,11 @@ class CarlaModel:
     def destroy_all_vehicles_and_cameras(self):
         """Destroy all actors in the simulation."""
         for vehicle in self.vehicles:
-            vehicle.vehicle.destroy()
+            vehicle.vehicle_actor.destroy()
         for camera in self.cameras:
             camera.camera.destroy()
         self.vehicles = []
         self.cameras = []
+
+
+    
