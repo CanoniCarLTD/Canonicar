@@ -1,0 +1,16 @@
+# Ignore virtual environment
+carla_env/
+
+# Ignore Python bytecode files
+__pycache__/
+
+# ignore .env
+.env
+
+
+
+#Zilberman's files to ignore:
+Canonicar_instructions.txt
+carla_fast_access.txt
+connTest.py
+.vscode
