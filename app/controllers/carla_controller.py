@@ -34,7 +34,7 @@ def random_point_spawn_vehicle():
 @carla_controller.route('/destroy_all_vehicles', methods=['POST'])
 def destroy_all_actors():
     try:
-        carla_model.destroy_all_vehicles()
+        carla_model.destroy_all_vehicles_and_cameras()
         return jsonify({"status": "success", "message": "All actors destroyed."}), 200
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500

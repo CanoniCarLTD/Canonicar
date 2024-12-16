@@ -23,8 +23,11 @@ class CarlaModel:
         # self.destroy_all_actors()  # Destroy all actors in the simulation
         time.sleep(2)  # Wait for the world to be ready
 
-    def destroy_all_vehicles(self):
+    def destroy_all_vehicles_and_cameras(self):
         """Destroy all actors in the simulation."""
-        actors = self.world.get_actors().filter('vehicle.*')
-        for actor in actors:
-            actor.destroy()
+        for vehicle in self.vehicles:
+            vehicle.vehicle.destroy()
+        for camera in self.cameras:
+            camera.camera.destroy()
+        self.vehicles = []
+        self.cameras = []
