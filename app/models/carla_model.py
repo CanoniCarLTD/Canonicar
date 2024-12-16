@@ -6,7 +6,7 @@ dotenv.load_dotenv()
 
 ETAI = os.getenv("ETAI_IP")
 KFIR = os.getenv("KFIR_IP")
-KFIR_LOCAL = "10.0.0.16"
+
 class CarlaModel:
     def __init__(self, host=KFIR, port=2000, timeout=2.0):
         self.host = host
