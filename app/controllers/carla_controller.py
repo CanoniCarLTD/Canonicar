@@ -1,3 +1,4 @@
+import time
 from flask import Blueprint, Response, jsonify, request
 from app.models.carla_factory import CarlaFactory
 from app.models.carla_model import CarlaModel
@@ -64,3 +65,14 @@ def video_feed():
                        b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
 
     return Response(generate(), mimetype='multipart/x-mixed-replace; boundary=frame')
+
+@carla_controller.route('/load_map', methods=['POST'])
+def load_map():
+    try:
+        data = request.get_json()
+        track = data.get('track')  # Extract 'track' from the JSON body of the request
+        carla_model.load_map(track)
+        return jsonify({"status": "success", "message": f"Map '{track}' loaded successfully."}), 200
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+    
