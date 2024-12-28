@@ -1,0 +1,21 @@
+# strategy: generate
+strategy: generate_and_test
+track:
+  base_track_name: track 
+  mode: RANDOM
+  path_points_density_factor: 1
+  # parameters for voronoi diagram
+  n_points: 60
+  n_regions: 20
+  min_bound: 0.0
+  max_bound: 150.0
+  lat_offset: 51.197682
+  lon_offset: 5.323411
+
+general:
+  n_tracks: 5
+  path_planning_timout: 300 
+  overwrite: false
+  plot_track: true
+  visualise_voronoi: false
+  visualise_failed: false
