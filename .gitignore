@@ -10,3 +10,4 @@ canonicar_init_instructions.txt
 carla_fast_access.txt
 connTest.py
 .vscode
+/env

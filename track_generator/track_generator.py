@@ -111,7 +111,7 @@ class TrackGenerator:
         4.  Interpolate between vertices.
         5.  Calculate curvature of track to check wether the curvature threshold is exceeded.
         6.  If curvature threshold is exceeded, remove vertice where the curvature is the highest from its set.
-            Repeat steps 4-6 until curvature is within limimts.
+            Repeat steps 4-6 until curvature is within limits.
         7.  Check if track does not cross itself. If so, go to step 2 and reiterate.
         8.  Find long enough straight section to place start line and start position.
         9.  Translate and rotate track to origin.
