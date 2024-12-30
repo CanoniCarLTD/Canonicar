@@ -6,16 +6,18 @@ Easily modifiable paramters with the quick access in this settings.py file \
 
 Names of the parameters are self-explanatory therefore elimating the use of further comments.
 '''
+import dotenv
+import os
+dotenv.load_dotenv()
 
 
-HOST = "localhost"
+HOST = os.getenv("ETAI_IP")
 PORT = 2000
 TIMEOUT = 20.0
 
 CAR_NAME = 'model3'
 EPISODE_LENGTH = 120
 NUMBER_OF_VEHICLES = 30
-NUMBER_OF_PEDESTRIAN = 10
 CONTINUOUS_ACTION = True
 VISUAL_DISPLAY = True
 
