@@ -7,11 +7,11 @@ from ML.encoder_init import EncodeState
 from networks.on_policy.ppo.ppo import ActorCritic
 from ML.parameters import  *
 
-device = torch.device("cuda")
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class Buffer:
     def __init__(self):
-         # Batch data
+        # Batch data
         self.observation = []  
         self.actions = []         
         self.log_probs = []     
@@ -30,7 +30,7 @@ class PPOAgent(object):
         
         #self.env = env
         self.obs_dim = 100
-        self.action_dim = 2
+        self.action_dim = 2 #NEED TO BE 3, +1 FOR BRAKE, AND MAYBE CHANGE OTHER STUFF ACCORDINGLY (ETAI)
         self.clip = POLICY_CLIP
         self.gamma = GAMMA
         self.n_updates_per_iteration = 7
@@ -128,7 +128,7 @@ class PPOAgent(object):
         self.old_policy.load_state_dict(self.policy.state_dict())
         self.memory.clear()
 
-    
+    ''' CHECK THAT THE SAVE-LOAD LOGIC WORKS WITH OUR OUR FOLDERS ARCHITECTURE (ETAI) '''
     def save(self):
         self.checkpoint_file_no = len(next(os.walk(PPO_CHECKPOINT_DIR+self.town))[2])
         checkpoint_file = PPO_CHECKPOINT_DIR+self.town+"/ppo_policy_" + str(self.checkpoint_file_no)+"_.pth"
@@ -140,7 +140,7 @@ class PPOAgent(object):
             self.checkpoint_file_no -=1
         checkpoint_file = PPO_CHECKPOINT_DIR+self.town+"/ppo_policy_" + str(self.checkpoint_file_no)+"_.pth"
         torch.save(self.old_policy.state_dict(), checkpoint_file)
-   
+    
     def load(self):
         self.checkpoint_file_no = len(next(os.walk(PPO_CHECKPOINT_DIR+self.town))[2]) - 1
         checkpoint_file = PPO_CHECKPOINT_DIR+self.town+"/ppo_policy_" + str(self.checkpoint_file_no)+"_.pth"
