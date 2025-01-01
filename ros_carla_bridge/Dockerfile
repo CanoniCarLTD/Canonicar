@@ -1,0 +1,32 @@
+# First stage sets up the base, ie everything except the active dev repo
+FROM osrf/ros:foxy-desktop-focal AS base
+
+SHELL ["/bin/bash", "-c"]
+
+RUN apt update && apt install -y python3-pip
+
+RUN sudo apt install python3-colcon-common-extensions
+
+RUN mkdir -p ~/carla-ros-bridge
+WORKDIR /root/carla-ros-bridge
+
+# TODO: Check versions, should support up to CARLA 0.9.13
+RUN git clone --recurse-submodules https://github.com/carla-simulator/ros-bridge.git src/ros-bridge
+
+RUN rosdep update && rosdep install --from-paths src --ignore-src -r
+
+RUN source /opt/ros/foxy/setup.bash && \
+    colcon build
+
+COPY ros_entrypoint.sh /
+
+# Ensure script is executable
+RUN ["sudo", "chmod", "+x", "/ros_entrypoint.sh"]
+
+ENTRYPOINT ["/ros_entrypoint.sh"]
+
+# docker run -it --rm \
+#     --network host \
+#     -v "C:\FinalProj\Canonicar_repo\carla_env\Lib\site-packages:/root/.local/lib/python3.7/site-packages" \
+#     --name ros_carla_bridge_container \
+#     ros_carla_bridge
