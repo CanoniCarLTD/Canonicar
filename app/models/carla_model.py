@@ -8,7 +8,7 @@ ETAI = os.getenv("ETAI_IP")
 KFIR = os.getenv("KFIR_IP")
 
 class CarlaModel:
-    def __init__(self, host=ETAI, port=2000, timeout=4.0):
+    def __init__(self, host=KFIR, port=2000, timeout=4.0):
         self.host = host
         self.port = port
         self.timeout = timeout
