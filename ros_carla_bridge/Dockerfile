@@ -36,5 +36,5 @@ RUN apt-get install -y ros-foxy-derived-object-msgs
 
 # launch ros2 : source /opt/ros/foxy/setup.bash
 # launch the colcon build workspace : source install/setup.bash
-# launch the carla-ros-bridge : ros2 launch carla_ros_bridge carla_ros_bridge.launch.py host:=109.67.132.31 port:=2000 synchronous_mode:=False
+# launch the carla-ros-bridge : ros2 launch carla_ros_bridge carla_ros_bridge.launch.py host:=KFIR_IP port:=2000 synchronous_mode:=False
 # launch ros-spawn-object: ros2 launch carla_spawn_objects carla_spawn_objects.launch.py objects_definition_file:=carla_spawn_objects/config/objects.json
