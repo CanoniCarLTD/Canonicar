@@ -10,7 +10,7 @@ class CarlaFactory:
     def set_blueprint_library(self):
         if not self.blueprint_library:
             self.blueprint_library = self.carla_model.world.get_blueprint_library()
-            
+
     def create_vehicle(self):
         if not self.blueprint_library:
             self.blueprint_library = self.carla_model.world.get_blueprint_library()
@@ -24,4 +24,3 @@ class CarlaFactory:
         camera = CameraModel(self.carla_model, vehicle)
         self.carla_model.cameras.append(camera)
         return camera
-        

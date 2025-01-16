@@ -2,9 +2,10 @@ from flask import Flask, render_template
 from db import init_db, close_db
 from app.controllers.carla_controller import carla_controller
 
+
 def create_app():
     app = Flask(__name__)
-    app.config.from_object('config.Config')
+    app.config.from_object("config.Config")
 
     # Initialize database
     if init_db():

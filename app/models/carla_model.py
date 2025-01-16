@@ -2,10 +2,12 @@ import time
 import carla
 import dotenv
 import os
+
 dotenv.load_dotenv()
 
 ETAI = os.getenv("ETAI_IP")
 KFIR = os.getenv("KFIR_IP")
+
 
 class CarlaModel:
     def __init__(self, host=KFIR, port=2000, timeout=4.0):
@@ -34,7 +36,7 @@ class CarlaModel:
             camera.camera.destroy()
         self.vehicles = []
         self.cameras = []
-  
+
     def load_map(self, map_name):
         if self.client is None:
             self.connect()  # Ensure connection is established
@@ -46,4 +48,3 @@ class CarlaModel:
                 print(f"Failed to load map: {e}")
         else:
             raise ValueError("Client is not initialized")
-
