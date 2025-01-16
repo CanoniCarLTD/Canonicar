@@ -89,7 +89,7 @@ def calculate_segment_lengths(centerline):
         segment_lengths.append(length)
     return segment_lengths
 
-def create_xodr_file(centerline, segment_lengths, lane_width=5.5, file_name="generated_tracks/generatedTrack.xodr"):
+def create_xodr_file(centerline, segment_lengths, lane_width=5.5, file_name="track_generator/generated_tracks/generatedTrack.xodr"):
     """
     Generates an OpenDRIVE file from the centerline.
     """
@@ -209,7 +209,9 @@ def trackgen():
 
 try:
     
-    trackgen()
+    #print("going to trackgen()")
+    #trackgen()
+    #print("after trackgen()")
     
     client = carla.Client(KFIR, CARLA_SERVER_PORT)
     client.set_timeout(10.0)
@@ -223,7 +225,7 @@ try:
     world = client.get_world()
     map = world.get_map()
     world.set_weather(carla.WeatherParameters.CloudyNoon)
-    
+        
     bounds = get_map_bounds(world)
     print("Map bounds: ", bounds)
     
@@ -241,27 +243,11 @@ try:
     vehicles = []
 
     vehicle = world.spawn_actor(vehicle_bp, transform)
-    '''
-    camera_bp = blueprint_library.find('sensor.camera.rgb')
-    camera_transform = carla.Transform(carla.Location(x=1.5, z=2.4))
-    camera = world.spawn_actor(camera_bp, camera_transform, attach_to=vehicle)
-    camera.listen(lambda image: image.save_to_disk('output/%.6d.png' % image.frame))
-    #lidar sensor and create a 3d map
-    lidar_bp = blueprint_library.find('sensor.lidar.ray_cast_semantic')
-    lidar_transform = carla.Transform(carla.Location(x=1.5, z=2.4))
-    lidar = world.spawn_actor(lidar_bp, lidar_transform, attach_to=vehicle)
-    lidar.listen(lambda point_cloud: point_cloud.save_to_disk('output/%.6d.ply' % point_cloud.frame))
-    '''
-    
-    
-
-    
+   
     ''' need to figure out why the vehicles disappear after almost completing the track '''
     
-        # Add a collision sensor to the vehicle
     collision_bp = blueprint_library.find('sensor.other.collision')
     collision_sensor = world.spawn_actor(collision_bp, carla.Transform(), attach_to=vehicle)
-
 
     vehicles.append(vehicle)
     print(
@@ -269,7 +255,7 @@ try:
         vehicle.type_id,
     )
     print("Setting autopilot...")
-    vehicle.set_autopilot(True)
+    vehicle.set_autopilot(False)
     
     print("Autopilot set")
     # Get the Traffic Manager
@@ -278,27 +264,18 @@ try:
     traffic_manager.force_lane_change(vehicle, False)
     traffic_manager.ignore_vehicles_percentage(vehicle, 5.0)
     traffic_manager.global_percentage_speed_difference(-100.0)
-    #generate 3 cars in 10 second intervals
-    sleep(3)
-    # for i in range(1,2):
-    #     vehicle_bp = blueprint_library.filter("cybertruck")[0]
-    #     vehicles.append(world.spawn_actor(vehicle_bp, transform))
-    #     vehicles[i].set_autopilot(True)
-    #     traffic_manager.ignore_vehicles_percentage(vehicles[i], 5.0)
-    #     sleep(3)
-    #print the number of the cars every 3 seconds
 
     # Perform ticks and check bounds
     while True:
         world.tick()  # Step simulation
         for vehicle in vehicles:
             location = vehicle.get_location()
-            draw_vehicle_bounding_box(world, vehicle, life_time=0.05)
+            #draw_vehicle_bounding_box(world, vehicle, life_time=0.05)
             if is_out_of_bounds(location, bounds):
                 print(f"Vehicle {vehicle.id} is out of bounds at {location}.")
-                vehicle.set_autopilot(False)  # Disable autopilot for safety
-                vehicles.remove(vehicle)  # Remove the vehicle from the list
-                vehicle.destroy()  # Destroy the out-of-bounds vehicle
+                #vehicle.set_autopilot(False)  # Disable autopilot for safety
+                #vehicles.remove(vehicle)  # Remove the vehicle from the list
+                #vehicle.destroy()  # Destroy the out-of-bounds vehicle
         sleep(0.05)  # Adjust tick frequency as needed
         
 except(Exception) as e:
