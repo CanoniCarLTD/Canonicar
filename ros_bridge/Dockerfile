@@ -3,35 +3,30 @@ FROM osrf/ros:foxy-desktop-focal AS base
 
 SHELL ["/bin/bash", "-c"]
 
-# Install necessary dependencies
-RUN apt update && apt install -y \
-    python3-pip \
-    python3-colcon-common-extensions \
-    ros-foxy-derived-object-msgs
+RUN apt update && apt install -y python3-pip
 
-# Upgrade pip and install Python dependencies
-RUN python3 -m pip install --upgrade pip && python3 -m pip install numpy pygame
-RUN python3 -m pip install \
-rclpy \
-ros2cli \
-ros2pkg \
-ros2run \
-ros2topic
+RUN sudo apt install python3-colcon-common-extensions 
 
-RUN rosdep update && rosdep install --from-paths src --ignore-src -r -y
-# Set up workspace
 WORKDIR /ros_bridge
-
 # Copy your local ROS 2 package into the container
 COPY ./src ./src
 
-# Install ROS dependencies
+# RUN rosdep update && rosdep install -i --from-path src --rosdistro foxy -y
 
+RUN rosdep update && rosdep install --from-paths src --ignore-src -r
+# Upgrade pip and install Python dependencies
+WORKDIR /ros_bridge
 # Source ROS 2 setup and build the workspace
-RUN source /opt/ros/foxy/setup.bash && colcon build
+RUN python3 -m pip install --upgrade pip && python3 -m pip install numpy pygame
+RUN python3 -m pip install 'carla==0.9.13'
+RUN apt-get install -y ros-foxy-derived-object-msgs ros-foxy-std-msgs
+RUN source /opt/ros/foxy/setup.bash && colcon build 
 
-# Expose necessary ports (if required by your ROS application)
-# EXPOSE 2000-2002
+# RUN sudo apt update
+# # RUN sudo apt upgrade
+# RUN sudo apt install ros-foxy-desktop python3-argcomplete
+# RUN sudo apt install ros-dev-tools
+
 
 # Set default entrypoint to bash (useful for debugging)
 CMD ["/bin/bash"]
