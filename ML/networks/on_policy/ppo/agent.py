@@ -3,9 +3,11 @@ import numpy as np
 
 import torch
 import torch.nn as nn
-from ML.encoder_init import EncodeState
+
+# from ML.encoder_init import EncodeState
 from networks.on_policy.ppo.ppo import ActorCritic
 from ML.parameters import *
+
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -30,14 +32,17 @@ class Buffer:
 class PPOAgent(object):
     def __init__(self, town, action_std_init=0.4):
         # self.env = env
+        """Will be changed as for how the output of convolution will look like + 3"""
         self.obs_dim = 100
-        self.action_dim = 2  # NEED TO BE 3, +1 FOR BRAKE, AND MAYBE CHANGE OTHER STUFF ACCORDINGLY (ETAI)
+        self.action_dim = 3  # STEER, THROTTLE, BRAKE.
         self.clip = POLICY_CLIP
         self.gamma = GAMMA
         self.n_updates_per_iteration = 7
         self.lr = PPO_LEARNING_RATE
         self.action_std = action_std_init
+        """
         self.encode = EncodeState(LATENT_DIM)
+        """
         self.memory = Buffer()
         self.town = town
 
@@ -167,7 +172,8 @@ class PPOAgent(object):
         )
         torch.save(self.old_policy.state_dict(), checkpoint_file)
 
-    def load(self):
+    def chkpt_load(self):
+        """Loads the latest checkpoint that was saved"""
         self.checkpoint_file_no = (
             len(next(os.walk(PPO_CHECKPOINT_DIR + self.town))[2]) - 1
         )

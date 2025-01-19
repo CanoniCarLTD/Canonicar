@@ -10,7 +10,8 @@ import torch
 from distutils.util import strtobool
 from datetime import datetime
 from torch.utils.tensorboard import SummaryWriter
-from encoder_init import EncodeState
+
+# from encoder_init import EncodeState
 from networks.on_policy.ppo.agent import PPOAgent
 from simulation.connection import ClientConnection
 from simulation.environment import CarlaEnvironment
@@ -126,7 +127,49 @@ def boolean_string(s):
 
 def runner():
     # ========================================================================
-    #                           BASIC PARAMETER & LOGGING SETUP
+    #        A HELPER FUNCTION FOR LOGGING TRAINING AND TESTING METRICS
+    # ========================================================================
+
+    def log_training_metrics():
+        """Logs the training metrics to tensorboard
+        Logs: episodic reward/episode, cumulative reward/info, cumulative reward/(t), average episodic reward/info, average reward/(t), episode length (s)/info, reward/(t), average deviation from center/episode, average deviation from center/(t), average distance covered (m)/episode, average distance covered (m)/(t)
+        """
+        writer.add_scalar("Episodic Reward/episode", scores[-1], episode)
+        writer.add_scalar("Cumulative Reward/info", cumulative_score, episode)
+        writer.add_scalar("Cumulative Reward/(t)", cumulative_score, timestep)
+        writer.add_scalar("Average Episodic Reward/info", np.mean(scores[-5]), episode)
+        writer.add_scalar("Average Reward/(t)", np.mean(scores[-5]), timestep)
+        writer.add_scalar("Episode Length (s)/info", np.mean(episodic_length), episode)
+        writer.add_scalar("Reward/(t)", scores[-1], timestep)
+        writer.add_scalar("Average Deviation from Center/episode", deviation_from_center / 5, episode)
+        writer.add_scalar("Average Deviation from Center/(t)", deviation_from_center / 5, timestep)
+        writer.add_scalar("Average Distance Covered (m)/episode", distance_covered / 5, episode)
+        writer.add_scalar("Average Distance Covered (m)/(t)", distance_covered / 5, timestep)
+
+    def log_testing_metrics():
+        '''Logs the testing metrics to tensorboard
+        Logs: episodic reward, cumulative reward/info, cumulative reward/(t), episode lengths (s), reward/(t), deviation from center, distance covered (m)/episode, distance covered (m)/(t)
+        '''
+        writer.add_scalar("TEST: Episodic Reward/episode", scores[-1], episode)
+        writer.add_scalar("TEST: Cumulative Reward/info", cumulative_score, episode)
+        writer.add_scalar("TEST: Cumulative Reward/(t)", cumulative_score, timestep)
+        writer.add_scalar(
+            "TEST: Episode Length (s)/info", np.mean(episodic_length), episode
+        )
+        writer.add_scalar("TEST: Reward/(t)", scores[-1], timestep)
+        writer.add_scalar(
+            "TEST: Deviation from Center/episode", deviation_from_center, episode
+        )
+        writer.add_scalar(
+            "TEST: Deviation from Center/(t)", deviation_from_center, timestep
+        )
+        writer.add_scalar(
+            "TEST: Distance Covered (m)/episode", distance_covered, episode
+        )
+        writer.add_scalar("TEST: Distance Covered (m)/(t)", distance_covered, timestep)
+
+    # ========================================================================
+    #                      BASIC PARAMETER & LOGGING SETUP
     # ========================================================================
 
     args = parse_args()
@@ -180,7 +223,9 @@ def runner():
         env = CarlaEnvironment(client, world, town)
     else:
         env = CarlaEnvironment(client, world, town, checkpoint_frequency=None)
+    """
     encode = EncodeState(LATENT_DIM)
+    """
     # ========================================================================
     #                           ALGORITHM
     # ========================================================================
@@ -201,11 +246,11 @@ def runner():
                 cumulative_score = data["cumulative_score"]
                 action_std_init = data["action_std_init"]
             agent = PPOAgent(town, action_std_init)
-            agent.load()
+            agent.chkpt_load()
         else:
             if train == False:
                 agent = PPOAgent(town, action_std_init)
-                agent.load()
+                agent.chkpt_load()
                 for params in agent.old_policy.actor.parameters():
                     params.requires_grad = False
             else:
@@ -215,32 +260,39 @@ def runner():
             while timestep < total_timesteps:
                 observation = env.reset()
                 """ THIS NOW NEEDS TO GO TO OUR CONVOLUTION ! """
+                """
                 observation = encode.process(observation)
+                """
 
                 current_ep_reward = 0
                 t1 = datetime.now()
 
                 for t in range(args.episode_length):
-                    # select action with policy
+                    
+                    # Select action with policy
                     action = agent.get_action(observation, train=True)
-
+                    
+                    # Take step in the environment
                     observation, reward, done, info = env.step(action)
                     if observation is None:
                         break
                     """ THIS AGAIN NEEDS TO GO TO OUR CONVOLUTION ! """
+                    """
                     observation = encode.process(observation)
-
+                    """
+                    
                     agent.memory.rewards.append(reward)
                     agent.memory.dones.append(done)
-
+                    
                     timestep += 1
                     current_ep_reward += reward
-
+                    
+                    # decay action standard deviation
                     if timestep % action_std_decay_freq == 0:
                         action_std_init = agent.decay_action_std(
                             action_std_decay_rate, min_action_std
                         )
-
+                    
                     if timestep == total_timesteps - 1:
                         agent.chkpt_save()
 
@@ -294,44 +346,7 @@ def runner():
                         pickle.dump(data_obj, handle)
 
                 if episode % 5 == 0:
-                    writer.add_scalar("Episodic Reward/episode", scores[-1], episode)
-                    writer.add_scalar(
-                        "Cumulative Reward/info", cumulative_score, episode
-                    )
-                    writer.add_scalar(
-                        "Cumulative Reward/(t)", cumulative_score, timestep
-                    )
-                    writer.add_scalar(
-                        "Average Episodic Reward/info", np.mean(scores[-5]), episode
-                    )
-                    writer.add_scalar(
-                        "Average Reward/(t)", np.mean(scores[-5]), timestep
-                    )
-                    writer.add_scalar(
-                        "Episode Length (s)/info", np.mean(episodic_length), episode
-                    )
-                    writer.add_scalar("Reward/(t)", current_ep_reward, timestep)
-                    writer.add_scalar(
-                        "Average Deviation from Center/episode",
-                        deviation_from_center / 5,
-                        episode,
-                    )
-                    writer.add_scalar(
-                        "Average Deviation from Center/(t)",
-                        deviation_from_center / 5,
-                        timestep,
-                    )
-                    writer.add_scalar(
-                        "Average Distance Covered (m)/episode",
-                        distance_covered / 5,
-                        episode,
-                    )
-                    writer.add_scalar(
-                        "Average Distance Covered (m)/(t)",
-                        distance_covered / 5,
-                        timestep,
-                    )
-
+                    log_training_metrics()
                     episodic_length = list()
                     deviation_from_center = 0
                     distance_covered = 0
@@ -359,7 +374,9 @@ def runner():
             # Testing
             while timestep < args.test_timesteps:
                 observation = env.reset()
+                """
                 observation = encode.process(observation)
+                """
 
                 current_ep_reward = 0
                 t1 = datetime.now()
@@ -369,7 +386,9 @@ def runner():
                     observation, reward, done, info = env.step(action)
                     if observation is None:
                         break
+                    """
                     observation = encode.process(observation)
+                    """
 
                     timestep += 1
                     current_ep_reward += reward
@@ -394,33 +413,9 @@ def runner():
                     ", Reward:  {:.2f}".format(current_ep_reward),
                     ", Average Reward:  {:.2f}".format(cumulative_score),
                 )
-
-                writer.add_scalar("TEST: Episodic Reward/episode", scores[-1], episode)
-                writer.add_scalar(
-                    "TEST: Cumulative Reward/info", cumulative_score, episode
-                )
-                writer.add_scalar(
-                    "TEST: Cumulative Reward/(t)", cumulative_score, timestep
-                )
-                writer.add_scalar(
-                    "TEST: Episode Length (s)/info", np.mean(episodic_length), episode
-                )
-                writer.add_scalar("TEST: Reward/(t)", current_ep_reward, timestep)
-                writer.add_scalar(
-                    "TEST: Deviation from Center/episode",
-                    deviation_from_center,
-                    episode,
-                )
-                writer.add_scalar(
-                    "TEST: Deviation from Center/(t)", deviation_from_center, timestep
-                )
-                writer.add_scalar(
-                    "TEST: Distance Covered (m)/episode", distance_covered, episode
-                )
-                writer.add_scalar(
-                    "TEST: Distance Covered (m)/(t)", distance_covered, timestep
-                )
-
+                
+                log_testing_metrics()
+                
                 episodic_length = list()
                 deviation_from_center = 0
                 distance_covered = 0
@@ -439,3 +434,12 @@ if __name__ == "__main__":
         sys.exit()
     finally:
         print("\nExit")
+
+
+
+
+
+
+
+
+

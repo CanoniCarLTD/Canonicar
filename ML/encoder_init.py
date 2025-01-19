@@ -1,6 +1,7 @@
 import sys
 import torch
-from autoencoder.encoder import VariationalEncoder
+
+# from autoencoder.encoder import VariationalEncoder
 
 
 class EncodeState:

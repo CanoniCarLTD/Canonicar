@@ -309,8 +309,10 @@ class CarlaEnvironment:
             if len(self.collision_history) != 0:
                 done = True
                 reward = -10
+                
             elif self.distance_from_center > self.max_distance_from_center:
                 done = True
+                ''' MIGHT WANNA DELETE IT CAUSE WE WANT IT TO USE THE WHOLE TRACK (ETAI) '''
                 reward = -10
             elif self.episode_start_time + 10 < time.time() and self.velocity < 1.0:
                 reward = -10
