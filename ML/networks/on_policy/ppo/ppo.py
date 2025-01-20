@@ -23,7 +23,8 @@ class CustomActivation(nn.Module):
         """Apply tanh for steering (first output), sigmoid for gas and brake (remaining outputs)
         return: torch.tensor: Normalized action values  (ETAI)"""
         x[:, 0] = torch.tanh(x[:, 0])  # Steer: [-1, 1]
-        x[:, 1:] = torch.sigmoid(x[:, 1:])  # Gas and Brake: [0, 1]
+        x[:, 1] = torch.sigmoid(x[:, 1])  # gas: [0, 1]
+        x[:, 2] = torch.sigmoid(x[:, 2])  # Brake: [0, 1]
         return x
 
 
@@ -44,11 +45,11 @@ class ActorCritic(nn.Module):
         # actor
         self.actor = nn.Sequential(
             nn.Linear(self.obs_dim, 500),
-            nn.Tanh(),
+            nn.ReLU(), # changed from Tanh to ReLU
             nn.Linear(500, 300),
-            nn.Tanh(),
+            nn.ReLU(), # changed from Tanh to ReLU
             nn.Linear(300, 100),
-            nn.Tanh(),
+            nn.ReLU(), # changed from Tanh to ReLU
             nn.Linear(100, self.action_dim),
             CustomActivation(),  # Custom activation function for steering, gas, and brake (ETAI)
         )
@@ -56,11 +57,11 @@ class ActorCritic(nn.Module):
         # critic
         self.critic = nn.Sequential(
             nn.Linear(self.obs_dim, 500),
-            nn.Tanh(),
+            nn.ReLU(), # changed from Tanh to ReLU
             nn.Linear(500, 300),
-            nn.Tanh(),
+            nn.ReLU(), # changed from Tanh to ReLU
             nn.Linear(300, 100),
-            nn.Tanh(),
+            nn.ReLU(), # changed from Tanh to ReLU
             nn.Linear(100, 1),
         )
 
