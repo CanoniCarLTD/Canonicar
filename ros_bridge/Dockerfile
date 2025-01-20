@@ -17,7 +17,7 @@ RUN rosdep update && rosdep install --from-paths src --ignore-src -r
 # Upgrade pip and install Python dependencies
 WORKDIR /ros_bridge
 # Source ROS 2 setup and build the workspace
-RUN python3 -m pip install --upgrade pip && python3 -m pip install numpy pygame
+RUN python3 -m pip install --upgrade pip && python3 -m pip install numpy pygame python-dotenv
 RUN python3 -m pip install 'carla==0.9.13'
 RUN apt-get install -y ros-foxy-derived-object-msgs ros-foxy-std-msgs
 RUN source /opt/ros/foxy/setup.bash && colcon build 

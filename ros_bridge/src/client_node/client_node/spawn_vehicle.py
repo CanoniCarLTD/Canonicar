@@ -4,25 +4,28 @@ from carla import Client, Transform, Location, Rotation
 import json
 import dotenv
 import os
+from ament_index_python.packages import get_package_share_directory
+
 
 dotenv.load_dotenv()
 
 ETAI = os.getenv("ETAI_IP")
 KFIR = os.getenv("KFIR_IP")
 
+share_dir = get_package_share_directory('client_node')
+sensors_file_path = os.path.join(share_dir, 'client_node', 'sensors_config.json')
 
 class SpawnVehicleNode(Node):
     def __init__(self):
         super().__init__('spawn_vehicle_node')
-        self.declare_parameter('host', 'KFIR_IP')
+        self.declare_parameter('host', KFIR)
         self.declare_parameter('port', 2000)
         self.declare_parameter('vehicle_blueprint', 'vehicle.tesla.model3')
-        self.declare_parameter('sensors_config_file', 'sensors_config.json')
 
         self.host = self.get_parameter('host').value
         self.port = self.get_parameter('port').value
         self.vehicle_blueprint = self.get_parameter('vehicle_blueprint').value
-        self.sensor_config_file = self.get_parameter('sensors_config_file').value
+        self.sensor_config_file = sensors_file_path
 
         self.client = None
         self.world = None
