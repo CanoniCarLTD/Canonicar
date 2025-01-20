@@ -16,6 +16,17 @@ action_std_init = Represents the initial standard deviation of the action
 """
 
 
+class CustomActivation(nn.Module):
+    """Normalize the output values of the actor network. steering [-1, 1], gas and brake [0, 1] (ETAI)"""
+
+    def forward(self, x):
+        """Apply tanh for steering (first output), sigmoid for gas and brake (remaining outputs)
+        return: torch.tensor: Normalized action values  (ETAI)"""
+        x[:, 0] = torch.tanh(x[:, 0])  # Steer: [-1, 1]
+        x[:, 1:] = torch.sigmoid(x[:, 1:])  # Gas and Brake: [0, 1]
+        return x
+
+
 class ActorCritic(nn.Module):
     def __init__(self, obs_dim, action_dim, action_std_init):
         super(ActorCritic, self).__init__()
@@ -39,7 +50,7 @@ class ActorCritic(nn.Module):
             nn.Linear(300, 100),
             nn.Tanh(),
             nn.Linear(100, self.action_dim),
-            nn.Tanh(),  # NEED TO PAY ATTENTION THAT BRAKE IS 0 TO 1 NOT -1 TO 1 (ETAI)
+            CustomActivation(),  # Custom activation function for steering, gas, and brake (ETAI)
         )
 
         # critic
@@ -53,9 +64,9 @@ class ActorCritic(nn.Module):
             nn.Linear(100, 1),
         )
 
-    def forward(self):
+    def forward(self, obs):
         """ABSTRACT - THE METHOD IS INTENDED TO BE OVERRIDDEN BY SUBCLASSES (ETAI)"""
-        raise NotImplementedError
+        raise NotImplementedError("Subclasses must implement the forward method.")
 
     def set_action_std(self, new_action_std):
         self.cov_var = torch.full((self.action_dim,), new_action_std)

@@ -429,7 +429,7 @@ class CarlaEnvironment:
     # ---------------------------------------------------
 
     """ CAN BE KEPT FOR NOW IF WE WILL ADD SHAY'S IDEA TO HANDLE OTHER VEHICLES (ETAI) """
-
+    """
     def set_other_vehicles(self):
         try:
             # NPC vehicles generated and set to autopilot
@@ -446,6 +446,7 @@ class CarlaEnvironment:
             self.client.apply_batch(
                 [carla.command.DestroyActor(x) for x in self.actor_list]
             )
+    """
 
     # ----------------------------------------------------------------
     # Extra very important methods: their names explain their purpose|

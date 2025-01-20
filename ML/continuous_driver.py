@@ -271,6 +271,7 @@ def runner():
                 """
                 observation = encode.process(observation)
                 """
+                # observation= convolution(observation) #IDEA (ETAI)
 
                 current_ep_reward = 0
                 t1 = datetime.now()
@@ -288,6 +289,7 @@ def runner():
                     """
                     observation = encode.process(observation)
                     """
+                    # observation= convolution(observation) #IDEA (ETAI)
 
                     agent.memory.rewards.append(reward)
                     agent.memory.dones.append(done)
