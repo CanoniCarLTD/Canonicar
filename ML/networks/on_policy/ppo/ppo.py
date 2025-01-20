@@ -22,6 +22,9 @@ class CustomActivation(nn.Module):
     def forward(self, x):
         """Apply tanh for steering (first output), sigmoid for gas and brake (remaining outputs)
         return: torch.tensor: Normalized action values  (ETAI)"""
+
+        print("in CustomActivation forward")
+
         x[:, 0] = torch.tanh(x[:, 0])  # Steer: [-1, 1]
         x[:, 1] = torch.sigmoid(x[:, 1])  # gas: [0, 1]
         x[:, 2] = torch.sigmoid(x[:, 2])  # Brake: [0, 1]
@@ -45,11 +48,11 @@ class ActorCritic(nn.Module):
         # actor
         self.actor = nn.Sequential(
             nn.Linear(self.obs_dim, 500),
-            nn.ReLU(), # changed from Tanh to ReLU
+            nn.Tanh(),
             nn.Linear(500, 300),
-            nn.ReLU(), # changed from Tanh to ReLU
+            nn.Tanh(),
             nn.Linear(300, 100),
-            nn.ReLU(), # changed from Tanh to ReLU
+            nn.Tanh(),
             nn.Linear(100, self.action_dim),
             CustomActivation(),  # Custom activation function for steering, gas, and brake (ETAI)
         )
@@ -57,11 +60,11 @@ class ActorCritic(nn.Module):
         # critic
         self.critic = nn.Sequential(
             nn.Linear(self.obs_dim, 500),
-            nn.ReLU(), # changed from Tanh to ReLU
+            nn.Tanh(),
             nn.Linear(500, 300),
-            nn.ReLU(), # changed from Tanh to ReLU
+            nn.Tanh(),
             nn.Linear(300, 100),
-            nn.ReLU(), # changed from Tanh to ReLU
+            nn.Tanh(),
             nn.Linear(100, 1),
         )
 
@@ -88,11 +91,16 @@ class ActorCritic(nn.Module):
         """This method returns an action sampled from the actor network
         and the log probability of that action. (ETAI)"""
 
+        print("in get_action_and_log_prob")
+        print("obs type: ", type(obs))
+
         if isinstance(obs, np.ndarray):
             obs = torch.tensor(obs, dtype=torch.float)
-
+        print("going into actor nn")
         # THIS LINE IS LITERALLY PASSING THE OBSERVATION IN THE ACTOR NETWORK (ETAI)
         mean = self.actor(obs)
+        print("obs went through actor nn")
+        self.cov_mat = torch.diag_embed(self.cov_var.expand_as(mean))
 
         # Create our Multivariate Normal Distribution
         dist = MultivariateNormal(mean, self.cov_mat)
@@ -118,7 +126,7 @@ class ActorCritic(nn.Module):
         cov_mat = torch.diag_embed(cov_var)
         dist = MultivariateNormal(mean, cov_mat)
 
-        logprobs = dist.log_prob(action)
+        logprobs = torch.clamp(dist.log_prob(action), min=-1e6)
         dist_entropy = dist.entropy()
         values = self.critic(obs)
 

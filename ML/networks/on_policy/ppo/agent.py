@@ -6,8 +6,7 @@ import torch.nn as nn
 
 # from ML.encoder_init import EncodeState
 from networks.on_policy.ppo.ppo import ActorCritic
-from ML.parameters import *
-
+from parameters import *
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -61,6 +60,7 @@ class PPOAgent(object):
         self.MseLoss = nn.MSELoss()
 
     def get_action(self, obs, train):
+        print("getting action")
         with torch.no_grad():
             if isinstance(obs, np.ndarray):
                 obs = torch.tensor(obs, dtype=torch.float)
@@ -69,7 +69,7 @@ class PPOAgent(object):
             self.memory.observation.append(obs.to(device))
             self.memory.actions.append(action)
             self.memory.log_probs.append(logprob)
-
+            print("returning action")
         return action.detach().cpu().numpy().flatten()
 
     def set_action_std(self, new_action_std):

@@ -17,6 +17,26 @@ from simulation.connection import ClientConnection
 from simulation.environment import CarlaEnvironment
 from parameters import *
 
+# ========================================================================
+#                                 SET DEVICE
+# ========================================================================
+
+print(
+    "============================================================================================"
+)
+# set device to cpu or cuda
+device = torch.device("cpu")
+if torch.cuda.is_available():
+    device = torch.device("cuda:0")
+    torch.cuda.empty_cache()
+    print("Using CUDA")
+    print("Device set to : " + str(torch.cuda.get_device_name(device)))
+else:
+    print("Device set to : cpu")
+print(
+    "============================================================================================"
+)
+
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -77,11 +97,11 @@ def parse_args():
     )
 
     parser.add_argument(
-        "--train", default=True, type=boolean_string, help="is it training?"
+        "--train", default=True, action="store_true", help="is it training?"
     )
 
     parser.add_argument(
-        "--town", type=str, default="Town07", help="which town do you like?"
+        "--town", type=str, default="Town07", help="which town do we load?"
     )
 
     # To replace the above line with the following line
@@ -108,10 +128,10 @@ def parse_args():
     parser.add_argument(
         "--cuda",
         type=lambda x: bool(strtobool(x)),
-        default=False,
         nargs="?",
-        const=True,
-        help="is cuda available? will be set to False on default",
+        const=True,  # If --cuda is used without a value, set it to True
+        default=torch.cuda.is_available(),  # Default to CUDA if available, otherwise False
+        help="Enable CUDA if available (default: auto-detect)",
     )
 
     args = parser.parse_args()
@@ -207,7 +227,34 @@ def runner():
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
-    torch.backends.cudnn.deterministic = args.torch_deterministic
+
+    # ========================================================================
+    #            ENSURE DETERMINISTIC SETTINGS BASED ON USER INPUT
+    # ========================================================================
+
+    if torch.cuda.is_available():
+        # Ensure CuDNN is enabled and set deterministic mode based on the user's preference
+        if torch.backends.cudnn.enabled:
+            print("CuDNN is enabled.")
+            if args.torch_deterministic:
+                print("Setting CuDNN to deterministic mode.")
+                torch.backends.cudnn.deterministic = True
+                torch.backends.cudnn.benchmark = (
+                    False  # Disable auto-tuner for deterministic behavior
+                )
+            else:
+                torch.backends.cudnn.deterministic = False
+                torch.backends.cudnn.benchmark = (
+                    True  # Enable auto-tuner for faster performance
+                )
+        else:
+            print(
+                "Warning: CuDNN is not enabled. Training may be significantly slower."
+            )
+
+    # ========================================================================
+    #            PREPARING THE PARAMETERS FOR THE ALGORITHM
+    # ========================================================================
 
     action_std_decay_rate = 0.05
     min_action_std = 0.05
@@ -224,13 +271,17 @@ def runner():
     #                           CREATING THE ENIVRONMENT
     # ========================================================================
 
-    client = None  # Pull from future connection implementation
-    world = None  # Pull from future connection implementation
+    clientConnection = ClientConnection("Town10HD")
+    client, world = clientConnection.setup()
+    # Pull from future connection implementation
 
     if train:
         env = CarlaEnvironment(client, world, town)
+        print("Training Environment Created")
     else:
         env = CarlaEnvironment(client, world, town, checkpoint_frequency=None)
+        print("Testing Environment Created")
+
     """
     encode = EncodeState(LATENT_DIM)
     """
@@ -267,6 +318,8 @@ def runner():
             # Training
             while timestep < total_timesteps:
                 observation = env.reset()
+                print("Observation recieved after env.reset()")
+
                 """ THIS NOW NEEDS TO GO TO OUR CONVOLUTION ! """
                 """
                 observation = encode.process(observation)
@@ -275,12 +328,12 @@ def runner():
 
                 current_ep_reward = 0
                 t1 = datetime.now()
-
                 for t in range(args.episode_length):
 
                     # Select action with policy
+                    print("going to get action()")
                     action = agent.get_action(observation, train=True)
-
+                    print("action recieved: ", action)
                     # Take step in the environment
                     observation, reward, done, info = env.step(action)
                     if observation is None:

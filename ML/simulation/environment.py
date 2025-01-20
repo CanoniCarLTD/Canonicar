@@ -2,9 +2,9 @@ import time
 import random
 import numpy as np
 import pygame
-from connection import carla
-from sensors import CameraSensor, CameraSensorEnv, CollisionSensor
-from settings import *
+from simulation.connection import carla
+from simulation.sensors import CameraSensor, CameraSensorEnv, CollisionSensor
+from simulation.settings import *
 
 
 class CarlaEnvironment:
@@ -15,17 +15,7 @@ class CarlaEnvironment:
         self.world = world
         self.blueprint_library = self.world.get_blueprint_library()
         self.map = self.world.get_map()
-        self.action_space = [
-            -1.0,
-            0.75,
-            0.5,
-            0.25,
-            0.0,
-            -0.25,
-            -0.5,
-            -0.75,
-            1.0,
-        ]  # DISCRETE ACTIONS
+        # self.action_space = [-1.0,0.75,0.5,0.25,0.0,-0.25,-0.5,-0.75,1.0,]  # DISCRETE ACTIONS - TO BE DELETED (ETAI)
         self.continous_action_space = continuous_action
         self.display_on = VISUAL_DISPLAY
         self.vehicle = None
@@ -46,8 +36,8 @@ class CarlaEnvironment:
         # Two very important lists for keeping track of our actors and their observations.
         self.sensor_list = list()
         self.actor_list = list()
-        self.walker_list = list()
-        self.create_pedestrians()
+        # self.walker_list = list() # TO BE DELETED (ETAI)
+        # self.create_pedestrians() # TO BE DELETED (ETAI)
 
     # A reset function for reseting our environment.
     def reset(self):
@@ -84,6 +74,7 @@ class CarlaEnvironment:
                 self.total_distance = 250
 
             self.vehicle = self.world.try_spawn_actor(vehicle_bp, transform)
+            print("Vehicle has been spawned in the environment.")
             self.actor_list.append(self.vehicle)
 
             # Camera Sensor
@@ -91,16 +82,19 @@ class CarlaEnvironment:
             while len(self.camera_obj.front_camera) == 0:
                 time.sleep(0.0001)
             self.image_obs = self.camera_obj.front_camera.pop(-1)
+            print("SSC Camera has been setup.")
             self.sensor_list.append(self.camera_obj.sensor)
 
             # Third person view of our vehicle in the Simulated env
             if self.display_on:
                 self.env_camera_obj = CameraSensorEnv(self.vehicle)
+                print("RGB Camera has been setup.")
                 self.sensor_list.append(self.env_camera_obj.sensor)
 
             # Collision sensor
             self.collision_obj = CollisionSensor(self.vehicle)
             self.collision_history = self.collision_obj.collision_data
+            print("Collision Sensor has been setup.")
             self.sensor_list.append(self.collision_obj.sensor)
 
             self.timesteps = 0
@@ -120,7 +114,7 @@ class CarlaEnvironment:
             self.velocity = float(0.0)
             self.distance_from_center = float(0.0)
             self.angle = float(0.0)
-            self.center_lane_deviation = 0.0  # HE PUT IT TWICE..?
+            self.center_lane_deviation = 0.0  # HE PUT IT TWICE..? (ETAI)
             self.distance_covered = 0.0
             """ NEED TO ADD BRAKE (ETAI) """
 
@@ -174,6 +168,8 @@ class CarlaEnvironment:
             self.collision_history.clear()
 
             self.episode_start_time = time.time()
+            print("Environment has been reset.")
+            print("returning image and navigation obs. (reset() method)")
             return [self.image_obs, self.navigation_obs]
 
         except:
@@ -183,13 +179,12 @@ class CarlaEnvironment:
             self.client.apply_batch(
                 [carla.command.DestroyActor(x) for x in self.actor_list]
             )
-            self.client.apply_batch(
-                [carla.command.DestroyActor(x) for x in self.walker_list]
-            )
+            # self.client.apply_batch([carla.command.DestroyActor(x) for x in self.walker_list])
             self.sensor_list.clear()
             self.actor_list.clear()
             self.remove_sensors()
             if self.display_on:
+                print("Closing the pygame window")
                 pygame.quit()
 
     # ----------------------------------------------------------------
@@ -222,6 +217,9 @@ class CarlaEnvironment:
                 )
                 self.previous_steer = steer
                 self.throttle = throttle
+
+            # DISCRETE, NO NEEDED - WILL BE DELETED (ETAI)
+            """
             else:
                 steer = self.action_space[action_idx]
                 if self.velocity < 20.0:
@@ -238,7 +236,7 @@ class CarlaEnvironment:
                     )
                 self.previous_steer = steer
                 self.throttle = 1.0
-
+            """
             # Traffic Light state
             if self.vehicle.is_at_traffic_light():
                 traffic_light = self.vehicle.get_traffic_light()

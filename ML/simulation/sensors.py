@@ -2,8 +2,8 @@ import math
 import numpy as np
 import weakref
 import pygame
-from connection import carla
-from settings import RGB_CAMERA, SSC_CAMERA
+from simulation.connection import carla
+from simulation.settings import RGB_CAMERA, SSC_CAMERA
 
 
 # ---------------------------------------------------------------------|

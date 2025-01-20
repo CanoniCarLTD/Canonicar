@@ -5,12 +5,13 @@ import numpy as np
 import os
 
 # Load an RGB image using OpenCV (change the path to your image)
-image_path = 'Convolution/00171.png'
+image_path = "Convolution/00171.png"
 image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
 
 # Check if the image was loaded successfully
 if image is None:
     raise FileNotFoundError(f"Error: The image file '{image_path}' was not found.")
+
 
 # Function to crop the center of the image to a smaller Field of View (FoV)
 def crop_center(img, cropx, cropy):
@@ -24,7 +25,8 @@ def crop_center(img, cropx, cropy):
     # Adjust starty to crop more from the upper part and add more of the lower part
     starty = max(0, starty - (cropy // 2))  # Crop more from the upper part
     endy = min(h, endy + (cropy // 2))  # Add more of the lower part
-    return img[starty:endy, startx:startx + cropx]
+    return img[starty:endy, startx : startx + cropx]
+
 
 # Set the desired cropped size (smaller FoV)
 crop_width = 400  # Increased width
@@ -37,13 +39,16 @@ image_tensor = torch.tensor(image_cropped, dtype=torch.float32) / 255.0
 image_tensor = image_tensor.unsqueeze(0).unsqueeze(0)  # Change to (1, 1, H, W)
 
 # Define a larger blurring kernel for a stronger blur effect
-blur_kernel = torch.tensor([
-    [1, 4, 7, 4, 1],
-    [4, 16, 26, 16, 4],
-    [7, 26, 41, 26, 7],
-    [4, 16, 26, 16, 4],
-    [1, 4, 7, 4, 1]
-], dtype=torch.float32)
+blur_kernel = torch.tensor(
+    [
+        [1, 4, 7, 4, 1],
+        [4, 16, 26, 16, 4],
+        [7, 26, 41, 26, 7],
+        [4, 16, 26, 16, 4],
+        [1, 4, 7, 4, 1],
+    ],
+    dtype=torch.float32,
+)
 # Normalize the kernel to ensure the sum is 1 (preserving brightness)
 blur_kernel = blur_kernel / blur_kernel.sum()
 blur_kernel = blur_kernel.unsqueeze(0).unsqueeze(0)  # Add dimensions for convolution
@@ -59,7 +64,7 @@ blurred_image = (blurred_image * 255).astype(np.uint8)
 
 # Extract the image name from image_path and create the output path
 image_name = os.path.splitext(os.path.basename(image_path))[0]
-output_path = os.path.join('Convolution', f'{image_name}_blurred.jpg')
+output_path = os.path.join("Convolution", f"{image_name}_blurred.jpg")
 cv2.imwrite(output_path, blurred_image)
 
 print(f"Blurred image saved as '{output_path}'")

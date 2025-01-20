@@ -1,7 +1,7 @@
 import os
 import sys
 import carla
-from settings import PORT, TIMEOUT, HOST
+from simulation.settings import PORT, TIMEOUT, HOST
 
 
 class ClientConnection:
@@ -12,8 +12,14 @@ class ClientConnection:
     def setup(self):
         try:
             # Connecting to the  Server
+            print("Trying to connect to the server on port: {}".format(PORT))
             self.client = carla.Client(HOST, PORT)
             self.client.set_timeout(TIMEOUT)
+            print(
+                "Connected to the server successfully!\n Port: {}\n Town: {}".format(
+                    PORT, self.town
+                )
+            )
             self.world = self.client.load_world(self.town)
             self.world.set_weather(carla.WeatherParameters.CloudyNoon)
             return self.client, self.world
@@ -31,3 +37,8 @@ class ClientConnection:
             print(
                 "There is a Client and Server version mismatch! Please install or download the right versions."
             )
+
+
+if __name__ == "__main__":
+    connection = ClientConnection("Town10HD")
+    connection.setup()
