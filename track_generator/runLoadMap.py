@@ -15,7 +15,7 @@ KFIR = os.getenv("KFIR_IP")
 CARLA_SERVER_PORT = 2000
 
 
-TRACK = "generated_tracks/track2.line"
+TRACK = "track_generator/generated_tracks/track2.line"
 
 def draw_vehicle_bounding_box(world, vehicle, life_time=1.0):
     """
@@ -89,7 +89,7 @@ def calculate_segment_lengths(centerline):
         segment_lengths.append(length)
     return segment_lengths
 
-def create_xodr_file(centerline, segment_lengths, lane_width=10.5, file_name="generated_tracks/generatedTrack.xodr"):
+def create_xodr_file(centerline, segment_lengths, lane_width=10.5, file_name="track_generator\generated_tracks\generatedTrack.xodr"):
     """
     Generates an OpenDRIVE file from the centerline.
     """
@@ -210,12 +210,12 @@ def trackgen():
 try:
     
     trackgen()
-    client = carla.Client(KFIR, CARLA_SERVER_PORT)
+    client = carla.Client(ETAI, CARLA_SERVER_PORT)
     client.set_timeout(10.0)
     print("Connected to carla: ", client.get_server_version())
     print(f"Loading track: {TRACK}")
 
-    with open('generated_tracks/generatedTrack.xodr', 'r') as f:
+    with open('track_generator\generated_tracks\generatedTrack.xodr', 'r') as f:
         opendrive_data = f.read()
 
     opendrive_params = carla.OpendriveGenerationParameters(
