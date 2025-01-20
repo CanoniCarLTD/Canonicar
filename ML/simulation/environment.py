@@ -205,9 +205,7 @@ class CarlaEnvironment:
 
             # Velocity of the vehicle
             velocity = self.vehicle.get_velocity()
-            self.velocity = (
-                np.sqrt(velocity.x**2 + velocity.y**2 + velocity.z**2) * 3.6
-            )
+            self.velocity = np.sqrt(velocity.x**2 + velocity.y**2 + velocity.z**2) * 3.6
 
             # Action from action space for contolling the vehicle with a discrete action
             """ DELETE DISCRETE DTUFF AND TAKE CARE OF CONTINUOUS ACTIONS (ETAI) """
@@ -309,10 +307,10 @@ class CarlaEnvironment:
             if len(self.collision_history) != 0:
                 done = True
                 reward = -10
-                
+
             elif self.distance_from_center > self.max_distance_from_center:
                 done = True
-                ''' MIGHT WANNA DELETE IT CAUSE WE WANT IT TO USE THE WHOLE TRACK (ETAI) '''
+                """ MIGHT WANNA DELETE IT CAUSE WE WANT IT TO USE THE WHOLE TRACK (ETAI) """
                 reward = -10
             elif self.episode_start_time + 10 < time.time() and self.velocity < 1.0:
                 reward = -10

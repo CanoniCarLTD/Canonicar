@@ -141,15 +141,23 @@ def runner():
         writer.add_scalar("Average Reward/(t)", np.mean(scores[-5]), timestep)
         writer.add_scalar("Episode Length (s)/info", np.mean(episodic_length), episode)
         writer.add_scalar("Reward/(t)", scores[-1], timestep)
-        writer.add_scalar("Average Deviation from Center/episode", deviation_from_center / 5, episode)
-        writer.add_scalar("Average Deviation from Center/(t)", deviation_from_center / 5, timestep)
-        writer.add_scalar("Average Distance Covered (m)/episode", distance_covered / 5, episode)
-        writer.add_scalar("Average Distance Covered (m)/(t)", distance_covered / 5, timestep)
+        writer.add_scalar(
+            "Average Deviation from Center/episode", deviation_from_center / 5, episode
+        )
+        writer.add_scalar(
+            "Average Deviation from Center/(t)", deviation_from_center / 5, timestep
+        )
+        writer.add_scalar(
+            "Average Distance Covered (m)/episode", distance_covered / 5, episode
+        )
+        writer.add_scalar(
+            "Average Distance Covered (m)/(t)", distance_covered / 5, timestep
+        )
 
     def log_testing_metrics():
-        '''Logs the testing metrics to tensorboard
+        """Logs the testing metrics to tensorboard
         Logs: episodic reward, cumulative reward/info, cumulative reward/(t), episode lengths (s), reward/(t), deviation from center, distance covered (m)/episode, distance covered (m)/(t)
-        '''
+        """
         writer.add_scalar("TEST: Episodic Reward/episode", scores[-1], episode)
         writer.add_scalar("TEST: Cumulative Reward/info", cumulative_score, episode)
         writer.add_scalar("TEST: Cumulative Reward/(t)", cumulative_score, timestep)
@@ -268,10 +276,10 @@ def runner():
                 t1 = datetime.now()
 
                 for t in range(args.episode_length):
-                    
+
                     # Select action with policy
                     action = agent.get_action(observation, train=True)
-                    
+
                     # Take step in the environment
                     observation, reward, done, info = env.step(action)
                     if observation is None:
@@ -280,19 +288,19 @@ def runner():
                     """
                     observation = encode.process(observation)
                     """
-                    
+
                     agent.memory.rewards.append(reward)
                     agent.memory.dones.append(done)
-                    
+
                     timestep += 1
                     current_ep_reward += reward
-                    
+
                     # decay action standard deviation
                     if timestep % action_std_decay_freq == 0:
                         action_std_init = agent.decay_action_std(
                             action_std_decay_rate, min_action_std
                         )
-                    
+
                     if timestep == total_timesteps - 1:
                         agent.chkpt_save()
 
@@ -413,9 +421,9 @@ def runner():
                     ", Reward:  {:.2f}".format(current_ep_reward),
                     ", Average Reward:  {:.2f}".format(cumulative_score),
                 )
-                
+
                 log_testing_metrics()
-                
+
                 episodic_length = list()
                 deviation_from_center = 0
                 distance_covered = 0
@@ -434,12 +442,3 @@ if __name__ == "__main__":
         sys.exit()
     finally:
         print("\nExit")
-
-
-
-
-
-
-
-
-

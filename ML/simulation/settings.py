@@ -6,6 +6,7 @@ Easily modifiable paramters with the quick access in this settings.py file \
 
 Names of the parameters are self-explanatory therefore elimating the use of further comments.
 """
+
 import dotenv
 import os
 
