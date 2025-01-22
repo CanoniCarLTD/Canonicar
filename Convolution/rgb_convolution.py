@@ -11,7 +11,8 @@ import numpy as np
 class DeepConvNet(nn.Module):
     def __init__(self):
         super(DeepConvNet, self).__init__()
-        self.conv1 = nn.Conv2d(in_channels=3, out_channels=16, kernel_size=3, stride=1, padding=1)  # Conv Layer 1
+        # Adjust input channels to 1 for grayscale images
+        self.conv1 = nn.Conv2d(in_channels=1, out_channels=16, kernel_size=3, stride=1, padding=1)  # Conv Layer 1
         self.conv2 = nn.Conv2d(in_channels=16, out_channels=32, kernel_size=3, stride=1, padding=1)  # Conv Layer 2
         self.conv3 = nn.Conv2d(in_channels=32, out_channels=4, kernel_size=3, stride=1, padding=1)  # Conv Layer 3 (4 channels)
         self.relu = nn.ReLU()
@@ -41,20 +42,20 @@ def preprocess_image(image: np.ndarray, new_height: int = 256) -> torch.Tensor:
     Preprocess the input image: resize, normalize, and convert to tensor.
 
     Args:
-        image (np.ndarray): Input image as a NumPy array (H x W x C).
+        image (np.ndarray): Input image as a NumPy array (H x W).
         new_height (int): Desired height for resizing (default: 256).
 
     Returns:
         torch.Tensor: Preprocessed image tensor.
     """
-    height, width, _ = image.shape
+    width, height = image.shape
     new_width = int(new_height * (width / height))  # Maintain aspect ratio
     image_pil = Image.fromarray(image)  # Convert to PIL image
 
     transform = transforms.Compose([
         transforms.Resize((new_height, new_width)),
         transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        transforms.Normalize(mean=[0.485], std=[0.229])  # Adjusted for grayscale
     ])
 
     return transform(image_pil).unsqueeze(0)  # Add batch dimension
@@ -83,12 +84,13 @@ def extract_features(image_tensor: torch.Tensor, model: nn.Module) -> torch.Tens
 
 # Example workflow
 if __name__ == "__main__":
-    # Simulate a random CARLA image (800x600)
-    example_image = np.random.rand(800, 600, 3) * 255
-    example_image = example_image.astype(np.uint8)
-
+    # Simulate a random CARLA image (800x600)    
+    carla_image_path = "Convolution/000171.png"
+    
+    image = np.array(Image.open(carla_image_path).convert('L'))
+    print(image.shape)
     # Preprocess the image
-    preprocessed_image = preprocess_image(example_image)
+    preprocessed_image = preprocess_image(carla_image_path)
 
     # Extract features
     features = extract_features(preprocessed_image, conv_model)
