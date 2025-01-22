@@ -1,5 +1,6 @@
 from mongoengine import Document, StringField, DateTimeField, BooleanField
 
+
 class ErrorLog(Document):
     error_id = StringField(primary_key=True)
     timestamp = DateTimeField(required=True)
@@ -7,4 +8,4 @@ class ErrorLog(Document):
     message = StringField(required=True)
     resolution_status = BooleanField()
 
-    meta = {'collection': 'error_logs'}
+    meta = {"collection": "error_logs"}

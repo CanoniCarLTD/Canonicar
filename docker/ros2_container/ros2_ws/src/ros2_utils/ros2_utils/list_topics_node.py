@@ -3,17 +3,19 @@ import rclpy
 from rclpy.node import Node
 from std_msgs.msg import String
 
+
 class minimalNode(Node):
-    
+
     def list_topics(self):
-        self.get_logger().info(' Sourcing topics...')
+        self.get_logger().info(" Sourcing topics...")
         topic_list = self.get_topic_names_and_types()
         for info in topic_list:
-            self.get_logger().info(f'topic: {info[0]}')
+            self.get_logger().info(f"topic: {info[0]}")
 
     def __init__(self):
-        super().__init__('list_topics_node')
+        super().__init__("list_topics_node")
         self.create_timer(5.0, self.list_topics)
+
 
 def main(args=None):
     rclpy.init(args=args)
@@ -24,7 +26,7 @@ def main(args=None):
     try:
         rclpy.spin(min_node)
     except KeyboardInterrupt:
-        print('Shutting down minimal_node...')
+        print("Shutting down minimal_node...")
         min_node.destroy_node()
         rclpy.shutdown()
         return
@@ -35,5 +37,6 @@ def main(args=None):
     min_node.destroy_node()
     rclpy.shutdown()
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()

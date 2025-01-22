@@ -229,7 +229,7 @@ def trackgen():
 
 try:
 
-    #trackgen()
+    # trackgen()
     client = carla.Client(ETAI, CARLA_SERVER_PORT)
     client.set_timeout(10.0)
     print("Connected to carla: ", client.get_server_version())
