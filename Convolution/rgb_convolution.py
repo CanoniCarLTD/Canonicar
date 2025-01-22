@@ -84,9 +84,9 @@ def extract_features(image_tensor: torch.Tensor, model: nn.Module) -> torch.Tens
 
 # Example workflow
 if __name__ == "__main__":
-    # Simulate a random CARLA image (800x600)    
+    # Simulate a random CARLA image (800x600)
     carla_image_path = "Convolution/000171.png"
-    
+
     image = np.array(Image.open(carla_image_path).convert('L'))
     print(image.shape)
     # Preprocess the image
