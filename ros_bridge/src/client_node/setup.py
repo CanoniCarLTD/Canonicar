@@ -22,7 +22,7 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'spawn_vehicle_node = client_node.spawn_vehicle:main',
+            'spawn_vehicle_node = client_node.spawn_vehicle2:main',
         ],
     },
 )
