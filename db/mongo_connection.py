@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+
 def init_db():
     try:
         # Connect to MongoDB and specify the database name

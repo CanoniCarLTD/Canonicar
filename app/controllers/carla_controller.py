@@ -101,23 +101,23 @@ def load_map():
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
-@carla_controller.route('/db_test', methods=['POST'])
+@carla_controller.route("/db_test", methods=["POST"])
 def db_test():
     try:
         episode = Episode(
-        episode_id="episode_1222",
-        reward=100.0,
-        average_reward=90.0,
-        policy_loss=0.2,
-        value_loss=0.1,
-        entropy=0.05,
-        duration=120.5,
-        num_steps=1000,
-        stage="Training"
-    )
+            episode_id="episode_1222",
+            reward=100.0,
+            average_reward=90.0,
+            policy_loss=0.2,
+            value_loss=0.1,
+            entropy=0.05,
+            duration=120.5,
+            num_steps=1000,
+            stage="Training",
+        )
 
         # Save the object to the MongoDB database
-        episode.save()       
+        episode.save()
         return jsonify({"status": "success", "message": "Saved to DB!."}), 200
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500

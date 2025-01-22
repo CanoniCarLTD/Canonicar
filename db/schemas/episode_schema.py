@@ -1,5 +1,6 @@
 from mongoengine import Document, StringField, FloatField, IntField
 
+
 class Episode(Document):
     episode_id = StringField(primary_key=True)
     reward = FloatField(required=True)
@@ -11,4 +12,4 @@ class Episode(Document):
     num_steps = IntField()
     stage = StringField()
 
-    meta = {'collection': 'episodes'}
+    meta = {"collection": "episodes"}

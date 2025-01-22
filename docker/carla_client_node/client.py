@@ -31,10 +31,16 @@ from queue import Queue
 from queue import Empty
 
 try:
-    sys.path.append(glob.glob('./carla-*%d.%d-%s.egg' % (
-        sys.version_info.major,
-        sys.version_info.minor,
-        'win-amd64' if os.name == 'nt' else 'linux-x86_64'))[0])
+    sys.path.append(
+        glob.glob(
+            "./carla-*%d.%d-%s.egg"
+            % (
+                sys.version_info.major,
+                sys.version_info.minor,
+                "win-amd64" if os.name == "nt" else "linux-x86_64",
+            )
+        )[0]
+    )
 except IndexError:
     pass
 
@@ -53,7 +59,9 @@ def sensor_callback(sensor_data, sensor_queue, sensor_name):
 
 def main():
     # We start creating the client
-    client = carla.Client('10.10.248.44', 2000, worker_threads=8) # Carla running in a container, host name is the name of the container
+    client = carla.Client(
+        "10.10.248.44", 2000, worker_threads=8
+    )  # Carla running in a container, host name is the name of the container
     client.set_timeout(5.0)
     world = client.get_world()
 
@@ -76,13 +84,13 @@ def main():
         # Bluepints for the sensors
         blueprint_library = world.get_blueprint_library()
 
-        lidar_bp = blueprint_library.find('sensor.lidar.ray_cast')
-        radar_bp = blueprint_library.find('sensor.other.radar')
+        lidar_bp = blueprint_library.find("sensor.lidar.ray_cast")
+        radar_bp = blueprint_library.find("sensor.other.radar")
 
         # We create all the sensors and keep them in a list for convenience.
         sensor_list = []
 
-        lidar_bp.set_attribute('points_per_second', '1000')
+        lidar_bp.set_attribute("points_per_second", "1000")
         lidar01 = world.spawn_actor(lidar_bp, carla.Transform())
         lidar01.listen(lambda data: sensor_callback(data, sensor_queue, "lidar01"))
         sensor_list.append(lidar01)
@@ -120,8 +128,8 @@ def main():
 
 
 if __name__ == "__main__":
-    print('running carla client...')
+    print("running carla client...")
     try:
         main()
     except KeyboardInterrupt:
-        print(' - Exited by user.')
+        print(" - Exited by user.")

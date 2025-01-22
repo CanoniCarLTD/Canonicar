@@ -16,7 +16,7 @@ def create_app():
     #     return render_template('index.html')
 
     # Register blueprints
-    app.register_blueprint(carla_controller, url_prefix='/carla')
+    app.register_blueprint(carla_controller, url_prefix="/carla")
 
     @app.teardown_appcontext
     def shutdown_session(exception=None):
