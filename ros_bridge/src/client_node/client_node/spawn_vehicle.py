@@ -1,7 +1,7 @@
 import rclpy
 from rclpy.node import Node
 import carla
-from carla import Client, Transform, Location, Rotation
+from carla import Client, Transform, Location, Rotation, TrafficManager
 import json
 import dotenv
 import os
@@ -14,11 +14,7 @@ from std_msgs.msg import Header
 import numpy as np
 import struct
 
-dotenv.load_dotenv()
-
-ETAI = os.getenv("ETAI_IP")
-KFIR = os.getenv("KFIR_IP")
-
+carla_host = os.getenv('CARLA_HOST', 'localhost')
 # Load sensors_config.json from your ROS package share directory
 share_dir = get_package_share_directory('client_node')
 sensors_file_path = os.path.join(share_dir, 'client_node', 'sensors_config.json')
@@ -28,7 +24,7 @@ class SpawnVehicleNode(Node):
         super().__init__('spawn_vehicle_node')
 
         # Use ROS2 params primarily for host/port
-        self.declare_parameter('host', KFIR)
+        self.declare_parameter('host', carla_host)
         self.declare_parameter('port', 2000)
 
         self.host = self.get_parameter('host').value
@@ -39,6 +35,11 @@ class SpawnVehicleNode(Node):
             self.client = Client(self.host, self.port)
             self.client.set_timeout(10.0)
             self.world = self.client.get_world()
+            settings = self.world.get_settings()
+            settings.synchronous_mode = False
+            # Initialize Traffic Manager
+            self.traffic_manager = self.client.get_trafficmanager(8000)
+            self.world.apply_settings(settings)
             self.spawned_sensors = []
         except Exception as e:
             self.get_logger().error(f"Error connecting to CARLA server: {e}")
@@ -124,6 +125,10 @@ class SpawnVehicleNode(Node):
                 self.get_logger().warn("No sensors found for the vehicle in JSON.")
             else:
                 self.spawn_sensors(sensors)
+            
+            self.vehicle.set_autopilot(True, self.traffic_manager.get_port())
+            self.traffic_manager.vehicle_percentage_speed_difference(self.vehicle,-1000)
+            
 
         except Exception as e:
             self.get_logger().error(f"Error parsing JSON or spawning objects: {e}")
@@ -212,10 +217,12 @@ class SpawnVehicleNode(Node):
                         "msg_type": msg_type,
                     }
 
-                    # # Attach a listener callback to the CARLA sensor
-                    # sensor_actor.listen(
-                    #     lambda data, actor_id=sensor_actor.id: self.sensor_data_callback(actor_id, data)
-                    # )
+                    # Attach a listener callback to the CARLA sensor
+                    def debug_listener(data, actor_id=sensor_actor.id):
+                        self.get_logger().info(f"Received data from sensor {actor_id}")
+                        self.sensor_data_callback(actor_id, data)
+
+                    sensor_actor.listen(debug_listener)
                 else:
                     self.get_logger().warn(
                         f"No recognized ROS message type for sensor '{sensor_type}'. Not publishing."
@@ -253,151 +260,150 @@ class SpawnVehicleNode(Node):
         else:
             return (None, None)
 
-    # def sensor_data_callback(self, actor_id, data):
-    #     """
-    #     Single callback for all sensors. We look up the sensor_type to figure out how to convert.
-    #     """
-    #     if actor_id not in self.sensors_publishers:
-    #         return
+    def sensor_data_callback(self, actor_id, data):
+        """
+        Single callback for all sensors. We look up the sensor_type to figure out how to convert.
+        """
+        if actor_id not in self.sensors_publishers:
+            return
 
-    #     pub_info = self.sensors_publishers[actor_id]
-    #     sensor_type = pub_info["sensor_type"]
-    #     publisher = pub_info["publisher"]
-    #     msg_type = pub_info["msg_type"]
+        pub_info = self.sensors_publishers[actor_id]
+        sensor_type = pub_info["sensor_type"]
+        publisher = pub_info["publisher"]
+        msg_type = pub_info["msg_type"]
 
-    #     # We create a header for the message
-    #     # (In a real app, you might want to handle sim vs. wall clock time, frames, etc.)
-    #     header = Header()
-    #     header.stamp = self.get_clock().now().to_msg()
-    #     header.frame_id = pub_info["sensor_id"]  # or "map", "base_link", etc.
+        # We create a header for the message
+        # (In a real app, you might want to handle sim vs. wall clock time, frames, etc.)
+        header = Header()
+        header.stamp = self.get_clock().now().to_msg()
+        header.frame_id = pub_info["sensor_id"]  # or "map", "base_link", etc.
 
-    #     if sensor_type.startswith("sensor.camera"):
-    #         msg = self.carla_image_to_ros_image(data, header)
-    #     elif sensor_type.startswith("sensor.lidar"):
-    #         msg = self.carla_lidar_to_ros_pointcloud2(data, header)
-    #     elif sensor_type.startswith("sensor.other.imu"):
-    #         msg = self.carla_imu_to_ros_imu(data, header)
-    #     elif sensor_type.startswith("sensor.other.gnss"):
-    #         msg = self.carla_gnss_to_ros_navsatfix(data, header)
-    #     else:
-    #         # Unhandled type
-    #         msg = None
+        if sensor_type.startswith("sensor.camera"):
+            msg = self.carla_image_to_ros_image(data, header)
+        elif sensor_type.startswith("sensor.lidar"):
+            msg = self.carla_lidar_to_ros_pointcloud2(data, header)
+        elif sensor_type.startswith("sensor.other.imu"):
+            msg = self.carla_imu_to_ros_imu(data, header)
+        elif sensor_type.startswith("sensor.other.gnss"):
+            msg = self.carla_gnss_to_ros_navsatfix(data, header)
+        else:
+            # Unhandled type
+            msg = None
 
-    #     if msg:
-    #         publisher.publish(msg)
+        if msg:
+            publisher.publish(msg)
 
     # ----------------------------------------------------------------------
     # 3) CONVERSION HELPERS
     # ----------------------------------------------------------------------
 
-    # def carla_image_to_ros_image(self, carla_image, header):
-    #     """
-    #     Convert a carla.Image (BGRA) to a sensor_msgs/Image (e.g. in 'bgra8' or 'rgb8').
-    #     By default, CARLA camera is in BGRA byte order.
-    #     """
-    #     img_msg = Image()
-    #     img_msg.header = header
-    #     img_msg.height = carla_image.height
-    #     img_msg.width = carla_image.width
-    #     img_msg.encoding = "bgra8"  # or "rgba8" / "bgr8" / etc. depending on your use
-    #     img_msg.step = 4 * carla_image.width  # BGRA -> 4 bytes per pixel
+    def carla_image_to_ros_image(self, carla_image, header):
+        """
+        Convert a carla.Image (BGRA) to a sensor_msgs/Image (e.g. in 'bgra8' or 'rgb8').
+        By default, CARLA camera is in BGRA byte order.
+        """
+        img_msg = Image()
+        img_msg.header = header
+        img_msg.height = carla_image.height
+        img_msg.width = carla_image.width
+        img_msg.encoding = "bgra8"  # or "rgba8" / "bgr8" / etc. depending on your use
+        img_msg.step = 4 * carla_image.width  # BGRA -> 4 bytes per pixel
 
-    #     # raw_data is a bytes() object containing BGRA
-    #     img_msg.data = bytes(carla_image.raw_data)
+        # raw_data is a bytes() object containing BGRA
+        img_msg.data = bytes(carla_image.raw_data)
 
-    #     return img_msg
+        return img_msg
 
-    # def carla_lidar_to_ros_pointcloud2(self, carla_lidar_data, header):
-    #     """
-    #     Convert a carla.LidarMeasurement to sensor_msgs/PointCloud2.
-    #     Each point in carla_lidar_data is [x, y, z, intensity].
-    #     """
-    #     pc_msg = PointCloud2()
-    #     pc_msg.header = header
+    def carla_lidar_to_ros_pointcloud2(self, carla_lidar_data, header):
+        """
+        Convert a carla.LidarMeasurement to sensor_msgs/PointCloud2.
+        Each point in carla_lidar_data is [x, y, z, intensity].
+        """
+        pc_msg = PointCloud2()
+        pc_msg.header = header
 
-    #     # Define fields: x, y, z, intensity
-    #     pc_msg.height = 1  # unorganized point cloud
-    #     pc_msg.width = len(carla_lidar_data)
-    #     pc_msg.is_bigendian = False
-    #     pc_msg.is_dense = False
+        # Define fields: x, y, z, intensity
+        pc_msg.height = 1  # unorganized point cloud
+        pc_msg.width = len(carla_lidar_data)
+        pc_msg.is_bigendian = False
+        pc_msg.is_dense = False
 
-    #     pc_msg.fields = [
-    #         PointField(name='x', offset=0,  datatype=PointField.FLOAT32, count=1),
-    #         PointField(name='y', offset=4,  datatype=PointField.FLOAT32, count=1),
-    #         PointField(name='z', offset=8,  datatype=PointField.FLOAT32, count=1),
-    #         PointField(name='intensity', offset=12, datatype=PointField.FLOAT32, count=1),
-    #     ]
-    #     pc_msg.point_step = 16  # 4 floats * 4 bytes each = 16
+        pc_msg.fields = [
+            PointField(name='x', offset=0,  datatype=PointField.FLOAT32, count=1),
+            PointField(name='y', offset=4,  datatype=PointField.FLOAT32, count=1),
+            PointField(name='z', offset=8,  datatype=PointField.FLOAT32, count=1),
+            PointField(name='intensity', offset=12, datatype=PointField.FLOAT32, count=1),
+        ]
+        pc_msg.point_step = 16  # 4 floats * 4 bytes each = 16
+        pc_msg.row_step = pc_msg.point_step * pc_msg.width
 
-    #     # Build raw data array
-    #     # carla_lidar_data is an iterable of carla.LidarDetection
-    #     # [d.point.x, d.point.y, d.point.z, d.object_idx (or intensity?)]
-    #     # In newer CARLA versions, it's x,y,z, cos_inc_angle, etc. 
-    #     # We'll treat 4th value as 'intensity' if your sensor is configured that way.
 
-    #     points = []
-    #     for d in carla_lidar_data:
-    #         # d has d.point.x, d.point.y, d.point.z, d.object_idx
-    #         # Or in older versions: d.x, d.y, d.z, d.intensity
-    #         # Adjust accordingly. Suppose we treat d.object_idx as intensity = 0.0 for demonstration
-    #         x = float(d.point.x)
-    #         y = float(d.point.y)
-    #         z = float(d.point.z)
-    #         intensity = 0.0  # or e.g. float(d.object_idx)
-    #         points.append(struct.pack('ffff', x, y, z, intensity))
+        # Build raw data array
+        # carla_lidar_data is an iterable of carla.LidarDetection
+        # [d.point.x, d.point.y, d.point.z, d.object_idx (or intensity?)]
+        # In newer CARLA versions, it's x,y,z, cos_inc_angle, etc. 
+        # We'll treat 4th value as 'intensity' if your sensor is configured that way.
 
-    #     pc_msg.data = b''.join(points)
+        points = []
+        for d in carla_lidar_data:
+            x = float(d.point.x)
+            y = float(d.point.y)
+            z = float(d.point.z)
+            intensity = float(d.intensity)
+            points.append(struct.pack('ffff', x, y, z, intensity))
 
-    #     return pc_msg
+        pc_msg.data = b''.join(points)
 
-    # def carla_imu_to_ros_imu(self, carla_imu_data, header):
-    #     """
-    #     Convert a carla.IMUMeasurement to sensor_msgs/Imu.
-    #     carla_imu_data.accelerometer, .gyroscope => Vector3D
-    #     """
-    #     imu_msg = Imu()
-    #     imu_msg.header = header
+        return pc_msg
 
-    #     # Carla IMU data fields
-    #     #  - accelerometer: (x, y, z) in m/s^2
-    #     #  - gyroscope: (x, y, z) in rad/s
-    #     #  - compass (float) in radians, optional
+    def carla_imu_to_ros_imu(self, carla_imu_data, header):
+        """
+        Convert a carla.IMUMeasurement to sensor_msgs/Imu.
+        carla_imu_data.accelerometer, .gyroscope => Vector3D
+        """
+        imu_msg = Imu()
+        imu_msg.header = header
 
-    #     # Fill linear_acceleration
-    #     imu_msg.linear_acceleration.x = float(carla_imu_data.accelerometer.x)
-    #     imu_msg.linear_acceleration.y = float(carla_imu_data.accelerometer.y)
-    #     imu_msg.linear_acceleration.z = float(carla_imu_data.accelerometer.z)
+        # Carla IMU data fields
+        #  - accelerometer: (x, y, z) in m/s^2
+        #  - gyroscope: (x, y, z) in rad/s
+        #  - compass (float) in radians, optional
 
-    #     # Fill angular_velocity
-    #     imu_msg.angular_velocity.x = float(carla_imu_data.gyroscope.x)
-    #     imu_msg.angular_velocity.y = float(carla_imu_data.gyroscope.y)
-    #     imu_msg.angular_velocity.z = float(carla_imu_data.gyroscope.z)
+        # Fill linear_acceleration
+        imu_msg.linear_acceleration.x = float(carla_imu_data.accelerometer.x)
+        imu_msg.linear_acceleration.y = float(carla_imu_data.accelerometer.y)
+        imu_msg.linear_acceleration.z = float(carla_imu_data.accelerometer.z)
 
-    #     # Carla doesn’t provide a direct orientation quaternion from sensor.other.imu
-    #     # We could fill with identity or compute from compass:
-    #     # Suppose we have a 'compass' field in radians (0 = North, pi/2 = East, etc.)
-    #     # You can do a partial orientation if you want. We'll skip it or set to 0.
-    #     # orientation is left at default (x=0, y=0, z=0, w=1).
+        # Fill angular_velocity
+        imu_msg.angular_velocity.x = float(carla_imu_data.gyroscope.x)
+        imu_msg.angular_velocity.y = float(carla_imu_data.gyroscope.y)
+        imu_msg.angular_velocity.z = float(carla_imu_data.gyroscope.z)
 
-    #     return imu_msg
+        # Carla doesn’t provide a direct orientation quaternion from sensor.other.imu
+        # We could fill with identity or compute from compass:
+        # Suppose we have a 'compass' field in radians (0 = North, pi/2 = East, etc.)
+        # You can do a partial orientation if you want. We'll skip it or set to 0.
+        # orientation is left at default (x=0, y=0, z=0, w=1).
 
-    # def carla_gnss_to_ros_navsatfix(self, carla_gnss_data, header):
-    #     """
-    #     Convert a carla.GnssMeasurement to sensor_msgs/NavSatFix.
-    #     carla_gnss_data.latitude, .longitude, .altitude
-    #     """
-    #     navsat_msg = NavSatFix()
-    #     navsat_msg.header = header
-    #     navsat_msg.latitude = float(carla_gnss_data.latitude)
-    #     navsat_msg.longitude = float(carla_gnss_data.longitude)
-    #     navsat_msg.altitude = float(carla_gnss_data.altitude)
+        return imu_msg
 
-    #     # Typically, you'd set position_covariance, status, etc. as needed.
-    #     navsat_msg.status.service = 1  # GPS
-    #     navsat_msg.status.status = 0   # STATUS_FIX
-    #     navsat_msg.position_covariance_type = NavSatFix.COVARIANCE_TYPE_UNKNOWN
+    def carla_gnss_to_ros_navsatfix(self, carla_gnss_data, header):
+        """
+        Convert a carla.GnssMeasurement to sensor_msgs/NavSatFix.
+        carla_gnss_data.latitude, .longitude, .altitude
+        """
+        navsat_msg = NavSatFix()
+        navsat_msg.header = header
+        navsat_msg.latitude = float(carla_gnss_data.latitude)
+        navsat_msg.longitude = float(carla_gnss_data.longitude)
+        navsat_msg.altitude = float(carla_gnss_data.altitude)
 
-    #     return navsat_msg
+        # Typically, you'd set position_covariance, status, etc. as needed.
+        navsat_msg.status.service = 1  # GPS
+        navsat_msg.status.status = 0   # STATUS_FIX
+        navsat_msg.position_covariance_type = NavSatFix.COVARIANCE_TYPE_UNKNOWN
+
+        return navsat_msg
 
 def main(args=None):
     rclpy.init(args=args)

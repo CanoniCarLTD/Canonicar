@@ -7,15 +7,19 @@ RUN apt update && apt install -y python3-pip
 
 RUN sudo apt install python3-colcon-common-extensions 
 
+# Set the working directory
 WORKDIR /ros_bridge
-# Copy your local ROS 2 package into the container
-COPY ./src ./src
+
+COPY setup_ros.sh /ros_bridge/
+
+# Initialize ROS workspace
+RUN mkdir -p src
 
 # RUN rosdep update && rosdep install -i --from-path src --rosdistro foxy -y
 
 RUN rosdep update && rosdep install --from-paths src --ignore-src -r
 # Upgrade pip and install Python dependencies
-WORKDIR /ros_bridge
+# WORKDIR /ros_bridge
 # Source ROS 2 setup and build the workspace
 RUN python3 -m pip install --upgrade pip && python3 -m pip install numpy pygame python-dotenv
 RUN python3 -m pip install 'carla==0.9.13'
@@ -28,12 +32,13 @@ RUN source /opt/ros/foxy/setup.bash && colcon build
 CMD ["/bin/bash"]
 
 # Instructions for running:
-# 1. Build the Docker image:
-#    docker build -t ros_hello_world .
-# 2. Run the container interactively:
-#    docker run -it ros_hello_world /bin/bash
-# 3. Inside the container:
-#    - Source ROS 2: source /opt/ros/foxy/setup.bash
-#    - Source workspace: source install/setup.bash
-#    - Run publisher: ros2 run hello_world publisher
-#    - Run subscriber: ros2 run hello_world subscriber
+# 1. Run the runLoadMap file from track_generator folder:
+#    python runLoadMap.py (Adjust the host IP in the file)
+# 2. Build the Docker image:
+#    docker compose up --build
+# 3. Run the container interactively:
+#    docker exec -it carla_client /bin/bash
+# 4. Inside the container:
+#    - Source ROS 2: source setup_ros.sh
+#    - Export environment IP: export CARLA_HOST="" (IP of the host machine)
+#    - Run the carla_client: ros2 run client_node spawn_vehicle_node

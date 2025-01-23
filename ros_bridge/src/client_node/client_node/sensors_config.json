@@ -16,36 +16,23 @@
                 "type": "sensor.camera.rgb",
                 "id": "rgb_front",
                 "spawn_point": {"x": 2.0, "y": 0.0, "z": 2.0, "roll": 0.0, "pitch": 0.0, "yaw": 0.0},
-                "image_size_x": 800,
-                "image_size_y": 600,
-                "fov": 90.0
-            },
-            {
-                "type": "sensor.camera.rgb",
-                "id": "rgb_view",
-                "spawn_point": {"x": -4.5, "y": 0.0, "z": 2.8, "roll": 0.0, "pitch": 20.0, "yaw": 0.0},
-                "image_size_x": 800,
-                "image_size_y": 600,
+                "image_size_x": 640,
+                "image_size_y": 480,
                 "fov": 90.0,
-                "attached_objects":
-                [
-                    {
-                        "type": "actor.pseudo.control",
-                        "id": "control"
-                    }
-                ]
+                "sensor_tick": 0.1
             },
             {
                 "type": "sensor.lidar.ray_cast",
                 "id": "lidar",
                 "spawn_point": {"x": 0.0, "y": 0.0, "z": 2.4, "roll": 0.0, "pitch": 0.0, "yaw": 0.0},
-                "range": 30,
-                "channels": 20,
+                "range": 40,
+                "channels": 32,
                 "points_per_second": 32000,
-                "horizontal_fov": 120,
+                "horizontal_fov": 360,
                 "upper_fov": 2.0,
                 "lower_fov": -26.8,
-                "rotation_frequency": 20
+                "rotation_frequency": 20,
+                "sensor_tick": 0.1
             },
             {
                 "type": "sensor.other.imu",
