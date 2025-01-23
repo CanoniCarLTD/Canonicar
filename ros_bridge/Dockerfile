@@ -22,10 +22,6 @@ RUN python3 -m pip install 'carla==0.9.13'
 RUN apt-get install -y ros-foxy-derived-object-msgs ros-foxy-std-msgs ros-foxy-carla-msgs
 RUN source /opt/ros/foxy/setup.bash && colcon build 
 
-# RUN sudo apt update
-# # RUN sudo apt upgrade
-# RUN sudo apt install ros-foxy-desktop python3-argcomplete
-# RUN sudo apt install ros-dev-tools
 
 
 # Set default entrypoint to bash (useful for debugging)
