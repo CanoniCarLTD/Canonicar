@@ -12,10 +12,9 @@ dotenv.load_dotenv()
 
 ETAI = os.getenv("ETAI_IP")
 KFIR = os.getenv("KFIR_IP")
+TRACK_LINE = os.getenv("TRACK_LINE")
+TRACK_XODR = os.getenv("TRACK_XODR")
 CARLA_SERVER_PORT = 2000
-
-
-TRACK = "track_generator/generated_tracks/track2.line"
 
 
 def draw_vehicle_bounding_box(world, vehicle, life_time=1.0):
@@ -99,7 +98,7 @@ def create_xodr_file(
     centerline,
     segment_lengths,
     lane_width=10.5,
-    file_name="track_generator\generated_tracks\generatedTrack.xodr",
+    file_name=TRACK_XODR,
 ):
     """
     Generates an OpenDRIVE file from the centerline.
@@ -215,7 +214,7 @@ def create_xodr_file(
 
 
 def trackgen():
-    line_file = TRACK  # Replace with your file name
+    line_file = TRACK_LINE  # Replace with your file name
 
     # Read the .line file
     centerline = read_line_file(line_file)
@@ -229,13 +228,13 @@ def trackgen():
 
 try:
 
-    # trackgen()
-    client = carla.Client(ETAI, CARLA_SERVER_PORT)
+    #trackgen()
+    client = carla.Client(KFIR, CARLA_SERVER_PORT)
     client.set_timeout(10.0)
     print("Connected to carla: ", client.get_server_version())
-    print(f"Loading track: {TRACK}")
+    print(f"Loading track: {TRACK_LINE}")
 
-    with open("track_generator\generated_tracks\generatedTrack.xodr", "r") as f:
+    with open(TRACK_XODR, "r") as f:
         opendrive_data = f.read()
 
     opendrive_params = carla.OpendriveGenerationParameters(
@@ -267,37 +266,37 @@ try:
         )
 
     blueprint_library = world.get_blueprint_library()
-    vehicle_bp = blueprint_library.filter("model3")[0]
+    # vehicle_bp = blueprint_library.filter("model3")[0]
     spawn_points = map.get_spawn_points()
-    transform = carla.Transform(
-        carla.Location(x=-5, y=-2, z=2), carla.Rotation(yaw=180)
-    )
+    # transform = carla.Transform(
+    #     carla.Location(x=-5, y=-2, z=2), carla.Rotation(yaw=180)
+    # )
     vehicles = []
 
-    vehicle = world.spawn_actor(vehicle_bp, transform)
+    # vehicle = world.spawn_actor(vehicle_bp, transform)
 
     """ need to figure out why the vehicles disappear after almost completing the track """
 
-    collision_bp = blueprint_library.find("sensor.other.collision")
-    collision_sensor = world.spawn_actor(
-        collision_bp, carla.Transform(), attach_to=vehicle
-    )
+    # collision_bp = blueprint_library.find("sensor.other.collision")
+    # collision_sensor = world.spawn_actor(
+    #     collision_bp, carla.Transform(), attach_to=vehicle
+    # )
 
-    vehicles.append(vehicle)
-    print(
-        "Vehicle spawned: ",
-        vehicle.type_id,
-    )
-    print("Setting autopilot...")
-    vehicle.set_autopilot(False)
+    # vehicles.append(vehicle)
+    # print(
+    #     "Vehicle spawned: ",
+    #     vehicle.type_id,
+    # )
+    # print("Setting autopilot...")
+    # vehicle.set_autopilot(False)
 
-    print("Autopilot set")
+    # print("Autopilot set")
     # Get the Traffic Manager
-    traffic_manager = client.get_trafficmanager()
-    traffic_manager.auto_lane_change(vehicle, True)
-    traffic_manager.force_lane_change(vehicle, False)
-    traffic_manager.ignore_vehicles_percentage(vehicle, 5.0)
-    traffic_manager.global_percentage_speed_difference(-100.0)
+    # traffic_manager = client.get_trafficmanager()
+    # traffic_manager.auto_lane_change(vehicle, True)
+    # traffic_manager.force_lane_change(vehicle, False)
+    # traffic_manager.ignore_vehicles_percentage(vehicle, 5.0)
+    # traffic_manager.global_percentage_speed_difference(-100.0)
 
     # Perform ticks and check bounds
     while True:
