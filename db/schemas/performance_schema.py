@@ -1,5 +1,6 @@
 from mongoengine import Document, StringField, FloatField, IntField, ListField
 
+
 class Performance(Document):
     performance_id = StringField(primary_key=True)
     race_id = StringField(required=True)
@@ -10,4 +11,4 @@ class Performance(Document):
     collisions = IntField()
     lap_progress = FloatField()
 
-    meta = {'collection': 'performance'}
+    meta = {"collection": "performance"}
