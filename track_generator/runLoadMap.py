@@ -12,6 +12,7 @@ dotenv.load_dotenv()
 
 ETAI = os.getenv("ETAI_IP")
 KFIR = os.getenv("KFIR_IP")
+MACHINE_IP = os.getenv("MACHINE_IP")
 TRACK_LINE = os.getenv("TRACK_LINE")
 TRACK_XODR = os.getenv("TRACK_XODR")
 CARLA_SERVER_PORT = 2000

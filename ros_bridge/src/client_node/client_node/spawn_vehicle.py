@@ -313,7 +313,7 @@ class SpawnVehicleNode(Node):
         img_msg.data = bytes(carla_image.raw_data)
 
         return img_msg
-
+    
     def carla_lidar_to_ros_pointcloud2(self, carla_lidar_data, header):
         """
         Convert a carla.LidarMeasurement to sensor_msgs/PointCloud2.
