@@ -299,6 +299,7 @@ class CarlaEnvironment:
                     ) * self.checkpoint_frequency
 
             # Rewards are given below!
+            # Create new function, Design our kind of rewards.
             done = False
             reward = 0
 
