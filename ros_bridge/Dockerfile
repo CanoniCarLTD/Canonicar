@@ -6,25 +6,24 @@ SHELL ["/bin/bash", "-c"]
 RUN apt update && apt install -y python3-pip
 
 RUN sudo apt install python3-colcon-common-extensions 
-
 # Set the working directory
 WORKDIR /ros_bridge
+
+RUN mkdir -p src
+
+VOLUME [ "/ros_bridge/src" ]
 
 COPY setup_ros.sh /ros_bridge/
 
 # Initialize ROS workspace
-RUN mkdir -p src
 
-# RUN rosdep update && rosdep install -i --from-path src --rosdistro foxy -y
-
-RUN rosdep update && rosdep install --from-paths src --ignore-src -r
 # Upgrade pip and install Python dependencies
 # WORKDIR /ros_bridge
 # Source ROS 2 setup and build the workspace
 RUN python3 -m pip install --upgrade pip && python3 -m pip install numpy pygame python-dotenv
 RUN python3 -m pip install 'carla==0.9.13'
 RUN apt-get install -y ros-foxy-derived-object-msgs ros-foxy-std-msgs ros-foxy-carla-msgs
-RUN source /opt/ros/foxy/setup.bash && colcon build 
+RUN source /opt/ros/foxy/setup.bash
 
 
 

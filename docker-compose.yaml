@@ -65,7 +65,12 @@ services:
     container_name: carla_client
     tty: true
     stdin_open: true
-    command: /bin/bash
+    command: bash -c "
+      rosdep update && \
+      rosdep install --from-paths src --ignore-src -r -y && \
+      colcon build && \
+      source install/setup.bash && \
+      tail -f /dev/null"
     volumes:
       - ./ros_bridge/src:/ros_bridge/src
     # restart: always
