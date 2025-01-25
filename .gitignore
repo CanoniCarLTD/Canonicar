@@ -4,10 +4,10 @@ carla_env/
 # Ignore Python bytecode files
 __pycache__/
 
-# ignore .env
 .env
 canonicar_init_instructions.txt
 carla_fast_access.txt
 connTest.py
 .vscode
-/env
+env
+CUDA.py
