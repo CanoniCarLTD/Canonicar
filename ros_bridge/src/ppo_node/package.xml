@@ -4,7 +4,7 @@
   <name>ppo_node</name>
   <version>0.0.0</version>
   <description>TODO: Package description</description>
-  <maintainer email="kfir.hoftman@gmail.com">kfirh</maintainer>
+  <maintainer email="etai444@gmail.com">Etaizil</maintainer>
   <license>Apache-2.0</license>
 
   <test_depend>ament_copyright</test_depend>
