@@ -90,7 +90,7 @@ if __name__ == "__main__":
     image = np.array(Image.open(carla_image_path).convert('L'))
     print(image.shape)
     # Preprocess the image
-    preprocessed_image = preprocess_image(carla_image_path)
+    preprocessed_image = preprocess_image(image)
 
     # Extract features
     features = extract_features(preprocessed_image, conv_model)

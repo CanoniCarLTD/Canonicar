@@ -43,7 +43,7 @@ class PPOAgent(object):
         self.encode = EncodeState(LATENT_DIM)
         """
         self.memory = Buffer()
-        self.town = town #Fix to use generated track
+        self.town = town  # Fix to use generated track
 
         self.checkpoint_file_no = 0
 
