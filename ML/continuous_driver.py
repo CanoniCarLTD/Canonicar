@@ -12,7 +12,7 @@ from datetime import datetime
 from torch.utils.tensorboard import SummaryWriter
 
 # from encoder_init import EncodeState
-from networks.on_policy.ppo.agent import PPOAgent
+from ML.networks.agent import PPOAgent
 from simulation.connection import ClientConnection
 from simulation.environment import CarlaEnvironment
 from parameters import *

@@ -5,7 +5,7 @@ import torch
 import torch.nn as nn
 
 # from ML.encoder_init import EncodeState
-from networks.on_policy.ppo.ppo import ActorCritic
+from ML.networks.ppo import ActorCritic
 from parameters import *
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
