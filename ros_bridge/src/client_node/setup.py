@@ -13,7 +13,7 @@ setup(
         ('share/' + package_name + '/client_node',
              ['client_node/sensors_config.json']),
     ],
-    install_requires=['setuptools'],
+    install_requires=['setuptools','sensors_data'],
     zip_safe=True,
     maintainer='kfir',
     maintainer_email='kfir.hoftman@gmail.com',
