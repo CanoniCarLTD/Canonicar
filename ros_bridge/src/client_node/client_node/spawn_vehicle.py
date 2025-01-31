@@ -25,22 +25,18 @@ class SpawnVehicleNode(Node):
     def __init__(self):
         super().__init__('spawn_vehicle_node')
 
-        # Use ROS2 params primarily for host/port
-        carla_host = os.getenv('CARLA_HOST', 'localhost')
-        self.declare_parameter('host', carla_host)
+        self.declare_parameter('host', '')
         self.declare_parameter('port', 2000)
 
         self.host = self.get_parameter('host').value
         self.port = self.get_parameter('port').value
 
-        # Connect to CARLA
         try:
             self.client = Client(self.host, self.port)
             self.client.set_timeout(10.0)
             self.world = self.client.get_world()
             settings = self.world.get_settings()
             settings.synchronous_mode = False
-            # Initialize Traffic Manager
             self.traffic_manager = self.client.get_trafficmanager(8000)
             self.world.apply_settings(settings)
             self.spawned_sensors = []
@@ -48,20 +44,14 @@ class SpawnVehicleNode(Node):
             self.get_logger().error(f"Error connecting to CARLA server: {e}")
             return
 
-        # We keep a map from actor_id -> publisher info
-        # Example: self.sensors_publishers[actor_id] = {"type": <sensor_type>, "publisher": <publisher_obj>, "cb": <callback>}
         self.sensors_publishers = {}
 
-        # Read JSON config and spawn objects
         self.sensor_config_file = os.path.join(
             get_package_share_directory('client_node'), 'client_node', 'sensors_config.json'
         )
         self.vehicle = None
         self.spawn_objects_from_config()
 
-    # ----------------------------------------------------------------------
-    # 1) SPAWN THE VEHICLE & SENSORS FROM JSON
-    # ----------------------------------------------------------------------
     def spawn_objects_from_config(self):
         """
         Reads the 'objects' array from sensors_config.json
@@ -91,11 +81,9 @@ class SpawnVehicleNode(Node):
                 return
             self.get_logger().info(f"Found vehicle blueprint '{vehicle_type}'")
 
-            # Set the role_name from JSON "id" => e.g. "ego_vehicle"
             vehicle_id = ego_object.get("id", "ego_vehicle")
             self.get_logger().info(f"Setting role_name to '{vehicle_id}'")
 
-            # Get transform from JSON
             spawn_point_data = ego_object.get("spawn_point", {})
             self.get_logger().info(f"Found spawn point data: {spawn_point_data}")
             vehicle_transform = Transform(
@@ -112,7 +100,6 @@ class SpawnVehicleNode(Node):
             )
             self.get_logger().info(f"Spawning vehicle '{vehicle_id}' at {vehicle_transform}")
 
-            # Attempt to spawn the vehicle
             self.vehicle = self.world.try_spawn_actor(vehicle_bp, vehicle_transform)
             if self.vehicle:
                 self.get_logger().info(
@@ -122,7 +109,6 @@ class SpawnVehicleNode(Node):
                 self.get_logger().error("Failed to spawn the vehicle. Check collisions or map issues.")
                 return
 
-            # Spawn the sensors for this vehicle
             sensors = ego_object.get("sensors", [])
             if not sensors:
                 self.get_logger().warn("No sensors found for the vehicle in JSON.")
@@ -158,7 +144,6 @@ class SpawnVehicleNode(Node):
                     self.get_logger().error(f"Sensor blueprint '{sensor_type}' not found. Skipping.")
                     continue
 
-                # Set blueprint attributes (skip 'type', 'id', 'spawn_point', 'attached_objects')
                 for attribute, value in sensor_def.items():
                     if attribute in ["type", "id", "spawn_point", "attached_objects"]:
                         continue
@@ -174,7 +159,6 @@ class SpawnVehicleNode(Node):
                             f"Blueprint '{sensor_type}' does NOT have an attribute '{attribute}'. Skipping."
                         )
 
-                # Build the transform
                 sp = sensor_def.get("spawn_point", {})
                 spawn_transform = Transform(
                     Location(
@@ -189,7 +173,6 @@ class SpawnVehicleNode(Node):
                     ),
                 )
 
-                # Attach sensor to the ego vehicle
                 sensor_actor = self.world.try_spawn_actor(sensor_bp, spawn_transform, attach_to=self.vehicle)
                 if sensor_actor is None:
                     self.get_logger().error(f"Failed to spawn sensor '{sensor_id}'.")
@@ -230,10 +213,6 @@ class SpawnVehicleNode(Node):
             except Exception as e:
                 self.get_logger().error(f"Error spawning sensor '{sensor_def}': {e}")
 
-    # ----------------------------------------------------------------------
-    # 2) SET UP PUBLISHING LOGIC
-    # ----------------------------------------------------------------------
-
     def get_ros_topic_and_type(self, sensor_type, sensor_id):
         """
         Returns a (topic_name, message_type) for the given CARLA sensor type.
@@ -265,7 +244,7 @@ class SpawnVehicleNode(Node):
         # Create a header for the message
         header = Header()
         header.stamp = self.get_clock().now().to_msg()
-        header.frame_id = pub_info["sensor_id"]  # or "map", "base_link", etc.
+        header.frame_id = pub_info["sensor_id"] 
 
         # Convert CARLA data to ROS message using sensors_data module
         if sensor_type.startswith("sensor.camera"):
@@ -277,7 +256,6 @@ class SpawnVehicleNode(Node):
         elif sensor_type.startswith("sensor.other.gnss"):
             msg = carla_gnss_to_ros_navsatfix(data, header)
         else:
-            # Unhandled type
             msg = None
 
         if msg:

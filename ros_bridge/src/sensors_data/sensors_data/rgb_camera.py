@@ -13,7 +13,6 @@ def carla_image_to_ros_image(carla_image, header: Header) -> Image:
     img_msg.encoding = "bgra8" 
     img_msg.step = 4 * carla_image.width 
 
-    # raw_data is a bytes() object containing BGRA
     img_msg.data = bytes(carla_image.raw_data)
 
     return img_msg
