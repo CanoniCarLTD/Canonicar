@@ -1,72 +1,82 @@
 
 services:
 
-  # Carla server container
-  carla:
-    image: carlasim/carla:0.9.13
-    container_name: carla_server
-    runtime: nvidia
-    ports: 
-      - 2000-2002:2000-2002
-    command: >
-      bash -c "
-        # Copy .Xauthority and set permissions as root
-        cp /root/.Xauthority /home/carla/.Xauthority;
-        chown carla:carla /home/carla/.Xauthority;
-        # Switch to carla user and set the XAUTHORITY environment
-        su carla -c 'export XAUTHORITY=/home/carla/.Xauthority && ./CarlaUE4.sh -quality-level=Low'
-      "
+  # # Carla server container
+  # carla:
+  #   image: carlasim/carla:0.9.13
+  #   container_name: carla_server
+  #   runtime: nvidia
+  #   ports: 
+  #     - 2000-2002:2000-2002
+  #   command: >
+  #     bash -c "
+  #       # Copy .Xauthority and set permissions as root
+  #       cp /root/.Xauthority /home/carla/.Xauthority;
+  #       chown carla:carla /home/carla/.Xauthority;
+  #       # Switch to carla user and set the XAUTHORITY environment
+  #       su carla -c 'export XAUTHORITY=/home/carla/.Xauthority && ./CarlaUE4.sh -quality-level=Low'
+  #     "
 
-    environment:
-      - DISPLAY=${DISPLAY}
-      - NVIDIA_VISIBLE_DEVICES=all
-      - NVIDIA_DRIVER_CAPABILITIES=all
-      - QT_X11_NO_MITSHM=1 # Fix a bug with QT
-      - SDL_VIDEODRIVER=x11
+  #   environment:
+  #     - DISPLAY=${DISPLAY}
+  #     - NVIDIA_VISIBLE_DEVICES=all
+  #     - NVIDIA_DRIVER_CAPABILITIES=all
+  #     - QT_X11_NO_MITSHM=1 # Fix a bug with QT
+  #     - SDL_VIDEODRIVER=x11
 
-    privileged: true
-    network_mode: "host"
-    stdin_open: true
-    tty: true
-    user: root
+  #   privileged: true
+  #   network_mode: "host"
+  #   stdin_open: true
+  #   tty: true
+  #   user: root
 
-    volumes:
-      - /tmp/.X11-unix:/tmp/.X11-unix  # Mount the X11 socket
-      - /home/deep/.Xauthority:/root/.Xauthority:ro
-  # Carla ROS bridge container
-  bridge:
-    build:
-      context: ./docker/ros_carla_bridge/
-      dockerfile: Dockerfile
-    container_name: carla_ros_bridge
-    command: ros2 launch carla_ros_bridge carla_ros_bridge_with_example_ego_vehicle.launch.py host:=10.10.248.44 port:=2000 timeout:=15
-    runtime: nvidia
-    restart: always
-    depends_on: 
-      carla:
-        condition: service_started
+  #   volumes:
+  #     - /tmp/.X11-unix:/tmp/.X11-unix  # Mount the X11 socket
+  #     - /home/deep/.Xauthority:/root/.Xauthority:ro
+  # # Carla ROS bridge container
+  # bridge:
+  #   build:
+  #     context: ./docker/ros_carla_bridge/
+  #     dockerfile: Dockerfile
+  #   container_name: carla_ros_bridge
+  #   command: ros2 launch carla_ros_bridge carla_ros_bridge_with_example_ego_vehicle.launch.py host:=10.10.248.44 port:=2000 timeout:=15
+  #   runtime: nvidia
+  #   restart: always
+  #   depends_on: 
+  #     carla:
+  #       condition: service_started
 
-  # Custom ROS2 container
-  ros2_container:
-    build:
-      context: ./docker/ros2_container/
-      dockerfile: Dockerfile
-    container_name: ros2_container
-    command: ros2 run ros2_utils list_topics_node
-    depends_on: 
-      bridge:
-        condition: service_started
+  # # Custom ROS2 container
+  # ros2_container:
+  #   build:
+  #     context: ./docker/ros2_container/
+  #     dockerfile: Dockerfile
+  #   container_name: ros2_container
+  #   command: ros2 run ros2_utils list_topics_node
+  #   depends_on: 
+  #     bridge:
+  #       condition: service_started
 
   # Custom Carla Node
   carla_client:
     build:
-      context: ./docker/carla_client_node/
+      context: ./ros_bridge/
       dockerfile: Dockerfile
     container_name: carla_client
-    restart: always
-    depends_on: 
-      bridge:
-        condition: service_started
+    tty: true
+    stdin_open: true
+    command: bash -c "
+      rosdep update && \
+      rosdep install --from-paths src --ignore-src -r -y && \
+      colcon build && \
+      source install/setup.bash && \
+      tail -f /dev/null"
+    volumes:
+      - ./ros_bridge/src:/ros_bridge/src
+    # restart: always
+    # depends_on: 
+    #   bridge:
+    #     condition: service_started
 
   # foxglove to visualize live data 
   foxglove_bridge:
@@ -78,8 +88,8 @@ services:
     container_name: foxglove_bridge
     command: ros2 launch foxglove_bridge foxglove_bridge_launch.xml port:=8765
     restart: always
-    depends_on: 
-      bridge:
-        condition: service_started
+    # depends_on: 
+    #   bridge:
+    #     condition: service_started
 
 
