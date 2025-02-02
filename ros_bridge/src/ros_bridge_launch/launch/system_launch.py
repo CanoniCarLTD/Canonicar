@@ -87,17 +87,11 @@ def generate_launch_description():
         package='data_collector_node',
         executable='data_collector',
         name='data_collector_node',
-        output='screen',
-        parameters=[
-            {
-                'host': LaunchConfiguration('host'),
-                'port': LaunchConfiguration('port'),
-            }
-        ]
+        output='screen'
     )
 
     delayed_data_collector = TimerAction(
-        period=10.0,  # Delay to ensure vehicle is spawned first
+        period=5.0,  # Delay to ensure vehicle is spawned first
         actions=[data_collector_node]
     )
 

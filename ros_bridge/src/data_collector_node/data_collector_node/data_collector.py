@@ -19,27 +19,13 @@ from torchvision.models import MobileNet_V2_Weights, mobilenet_v2
 class DataCollector(Node):
     def __init__(self):
         super().__init__('data_collector')
-
-        self.declare_parameter('host', '')
-        self.declare_parameter('port', 2000)
-        self.host = self.get_parameter('host').value
-        self.port = self.get_parameter('port').value
-
         try:
-            self.client = Client(self.host, self.port)
-            self.client.set_timeout(10.0)
-            self.world = self.client.get_world()
-            settings = self.world.get_settings()
-            settings.synchronous_mode = False
-            self.traffic_manager = self.client.get_trafficmanager(8000)
-            self.world.apply_settings(settings)
             self.prev_gnss = None  # Store previous GNSS position for velocity calculation
             self.prev_time = None  # Store timestamp
         except Exception as e:
             self.get_logger().error(f"Error connecting to CARLA server: {e}")
             return
 
-        self.vehicle = None
         self.data_buffer = []  # List of dictionaries to store synchronized data
         self.setup_subscribers()
         self.vision_model = self.initialize_vision_model()
@@ -109,11 +95,7 @@ class DataCollector(Node):
         )
 
     def process_image(self, image_msg):
-        """Process camera image data and extract convolutional features using PyTorch."""
-        if image_msg.encoding not in ['rgb8', 'bgr8', 'bgra8', 'rgba8']:
-            self.get_logger().error(f"Unsupported image encoding: {image_msg.encoding}")
-            return np.zeros(20)
-
+        """Process camera image data and extract convolutional features using PyTorch."""        
         raw_image = np.frombuffer(image_msg.data, dtype=np.uint8).reshape((image_msg.height, image_msg.width, -1))
         if raw_image.shape[2] == 4:
             raw_image = raw_image[:, :, :3]  # Remove alpha channel if present
