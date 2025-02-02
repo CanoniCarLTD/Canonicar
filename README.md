@@ -42,6 +42,7 @@ Before you begin, ensure you have the following installed on your machine:
 ### 1. Build the Docker Image
 
 Build the Docker image using Docker Compose. This step will set up the necessary environment for the CARLA client.
+If you are using a simulator as carla server which means the simulator is not running on your local machine, you have to activate the `carla_server` at the docker compose.
 
 ```bash
 docker compose up --build
@@ -89,6 +90,12 @@ ros2 launch ros_bridge_launch system_launch.py host:=your_host_ip_addres
   - Ensure that ROS 2 is correctly sourced and all dependencies are installed.
   - Refer to the [ROS 2 Documentation](https://docs.ros.org/en/foxy/index.html) for detailed troubleshooting steps.
 
+- **Adding nodes:**
+  - In case you want to add new node, you have to create new pacgkge with the following ROS commands:
+  ```bash
+  ros2 pkg create --build-type ament_python --license Apache-2.0 <package_name>
+  ```
+  - if you are making changes at the nodes, and the containers are up and running, you have to do `colcon build` inside the container itself before launching the nodes.
 
 ## License
 

@@ -33,7 +33,7 @@ services:
   #   volumes:
   #     - /tmp/.X11-unix:/tmp/.X11-unix  # Mount the X11 socket
   #     - /home/deep/.Xauthority:/root/.Xauthority:ro
-  # # Carla ROS bridge container
+  # Carla ROS bridge container
   # bridge:
   #   build:
   #     context: ./docker/ros_carla_bridge/

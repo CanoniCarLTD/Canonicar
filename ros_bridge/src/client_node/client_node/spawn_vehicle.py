@@ -115,7 +115,7 @@ class SpawnVehicleNode(Node):
             else:
                 self.spawn_sensors(sensors)
 
-            self.vehicle.set_autopilot(True, self.traffic_manager.get_port())
+            # self.vehicle.set_autopilot(True, self.traffic_manager.get_port())
             self.traffic_manager.vehicle_percentage_speed_difference(self.vehicle, -1000)
 
         except Exception as e:
