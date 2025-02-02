@@ -11,7 +11,7 @@ setup(
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
     ],
-    install_requires=['setuptools'],
+    install_requires=['setuptools', 'torch', 'torchvision'],
     zip_safe=True,
     maintainer='kfirh',
     maintainer_email='kfir.hoftman@gmail.com',
@@ -20,6 +20,7 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
+            'data_collector = data_collector_node.data_collector:main',
         ],
     },
 )
