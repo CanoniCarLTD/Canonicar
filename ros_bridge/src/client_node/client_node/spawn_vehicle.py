@@ -3,15 +3,14 @@ from rclpy.node import Node
 import carla
 from carla import Client, Transform, Location, Rotation, TrafficManager
 import json
-import dotenv
 import os
 from ament_index_python.packages import get_package_share_directory
+import time
 
 # For ROS2 messages
 from sensor_msgs.msg import Image, PointCloud2, Imu, NavSatFix
 from std_msgs.msg import Header
 
-import numpy as np
 
 # Import conversion functions from sensors_data
 from sensors_data import (
@@ -51,18 +50,21 @@ class SpawnVehicleNode(Node):
         )
         self.vehicle = None
         self.spawn_objects_from_config()
+        
 
     def spawn_objects_from_config(self):
-        """
-        Reads the 'objects' array from sensors_config.json
-        Spawns the first 'vehicle.*' it finds using the JSON's spawn_point
-        Then spawns sensors attached to that vehicle.
-        """
+       
+        # Add delay to ensure map is fully loaded
+        self.get_logger().info("Waiting for map to fully load...")
+        time.sleep(2.0)
+        
         try:
+            # Load vehicle configuration
             with open(self.sensor_config_file, 'r') as f:
                 config = json.load(f)
-                self.get_logger().info("Loaded JSON config from sensors_config.json")
+                self.get_logger().info("Loaded JSON config")
 
+            # Get vehicle blueprint
             objects = config.get("objects", [])
             if not objects:
                 self.get_logger().error("No objects found in sensors_config.json")
@@ -76,50 +78,93 @@ class SpawnVehicleNode(Node):
 
             blueprint_library = self.world.get_blueprint_library()
             vehicle_bp = blueprint_library.find(vehicle_type)
-            if not vehicle_bp:
-                self.get_logger().error(f"Vehicle blueprint '{vehicle_type}' not found in CARLA.")
+            
+            carla_map = self.world.get_map()
+            waypoints = carla_map.generate_waypoints(1.0) # 1-meter interval for precision
+            
+            road_ids = set(wp.road_id for wp in waypoints)
+            if len(road_ids) == 0:
+                self.get_logger().error("No roads found in the map!")
                 return
-            self.get_logger().info(f"Found vehicle blueprint '{vehicle_type}'")
-
-            vehicle_id = ego_object.get("id", "ego_vehicle")
-            self.get_logger().info(f"Setting role_name to '{vehicle_id}'")
-
-            spawn_point_data = ego_object.get("spawn_point", {})
-            self.get_logger().info(f"Found spawn point data: {spawn_point_data}")
-            vehicle_transform = Transform(
-                Location(
-                    x=spawn_point_data.get("x", 0.0),
-                    y=spawn_point_data.get("y", 0.0),
-                    z=spawn_point_data.get("z", 0.0),
-                ),
-                Rotation(
-                    roll=spawn_point_data.get("roll", 0.0),
-                    pitch=spawn_point_data.get("pitch", 0.0),
-                    yaw=spawn_point_data.get("yaw", 0.0),
-                ),
-            )
-            self.get_logger().info(f"Spawning vehicle '{vehicle_id}' at {vehicle_transform}")
-
-            self.vehicle = self.world.try_spawn_actor(vehicle_bp, vehicle_transform)
-            if self.vehicle:
-                self.get_logger().info(
-                    f"Spawned vehicle '{vehicle_id}' with ID={self.vehicle.id} at {vehicle_transform}"
+                
+            main_road_id = list(road_ids)[0] if len(road_ids) == 1 else min(road_ids)
+            
+            # Find lanes on this road (prioritize negative lane IDs for left-side driving)
+            lane_ids = set(wp.lane_id for wp in waypoints if wp.road_id == main_road_id)
+            driving_lane_id = next((id for id in lane_ids if id < 0), next((id for id in lane_ids if id > 0), 0))
+            
+            if driving_lane_id == 0:
+                self.get_logger().error("No valid driving lane found!")
+                return
+                            
+            # Find waypoints specifically for this road and lane
+            road_waypoints = [wp for wp in waypoints if wp.road_id == main_road_id and wp.lane_id == driving_lane_id]
+            if not road_waypoints:
+                self.get_logger().error("No waypoints found for the selected road/lane!")
+                return
+                
+            # Sort waypoints by s-value to ensure they're in order along the road
+            road_waypoints.sort(key=lambda wp: wp.s)
+            
+            spawn_waypoint = road_waypoints[3] 
+            self.get_logger().info(f"Using waypoint at s={spawn_waypoint.s:.1f} for spawn")
+                
+            # Create the transform and raise it slightly to prevent ground collision
+            spawn_transform = spawn_waypoint.transform
+            spawn_transform.location.z += 0.3
+                
+            # Try to spawn the vehicle
+            self.vehicle = self.world.try_spawn_actor(vehicle_bp, spawn_transform)
+            
+            if not self.vehicle:
+                self.get_logger().error("Failed to spawn at waypoint")
+                return
+            
+            self.get_logger().info(f"Spawned vehicle at {self.vehicle.get_location()}")
+            
+            # Add collision sensor for debugging
+            collision_bp = blueprint_library.find('sensor.other.collision')
+            if collision_bp:
+                collision_sensor = self.world.spawn_actor(
+                    collision_bp, 
+                    carla.Transform(), 
+                    attach_to=self.vehicle
                 )
-            else:
-                self.get_logger().error("Failed to spawn the vehicle. Check collisions or map issues.")
-                return
-
+                collision_sensor.listen(lambda event: self._on_collision(event))
+                self.spawned_sensors.append(collision_sensor)
+            
+            # Configure physics for stability
+            physics_control = self.vehicle.get_physics_control()
+            physics_control.mass = physics_control.mass * 1.5
+            self.vehicle.apply_physics_control(physics_control)
+            
+            # Spawn sensors
             sensors = ego_object.get("sensors", [])
-            if not sensors:
-                self.get_logger().warn("No sensors found for the vehicle in JSON.")
-            else:
+            if sensors:
                 self.spawn_sensors(sensors)
 
-            # self.vehicle.set_autopilot(True, self.traffic_manager.get_port())
-            self.traffic_manager.vehicle_percentage_speed_difference(self.vehicle, -1000)
-
+            # Configure autopilot
+            self.traffic_manager.global_percentage_speed_difference(0)
+            self.traffic_manager.auto_lane_change(self.vehicle, False)
+            self.traffic_manager.random_left_lanechange_percentage(self.vehicle, 0)
+            self.traffic_manager.random_right_lanechange_percentage(self.vehicle, 0)
+            self.vehicle.set_autopilot(True, self.traffic_manager.get_port())
+            
+            
         except Exception as e:
-            self.get_logger().error(f"Error parsing JSON or spawning objects: {e}")
+            self.get_logger().error(f"Error spawning vehicle: {e}")
+            import traceback
+            self.get_logger().error(traceback.format_exc())
+    
+    def _on_collision(self, event):
+        """Callback for collision sensor to help debug vehicle disappearances"""
+        collision_type = event.other_actor.type_id if event.other_actor else "unknown"
+        collision_location = event.transform.location
+        
+        self.get_logger().warn(
+            f"COLLISION: vehicle hit {collision_type} at "
+            f"({collision_location.x:.1f}, {collision_location.y:.1f}, {collision_location.z:.1f})"
+        )
 
     def spawn_sensors(self, sensors):
         """
@@ -261,14 +306,49 @@ class SpawnVehicleNode(Node):
         if msg:
             publisher.publish(msg)
 
+    def destroy_actors(self):
+        """
+        Clean up all spawned actors (vehicle and sensors) when node shuts down.
+        """
+        self.get_logger().info("Destroying all spawned actors...")
+        
+        try:
+            # Destroy all sensors first
+            for sensor in self.spawned_sensors:
+                if sensor is not None and sensor.is_alive:
+                    sensor.stop()
+                    sensor.destroy()
+                    self.get_logger().debug(f"Destroyed sensor {sensor.id}")
+            self.spawned_sensors.clear()
+            
+            # Then destroy the vehicle
+            if self.vehicle is not None and self.vehicle.is_alive:
+                # Disable autopilot before destroying
+                try:
+                    self.vehicle.set_autopilot(False)
+                except:
+                    pass
+                    
+                self.vehicle.destroy()
+                self.get_logger().info(f"Destroyed vehicle {self.vehicle.id}")
+                self.vehicle = None
+                
+            self.get_logger().info("All actors destroyed successfully")
+            
+        except Exception as e:
+            self.get_logger().error(f"Error during actor cleanup: {e}")
+            import traceback
+            self.get_logger().error(traceback.format_exc())
+
 def main(args=None):
     rclpy.init(args=args)
     node = SpawnVehicleNode()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
-        pass
+        node.get_logger().info("KeyboardInterrupt received, shutting down...")
     finally:
+        node.destroy_actors()
         node.destroy_node()
         rclpy.shutdown()
 
