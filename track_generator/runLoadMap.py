@@ -55,7 +55,7 @@ def is_out_of_bounds(location, bounds):
 
 def get_map_bounds(world):
     carla_map = world.get_map()
-    waypoints = carla_map.generate_waypoints(2.0)  # Waypoints every 2 meters
+    waypoints = carla_map.generate_waypoints(1.0)
 
     min_x, max_x = float("inf"), float("-inf")
     min_y, max_y = float("inf"), float("-inf")
@@ -97,7 +97,7 @@ def calculate_segment_lengths(centerline):
 def create_xodr_file(
     centerline,
     segment_lengths,
-    lane_width=10.5,
+    lane_width=7.5,
     file_name=TRACK_XODR,
 ):
     """
@@ -120,7 +120,7 @@ def create_xodr_file(
     )
 
     # Calculate total road length
-    total_length = sum(segment_lengths)
+    total_length = sum(segment_lengths) + segment_lengths[0]
 
     # Create a road element
     road = ET.SubElement(
@@ -133,12 +133,15 @@ def create_xodr_file(
             "junction": "-1",
         },
     )
+    link = ET.SubElement(road, "link")
+    ET.SubElement(link, "predecessor", {"elementType": "road", "elementId": "1", "contactPoint": "end"})
+    ET.SubElement(link, "successor", {"elementType": "road", "elementId": "1", "contactPoint": "start"})
 
     # Add plan view with geometry
     plan_view = ET.SubElement(road, "planView")
     s = 0.0  # Cumulative road length
 
-    for i in range(len(centerline) - 1):
+    for i in range(len(centerline)-1):
         x, y, hdg = centerline[i]
         length = segment_lengths[i]
         geometry = ET.SubElement(
@@ -155,14 +158,34 @@ def create_xodr_file(
         ET.SubElement(geometry, "line")
         s += length
 
+    x, y, hdg = centerline[0]
+    ET.SubElement(
+            plan_view,
+            "geometry",
+            {
+                "s": f"{s:.5f}",
+                "x": f"{x:.5f}",
+                "y": f"{y:.5f}",
+                "hdg": f"{hdg:.5f}",
+                "length": f"{segment_lengths[0]:.5f}",
+            },
+        )
+    s += length
+
     # Add lanes
     lanes = ET.SubElement(road, "lanes")
     lane_section = ET.SubElement(lanes, "laneSection", {"s": "0.0"})
 
     left_element = ET.SubElement(lane_section, "left")
     left_lane = ET.SubElement(
-        left_element, "lane", {"id": "1", "type": "driving", "level": "false"}
+        left_element, "lane", {"id": "-1", "type": "driving", "level": "false"}
     )
+    left_link = ET.SubElement(
+        left_lane,
+        "link"
+    )
+    ET.SubElement(left_link, "predecessor", {"id": "-1"})
+    ET.SubElement(left_link, "successor", {"id": "-1"})
     ET.SubElement(
         left_lane,
         "roadMark",
@@ -182,28 +205,6 @@ def create_xodr_file(
 
     center = ET.SubElement(lane_section, "center")
     ET.SubElement(center, "lane", {"id": "0", "type": "none", "level": "false"})
-
-    # right_element = ET.SubElement(lane_section, "right")
-    # right_lane = ET.SubElement(right_element, "lane", {
-    #     "id": "-1",
-    #     "type": "driving",
-    #     "level": "false"
-    # })
-
-    # ET.SubElement(right_lane, "roadMark", {
-    #     "sOffset":"0.0",
-    #     "type":"solid",
-    #     "color":"standard",
-    #     "width":"0.15",
-    #     "laneChange":"none"
-    # })
-    # ET.SubElement(right_lane, "width", {
-    #     "sOffset": "0.0",
-    #     "a": str(lane_width),
-    #     "b": "0.0",
-    #     "c": "0.0",
-    #     "d": "0.0"
-    # })
 
     # Write to file
     tree = ET.ElementTree(opendrive)
@@ -227,7 +228,7 @@ def trackgen():
 
 
 try:
-
+    trackgen()
     client = carla.Client(KFIR, CARLA_SERVER_PORT)
     client.set_timeout(10.0)
     print("Connected to carla: ", client.get_server_version())
@@ -237,13 +238,12 @@ try:
         opendrive_data = f.read()
 
     opendrive_params = carla.OpendriveGenerationParameters(
-        # vertex_distance=2.0,
-        # max_road_length=500.0,
-        wall_height=1.0,
-        # additional_width=20.0,
+        vertex_distance=0.5,
+        max_road_length=25.0,        # Increased from 5.0 for more continuous segments
+        wall_height=0.0,             # No walls to avoid physics issues
+        additional_width=1.0,        # Wider road for better vehicle stability
         smooth_junctions=True,
         enable_mesh_visibility=True,
-        enable_pedestrian_navigation=True,
     )
 
     world = client.generate_opendrive_world(opendrive_data, opendrive_params)

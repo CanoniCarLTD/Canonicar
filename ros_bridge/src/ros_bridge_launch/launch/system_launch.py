@@ -76,8 +76,9 @@ def generate_launch_description():
     )
 
 
+    # Increase delay between map loading and vehicle spawning to ensure map is fully loaded
     delayed_spawn_vehicle = TimerAction(
-        period=5.0,
+        period=5.0, 
         actions=[spawn_vehicle_launch]
     )
     
@@ -91,7 +92,7 @@ def generate_launch_description():
     )
 
     delayed_data_collector = TimerAction(
-        period=5.0,  # Delay to ensure vehicle is spawned first
+        period=7.0,  # Delay to ensure vehicle is spawned first
         actions=[data_collector_node]
     )
 
