@@ -1,21 +1,48 @@
-# strategy: generate
 strategy: generate_and_test
 track:
-  base_track_name: track 
+  base_track_name: track
   mode: RANDOM
-  path_points_density_factor: 1
+  path_points_density_factor: 3
+  difficulty_level: easy  # choose "easy", "normal", or "hard"
   # parameters for voronoi diagram
   n_points: 60
   n_regions: 20
   min_bound: 0.0
-  max_bound: 150.0
+  max_bound: 200.0
   lat_offset: 51.197682
   lon_offset: 5.323411
+  # difficulty adjustments
+  difficulty:
+    easy:
+      n_points: -10
+      n_regions: -1
+      min_bound: -5.0
+      max_bound: -5.0
+      curvature_threshold: -0.10
+      length_start_area: 2.0
+
+    normal:
+      n_points: 0
+      n_regions: 0
+      min_bound: 0.0
+      max_bound: 0.0
+      curvature_threshold: 0.0
+      length_start_area: 0.0
+      
+      
+    hard:
+      n_points: 10
+      n_regions: 1
+      min_bound: 5.0
+      max_bound: 5.0
+      curvature_threshold: 0.05
+      length_start_area: -2.0
+
 
 general:
   n_tracks: 5
   path_planning_timout: 300 
-  overwrite: false
+  overwrite: true
   plot_track: true
   visualise_voronoi: false
   visualise_failed: false

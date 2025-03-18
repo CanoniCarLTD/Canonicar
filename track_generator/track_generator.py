@@ -46,7 +46,7 @@ class TrackGenerator:
         self._path_points_density_factor = path_points_density_factor
 
         # Track parameters
-        self._track_width = 3.0  # [m]
+        self._track_width = 10.0  # [m]
         self._cone_spacing = 5.0  # [m]
         self._length_start_area = 6.0  # [m]
         self._curvature_threshold = 1.0 / 3.75  # [m^-1]
