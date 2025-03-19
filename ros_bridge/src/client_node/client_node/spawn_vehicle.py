@@ -73,25 +73,27 @@ class SpawnVehicleNode(Node):
             self.lap_callback,
             10,
         )
-        
+        self.get_logger().info("Creating start vehicle manager subscription")
         self.start_subscription = self.create_subscription(
             String, "/start_vehicle_manager", self.start_driving, 10  # QoS
         )
-        self.data_collector_ready = False
+        self.data_collector_ready = True
         self.map_loaded = False
 
         self.current_vehicle_index = 0
-        self.spawn_objects_from_config()
 
     def start_driving(self, msg):
         self.get_logger().info(f"Received start signal: {msg.data}")
         if msg.data == "Map is loaded":
+            self.get_logger().info("Map is loaded")
             self.map_loaded = True
         if msg.data == "DataCollector is ready":
+            self.get_logger().info("DataCollector is ready")
             self.data_collector_ready = True
         if self.map_loaded and self.data_collector_ready:
             self.get_logger().info("Starting to drive")
             self.spawn_objects_from_config()
+            self.get_logger().info("Spanwed objects from config")
         self.get_logger().info(
             f"Is map loaded?: {self.map_loaded}, Is data collector ready {self.data_collector_ready}"
         )

@@ -94,12 +94,19 @@ def generate_launch_description():
         period=5.0,  # Delay to ensure vehicle is spawned first
         actions=[data_collector_node]
     )
+    ppo_node = Node(
+        package='ppo_node',
+        executable='ppo_node',
+        name='ppo_node',
+        output='screen'
+    )
 
     ld = LaunchDescription()
     ld.add_action(host_arg)
     ld.add_action(port_arg)
+    ld.add_action(ppo_node)
     ld.add_action(run_load_map_node)
-    ld.add_action(delayed_spawn_vehicle)
+    ld.add_action(spawn_vehicle_launch)
     ld.add_action(delayed_data_collector)
     
     return ld

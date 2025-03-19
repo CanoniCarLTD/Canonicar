@@ -17,9 +17,8 @@ class PPOModelNode(Node):
     def __init__(self):
         super().__init__("ppo_model_node")
 
-        # CHANGE THE TOPIC PATH
         self.data_sub = self.create_subscription(
-            Float32MultiArray, "carla_demo_topic", self.data_callback, 10
+            Float32MultiArray, "/data_to_ppo", self.data_callback, 10
         )
 
         # Action publisher (Steering, Throttle, Brake)
@@ -33,15 +32,15 @@ class PPOModelNode(Node):
     def data_callback(self, msg):
         self.get_logger().info(
             # f"Received image with resolution {msg.width}x{msg.height}"
-            f"Received data: {msg.data}"
+            f"Received data in PPO node: {msg.data}"
         )
-        self.send_to_ppo(msg.data)
+    #     self.send_to_ppo(msg.data)
 
-    def send_to_ppo(self, data):
-        # Send data to PPO model
-        ppoModel = agent.PPOAgent(town="Town10HD", action_std_init=0.4)
-        if ppoModel is not None:
-            print("PPO model is not None")
+    # def send_to_ppo(self, data):
+    #     # Send data to PPO model
+    #     ppoModel = agent.PPOAgent(town="Town10HD", action_std_init=0.4)
+    #     if ppoModel is not None:
+    #         print("PPO model is not None")
 
 
 def main(args=None):
