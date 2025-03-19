@@ -60,21 +60,9 @@ class SpawnVehicleNode(Node):
             "client_node",
             "sensors_config.json",
         )
-
-        self.physics_publisher = self.create_publisher(
-            Float32MultiArray, "/carla/vehicle/physics", 10
-        )
-        self.timer = self.create_timer(0.1, self.publish_vehicle_physics)
+        
         self.control_publisher = self.create_publisher(
             Float32MultiArray, "/carla/vehicle/control", 10
-        )
-        self.timer = self.create_timer(0.1, self.publish_vehicle_control)
-        self.location_publisher = self.create_publisher(
-            Float32MultiArray, "/carla/vehicle/location", 10
-        )
-        self.timer = self.create_timer(0.1, self.publish_vehicle_location)
-        self.vehicle_type_publisher = self.create_publisher(
-            String, "/carla/vehicle/type", 10
         )
 
         self.vehicle = None
@@ -85,71 +73,12 @@ class SpawnVehicleNode(Node):
             self.lap_callback,
             10,
         )
+        
         self.start_subscription = self.create_subscription(
             String, "/start_vehicle_manager", self.start_driving, 10  # QoS
         )
         self.data_collector_ready = False
         self.map_loaded = False
-
-        self.vehicle_types = [
-            "vehicle.toyota.prius",
-            "vehicle.yamaha.yzf",
-            "vehicle.carlamotors.carlacola",
-            "vehicle.mini.cooper_s_2021",
-            "vehicle.mercedes.sprinter",
-            "vehicle.ford.ambulance",
-            "vehicle.kawasaki.ninja",
-            "vehicle.carlamotors.firetruck",
-            "vehicle.ford.mustang",
-            "vehicle.volkswagen.t2_2021",
-            "vehicle.vespa.zx125",
-            "vehicle.lincoln.mkz_2020",
-            "vehicle.harley-davidson.low_rider",
-            "vehicle.audi.tt",
-            "vehicle.dodge.charger_2020",
-            "vehicle.nissan.patrol_2021",
-            "vehicle.tesla.cybertruck",
-        ]
-
-        # self.vehicle_types = [
-        #     "vehicle.audi.a2",
-        #     "vehicle.citroen.c3",
-        #     "vehicle.micro.microlino",
-        #     "vehicle.dodge.charger_police",
-        #     "vehicle.audi.tt",
-        #     "vehicle.jeep.wrangler_rubicon",
-        #     "vehicle.mercedes.coupe",
-        #     "vehicle.mercedes.coupe_2020",
-        #     "vehicle.harley-davidson.low_rider",
-        #     "vehicle.dodge.charger_2020",
-        #     "vehicle.ford.ambulance",
-        #     "vehicle.lincoln.mkz_2020",
-        #     "vehicle.mini.cooper_s_2021",
-        #     "vehicle.toyota.prius",
-        #     "vehicle.ford.crown",
-        #     "vehicle.carlamotors.carlacola",
-        #     "vehicle.vespa.zx125",
-        #     "vehicle.nissan.patrol_2021",
-        #     "vehicle.dodge.charger_police_2020",
-        #     "vehicle.mercedes.sprinter",
-        #     "vehicle.audi.etron",
-        #     "vehicle.seat.leon",
-        #     "vehicle.volkswagen.t2_2021",
-        #     "vehicle.tesla.cybertruck",
-        #     "vehicle.lincoln.mkz_2017",
-        #     "vehicle.ford.mustang",
-        #     "vehicle.carlamotors.firetruck",
-        #     "vehicle.volkswagen.t2",
-        #     "vehicle.diamondback.century",
-        #     "vehicle.gazelle.omafiets",
-        #     "vehicle.bmw.grandtourer",
-        #     "vehicle.bh.crossbike",
-        #     "vehicle.kawasaki.ninja",
-        #     "vehicle.yamaha.yzf",
-        #     "vehicle.nissan.patrol",
-        #     "vehicle.nissan.micra",
-        #     "vehicle.mini.cooper_s"
-        #     ]
 
         self.current_vehicle_index = 0
         self.spawn_objects_from_config()
@@ -176,13 +105,6 @@ class SpawnVehicleNode(Node):
             self.vehicle_types
         )
 
-    def publish_vehicle_location(self):
-        if self.vehicle is not None and self.vehicle.is_alive:
-            location = self.vehicle.get_location()
-            msg = Float32MultiArray()
-            msg.data = [location.x, location.y, location.z]
-            self.location_publisher.publish(msg)
-
     def publish_vehicle_control(self):
         if self.vehicle is not None and self.vehicle.is_alive:
             control = self.vehicle.get_control()
@@ -190,13 +112,6 @@ class SpawnVehicleNode(Node):
             msg.data = [control.throttle, control.steer, control.brake]
             self.control_publisher.publish(msg)
 
-    def publish_vehicle_physics(self):
-        if self.vehicle is not None and self.vehicle.is_alive:
-            physics_control = self.vehicle.get_physics_control()
-
-            msg = Float32MultiArray()
-            msg.data = [physics_control.mass, physics_control.drag_coefficient]
-            self.physics_publisher.publish(msg)
 
     def spawn_objects_from_config(self):
 
@@ -287,15 +202,11 @@ class SpawnVehicleNode(Node):
             if sensors:
                 self.spawn_sensors(sensors)
 
-            self.traffic_manager.global_percentage_speed_difference(0)
-            self.traffic_manager.auto_lane_change(self.vehicle, False)
-            self.traffic_manager.random_left_lanechange_percentage(self.vehicle, 0)
-            self.traffic_manager.random_right_lanechange_percentage(self.vehicle, 0)
-            self.vehicle.set_autopilot(True, self.traffic_manager.get_port())
-
-            request_msg = String()
-            request_msg.data = self.vehicle_type
-            self.vehicle_type_publisher.publish(request_msg)
+            # self.traffic_manager.global_percentage_speed_difference(0)
+            # self.traffic_manager.auto_lane_change(self.vehicle, False)
+            # self.traffic_manager.random_left_lanechange_percentage(self.vehicle, 0)
+            # self.traffic_manager.random_right_lanechange_percentage(self.vehicle, 0)
+            # self.vehicle.set_autopilot(True, self.traffic_manager.get_port())
 
         except Exception as e:
             self.get_logger().error(f"Error spawning vehicle: {e}")
