@@ -133,6 +133,18 @@ def create_xodr_file(
             "junction": "-1",
         },
     )
+    	
+    link = ET.SubElement(road, "link")
+    ET.SubElement(
+        link,
+        "predecessor",
+        {"elementType": "road", "elementId": "1", "contactPoint": "end"},
+    )
+    ET.SubElement(
+        link,
+        "successor",
+        {"elementType": "road", "elementId": "1", "contactPoint": "start"},
+    )
 
     # Add plan view with geometry
     plan_view = ET.SubElement(road, "planView")
@@ -161,8 +173,11 @@ def create_xodr_file(
 
     left_element = ET.SubElement(lane_section, "left")
     left_lane = ET.SubElement(
-        left_element, "lane", {"id": "1", "type": "driving", "level": "false"}
+        left_element, "lane", {"id": "-1", "type": "driving", "level": "false"}
     )
+    left_link = ET.SubElement(left_lane, "link")
+    ET.SubElement(left_link, "predecessor", {"id": "-1"})
+    ET.SubElement(left_link, "successor", {"id": "-1"})
     ET.SubElement(
         left_lane,
         "roadMark",
@@ -227,8 +242,8 @@ def trackgen():
 
 
 try:
-
-    client = carla.Client(KFIR, CARLA_SERVER_PORT)
+    trackgen()
+    client = carla.Client(ETAI, CARLA_SERVER_PORT)
     client.set_timeout(10.0)
     print("Connected to carla: ", client.get_server_version())
     print(f"Loading track: {TRACK_LINE}")

@@ -28,7 +28,7 @@ class CustomActivation(nn.Module):
         x[:, 0] = torch.tanh(x[:, 0])  # Steer: [-1, 1]
         x[:, 1] = torch.sigmoid(x[:, 1])  # gas: [0, 1]
         x[:, 2] = torch.sigmoid(x[:, 2])  # Brake: [0, 1]
-        return x
+        return x.detach().numpy().flatten()
 
 
 class ActorCritic(nn.Module):

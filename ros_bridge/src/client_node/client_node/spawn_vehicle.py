@@ -3,15 +3,17 @@ from rclpy.node import Node
 import carla
 from carla import Client, Transform, Location, Rotation, TrafficManager
 import json
-import dotenv
 import os
+from std_msgs.msg import Float32MultiArray
 from ament_index_python.packages import get_package_share_directory
+import time
+from std_msgs.msg import String
+from rclpy.qos import QoSProfile, ReliabilityPolicy
 
 # For ROS2 messages
 from sensor_msgs.msg import Image, PointCloud2, Imu, NavSatFix
 from std_msgs.msg import Header
 
-import numpy as np
 
 # Import conversion functions from sensors_data
 from sensors_data import (
@@ -21,18 +23,25 @@ from sensors_data import (
     carla_gnss_to_ros_navsatfix,
 )
 
+
 class SpawnVehicleNode(Node):
     def __init__(self):
-        super().__init__('spawn_vehicle_node')
+        super().__init__("spawn_vehicle_node")
 
-        self.declare_parameter('host', '')
-        self.declare_parameter('port', 2000)
+        self.declare_parameter("host", "")
+        self.declare_parameter("port", 2000)
+        self.declare_parameter("vehicle_type", "vehicle.tesla.model3")
 
-        self.host = self.get_parameter('host').value
-        self.port = self.get_parameter('port').value
+        self.host = self.get_parameter("host").value
+        self.port = self.get_parameter("port").value
+        self.vehicle_type = self.get_parameter("vehicle_type").value
+
+        self.get_logger().info(
+            f"Connecting to CARLA server at {self.host}:{self.port} with vehicle {self.vehicle_type}"
+        )
 
         try:
-            self.client = Client(self.host, self.port)
+            self.client = Client(self.host, 2000)
             self.client.set_timeout(10.0)
             self.world = self.client.get_world()
             settings = self.world.get_settings()
@@ -47,21 +56,158 @@ class SpawnVehicleNode(Node):
         self.sensors_publishers = {}
 
         self.sensor_config_file = os.path.join(
-            get_package_share_directory('client_node'), 'client_node', 'sensors_config.json'
+            get_package_share_directory("client_node"),
+            "client_node",
+            "sensors_config.json",
         )
+
+        self.physics_publisher = self.create_publisher(
+            Float32MultiArray, "/carla/vehicle/physics", 10
+        )
+        self.timer = self.create_timer(0.1, self.publish_vehicle_physics)
+        self.control_publisher = self.create_publisher(
+            Float32MultiArray, "/carla/vehicle/control", 10
+        )
+        self.timer = self.create_timer(0.1, self.publish_vehicle_control)
+        self.location_publisher = self.create_publisher(
+            Float32MultiArray, "/carla/vehicle/location", 10
+        )
+        self.timer = self.create_timer(0.1, self.publish_vehicle_location)
+        self.vehicle_type_publisher = self.create_publisher(
+            String, "/carla/vehicle/type", 10
+        )
+
         self.vehicle = None
+
+        self.lap_subscription = self.create_subscription(
+            String,
+            "/lap_completed",
+            self.lap_callback,
+            10,
+        )
+        self.start_subscription = self.create_subscription(
+            String, "/start_vehicle_manager", self.start_driving, 10  # QoS
+        )
+        self.data_collector_ready = False
+        self.map_loaded = False
+
+        self.vehicle_types = [
+            "vehicle.toyota.prius",
+            "vehicle.yamaha.yzf",
+            "vehicle.carlamotors.carlacola",
+            "vehicle.mini.cooper_s_2021",
+            "vehicle.mercedes.sprinter",
+            "vehicle.ford.ambulance",
+            "vehicle.kawasaki.ninja",
+            "vehicle.carlamotors.firetruck",
+            "vehicle.ford.mustang",
+            "vehicle.volkswagen.t2_2021",
+            "vehicle.vespa.zx125",
+            "vehicle.lincoln.mkz_2020",
+            "vehicle.harley-davidson.low_rider",
+            "vehicle.audi.tt",
+            "vehicle.dodge.charger_2020",
+            "vehicle.nissan.patrol_2021",
+            "vehicle.tesla.cybertruck",
+        ]
+
+        # self.vehicle_types = [
+        #     "vehicle.audi.a2",
+        #     "vehicle.citroen.c3",
+        #     "vehicle.micro.microlino",
+        #     "vehicle.dodge.charger_police",
+        #     "vehicle.audi.tt",
+        #     "vehicle.jeep.wrangler_rubicon",
+        #     "vehicle.mercedes.coupe",
+        #     "vehicle.mercedes.coupe_2020",
+        #     "vehicle.harley-davidson.low_rider",
+        #     "vehicle.dodge.charger_2020",
+        #     "vehicle.ford.ambulance",
+        #     "vehicle.lincoln.mkz_2020",
+        #     "vehicle.mini.cooper_s_2021",
+        #     "vehicle.toyota.prius",
+        #     "vehicle.ford.crown",
+        #     "vehicle.carlamotors.carlacola",
+        #     "vehicle.vespa.zx125",
+        #     "vehicle.nissan.patrol_2021",
+        #     "vehicle.dodge.charger_police_2020",
+        #     "vehicle.mercedes.sprinter",
+        #     "vehicle.audi.etron",
+        #     "vehicle.seat.leon",
+        #     "vehicle.volkswagen.t2_2021",
+        #     "vehicle.tesla.cybertruck",
+        #     "vehicle.lincoln.mkz_2017",
+        #     "vehicle.ford.mustang",
+        #     "vehicle.carlamotors.firetruck",
+        #     "vehicle.volkswagen.t2",
+        #     "vehicle.diamondback.century",
+        #     "vehicle.gazelle.omafiets",
+        #     "vehicle.bmw.grandtourer",
+        #     "vehicle.bh.crossbike",
+        #     "vehicle.kawasaki.ninja",
+        #     "vehicle.yamaha.yzf",
+        #     "vehicle.nissan.patrol",
+        #     "vehicle.nissan.micra",
+        #     "vehicle.mini.cooper_s"
+        #     ]
+
+        self.current_vehicle_index = 0
         self.spawn_objects_from_config()
 
+    def start_driving(self, msg):
+        self.get_logger().info(f"Received start signal: {msg.data}")
+        if msg.data == "Map is loaded":
+            self.map_loaded = True
+        if msg.data == "DataCollector is ready":
+            self.data_collector_ready = True
+        if self.map_loaded and self.data_collector_ready:
+            self.get_logger().info("Starting to drive")
+            self.spawn_objects_from_config()
+        self.get_logger().info(
+            f"Is map loaded?: {self.map_loaded}, Is data collector ready {self.data_collector_ready}"
+        )
+
+    def lap_callback(self, msg):
+        self.data_collector_ready = False
+        self.get_logger().info(f"Lap completed! Destroy vehicle {self.vehicle_type}")
+        self.destroy_actors()
+        self.vehicle_type = self.vehicle_types[self.current_vehicle_index]
+        self.current_vehicle_index = (self.current_vehicle_index + 1) % len(
+            self.vehicle_types
+        )
+
+    def publish_vehicle_location(self):
+        if self.vehicle is not None and self.vehicle.is_alive:
+            location = self.vehicle.get_location()
+            msg = Float32MultiArray()
+            msg.data = [location.x, location.y, location.z]
+            self.location_publisher.publish(msg)
+
+    def publish_vehicle_control(self):
+        if self.vehicle is not None and self.vehicle.is_alive:
+            control = self.vehicle.get_control()
+            msg = Float32MultiArray()
+            msg.data = [control.throttle, control.steer, control.brake]
+            self.control_publisher.publish(msg)
+
+    def publish_vehicle_physics(self):
+        if self.vehicle is not None and self.vehicle.is_alive:
+            physics_control = self.vehicle.get_physics_control()
+
+            msg = Float32MultiArray()
+            msg.data = [physics_control.mass, physics_control.drag_coefficient]
+            self.physics_publisher.publish(msg)
+
     def spawn_objects_from_config(self):
-        """
-        Reads the 'objects' array from sensors_config.json
-        Spawns the first 'vehicle.*' it finds using the JSON's spawn_point
-        Then spawns sensors attached to that vehicle.
-        """
+
+        self.get_logger().info("Waiting for map to fully load...")
+        time.sleep(2.0)
+        self.get_logger().info("Spawning vehicle type " + self.vehicle_type)
+
         try:
-            with open(self.sensor_config_file, 'r') as f:
+            with open(self.sensor_config_file, "r") as f:
                 config = json.load(f)
-                self.get_logger().info("Loaded JSON config from sensors_config.json")
+                self.get_logger().info("Loaded JSON config")
 
             objects = config.get("objects", [])
             if not objects:
@@ -69,57 +215,103 @@ class SpawnVehicleNode(Node):
                 return
 
             ego_object = objects[0]
-            vehicle_type = ego_object.get("type", "")
+            vehicle_type = self.vehicle_type
             if not vehicle_type.startswith("vehicle."):
                 self.get_logger().error("No valid vehicle object found in JSON.")
                 return
 
             blueprint_library = self.world.get_blueprint_library()
             vehicle_bp = blueprint_library.find(vehicle_type)
-            if not vehicle_bp:
-                self.get_logger().error(f"Vehicle blueprint '{vehicle_type}' not found in CARLA.")
+
+            carla_map = self.world.get_map()
+            waypoints = carla_map.generate_waypoints(2.0)
+
+            road_ids = set(wp.road_id for wp in waypoints)
+            if len(road_ids) == 0:
+                self.get_logger().error("No roads found in the map!")
                 return
-            self.get_logger().info(f"Found vehicle blueprint '{vehicle_type}'")
 
-            vehicle_id = ego_object.get("id", "ego_vehicle")
-            self.get_logger().info(f"Setting role_name to '{vehicle_id}'")
+            main_road_id = list(road_ids)[0] if len(road_ids) == 1 else min(road_ids)
 
-            spawn_point_data = ego_object.get("spawn_point", {})
-            self.get_logger().info(f"Found spawn point data: {spawn_point_data}")
-            vehicle_transform = Transform(
-                Location(
-                    x=spawn_point_data.get("x", 0.0),
-                    y=spawn_point_data.get("y", 0.0),
-                    z=spawn_point_data.get("z", 0.0),
-                ),
-                Rotation(
-                    roll=spawn_point_data.get("roll", 0.0),
-                    pitch=spawn_point_data.get("pitch", 0.0),
-                    yaw=spawn_point_data.get("yaw", 0.0),
-                ),
+            lane_ids = set(wp.lane_id for wp in waypoints if wp.road_id == main_road_id)
+            driving_lane_id = next(
+                (id for id in lane_ids if id < 0),
+                next((id for id in lane_ids if id > 0), 0),
             )
-            self.get_logger().info(f"Spawning vehicle '{vehicle_id}' at {vehicle_transform}")
 
-            self.vehicle = self.world.try_spawn_actor(vehicle_bp, vehicle_transform)
-            if self.vehicle:
-                self.get_logger().info(
-                    f"Spawned vehicle '{vehicle_id}' with ID={self.vehicle.id} at {vehicle_transform}"
-                )
-            else:
-                self.get_logger().error("Failed to spawn the vehicle. Check collisions or map issues.")
+            if driving_lane_id == 0:
+                self.get_logger().error("No valid driving lane found!")
                 return
 
+            road_waypoints = [
+                wp
+                for wp in waypoints
+                if wp.road_id == main_road_id and wp.lane_id == driving_lane_id
+            ]
+            if not road_waypoints:
+                self.get_logger().error(
+                    "No waypoints found for the selected road/lane!"
+                )
+                return
+
+            road_waypoints.sort(key=lambda wp: wp.s)
+
+            spawn_waypoint = road_waypoints[3]
+            self.get_logger().info(
+                f"Using waypoint at s={spawn_waypoint.s:.1f} for spawn"
+            )
+
+            spawn_transform = spawn_waypoint.transform
+            spawn_transform.location.z += 0.3
+
+            self.vehicle = self.world.try_spawn_actor(vehicle_bp, spawn_transform)
+            if not self.vehicle:
+                self.get_logger().error("Failed to spawn at waypoint")
+                return
+
+            location = self.vehicle.get_location()
+            self.get_logger().info(f"Spawned vehicle at {location}")
+
+            collision_bp = blueprint_library.find("sensor.other.collision")
+            if collision_bp:
+                collision_sensor = self.world.spawn_actor(
+                    collision_bp, carla.Transform(), attach_to=self.vehicle
+                )
+                collision_sensor.listen(lambda event: self._on_collision(event))
+                self.spawned_sensors.append(collision_sensor)
+
+            physics_control = self.vehicle.get_physics_control()
+            physics_control.mass = physics_control.mass * 1.5
+            self.vehicle.apply_physics_control(physics_control)
             sensors = ego_object.get("sensors", [])
-            if not sensors:
-                self.get_logger().warn("No sensors found for the vehicle in JSON.")
-            else:
+            if sensors:
                 self.spawn_sensors(sensors)
 
-            # self.vehicle.set_autopilot(True, self.traffic_manager.get_port())
-            self.traffic_manager.vehicle_percentage_speed_difference(self.vehicle, -1000)
+            self.traffic_manager.global_percentage_speed_difference(0)
+            self.traffic_manager.auto_lane_change(self.vehicle, False)
+            self.traffic_manager.random_left_lanechange_percentage(self.vehicle, 0)
+            self.traffic_manager.random_right_lanechange_percentage(self.vehicle, 0)
+            self.vehicle.set_autopilot(True, self.traffic_manager.get_port())
+
+            request_msg = String()
+            request_msg.data = self.vehicle_type
+            self.vehicle_type_publisher.publish(request_msg)
 
         except Exception as e:
-            self.get_logger().error(f"Error parsing JSON or spawning objects: {e}")
+            self.get_logger().error(f"Error spawning vehicle: {e}")
+            import traceback
+
+            self.get_logger().error(traceback.format_exc())
+
+    def _on_collision(self, event):
+        """Callback for collision sensor to help debug vehicle disappearances"""
+        collision_type = event.other_actor.type_id if event.other_actor else "unknown"
+        collision_location = event.transform.location
+
+        self.get_logger().warn(
+            f"COLLISION: vehicle hit {collision_type} at "
+            f"({collision_location.x:.1f}, {collision_location.y:.1f}, {collision_location.z:.1f})"
+        )
 
     def spawn_sensors(self, sensors):
         """
@@ -141,7 +333,9 @@ class SpawnVehicleNode(Node):
 
                 sensor_bp = blueprint_library.find(sensor_type)
                 if not sensor_bp:
-                    self.get_logger().error(f"Sensor blueprint '{sensor_type}' not found. Skipping.")
+                    self.get_logger().error(
+                        f"Sensor blueprint '{sensor_type}' not found. Skipping."
+                    )
                     continue
 
                 for attribute, value in sensor_def.items():
@@ -173,17 +367,22 @@ class SpawnVehicleNode(Node):
                     ),
                 )
 
-                sensor_actor = self.world.try_spawn_actor(sensor_bp, spawn_transform, attach_to=self.vehicle)
+                sensor_actor = self.world.try_spawn_actor(
+                    sensor_bp, spawn_transform, attach_to=self.vehicle
+                )
                 if sensor_actor is None:
                     self.get_logger().error(f"Failed to spawn sensor '{sensor_id}'.")
                     continue
                 else:
                     self.spawned_sensors.append(sensor_actor)
 
-                self.get_logger().info(f"Spawned sensor '{sensor_id}' ({sensor_type}) at {spawn_transform}")
+                self.get_logger().info(
+                    f"Spawned sensor '{sensor_id}' ({sensor_type}) at {spawn_transform}"
+                )
 
-                # Create a ROS2 publisher for this sensor
-                topic_name, msg_type = self.get_ros_topic_and_type(sensor_type, sensor_id)
+                topic_name, msg_type = self.get_ros_topic_and_type(
+                    sensor_type, sensor_id
+                )
                 if topic_name and msg_type:
                     publisher = self.create_publisher(msg_type, topic_name, 10)
                     self.sensors_publishers[sensor_actor.id] = {
@@ -193,9 +392,7 @@ class SpawnVehicleNode(Node):
                         "msg_type": msg_type,
                     }
 
-                    # Attach a listener callback to the CARLA sensor
                     def debug_listener(data, actor_id=sensor_actor.id):
-                        # self.get_logger().debug(f"Received data from sensor {actor_id}")
                         self.sensor_data_callback(actor_id, data)
 
                     sensor_actor.listen(debug_listener)
@@ -204,11 +401,11 @@ class SpawnVehicleNode(Node):
                         f"No recognized ROS message type for sensor '{sensor_type}'. Not publishing."
                     )
 
-                # Handle attached pseudo-actors if any
                 attached_objects = sensor_def.get("attached_objects", [])
                 for ao in attached_objects:
-                    self.get_logger().info(f"Detected attached object (pseudo) {ao['type']} with id '{ao['id']}'")
-                    # Implement handling of attached objects if necessary.
+                    self.get_logger().info(
+                        f"Detected attached object (pseudo) {ao['type']} with id '{ao['id']}'"
+                    )
 
             except Exception as e:
                 self.get_logger().error(f"Error spawning sensor '{sensor_def}': {e}")
@@ -241,10 +438,9 @@ class SpawnVehicleNode(Node):
         publisher = pub_info["publisher"]
         msg_type = pub_info["msg_type"]
 
-        # Create a header for the message
         header = Header()
         header.stamp = self.get_clock().now().to_msg()
-        header.frame_id = pub_info["sensor_id"] 
+        header.frame_id = pub_info["sensor_id"]
 
         # Convert CARLA data to ROS message using sensors_data module
         if sensor_type.startswith("sensor.camera"):
@@ -261,16 +457,54 @@ class SpawnVehicleNode(Node):
         if msg:
             publisher.publish(msg)
 
+    def destroy_actors(self):
+        """
+        Clean up all spawned actors (vehicle and sensors) when node shuts down.
+        """
+        self.get_logger().info("Destroying all spawned actors...")
+
+        try:
+            # Destroy all sensors first
+            for sensor in self.spawned_sensors:
+                if sensor is not None and sensor.is_alive:
+                    sensor.stop()
+                    sensor.destroy()
+                    self.get_logger().debug(f"Destroyed sensor {sensor.id}")
+            self.spawned_sensors.clear()
+
+            # Then destroy the vehicle
+            if self.vehicle is not None and self.vehicle.is_alive:
+                # Disable autopilot before destroying
+                try:
+                    self.vehicle.set_autopilot(False)
+                except:
+                    pass
+
+                self.vehicle.destroy()
+                self.get_logger().info(f"Destroyed vehicle {self.vehicle.id}")
+                self.vehicle = None
+
+            self.get_logger().info("All actors destroyed successfully")
+
+        except Exception as e:
+            self.get_logger().error(f"Error during actor cleanup: {e}")
+            import traceback
+
+            self.get_logger().error(traceback.format_exc())
+
+
 def main(args=None):
     rclpy.init(args=args)
     node = SpawnVehicleNode()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
-        pass
+        node.get_logger().info("KeyboardInterrupt received, shutting down...")
     finally:
+        node.destroy_actors()
         node.destroy_node()
         rclpy.shutdown()
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()

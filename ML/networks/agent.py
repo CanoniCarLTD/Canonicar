@@ -5,7 +5,7 @@ import torch
 import torch.nn as nn
 
 # from ML.encoder_init import EncodeState
-from networks.on_policy.ppo.ppo import ActorCritic
+from ML.networks.ppo import ActorCritic
 from parameters import *
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -32,7 +32,7 @@ class PPOAgent(object):
     def __init__(self, town, action_std_init=0.4):
         # self.env = env
         """Will be changed as for how the output of convolution will look like + 3"""
-        self.obs_dim = 100
+        self.obs_dim = OBS_DIM
         self.action_dim = 3  # STEER, THROTTLE, BRAKE.
         self.clip = POLICY_CLIP
         self.gamma = GAMMA
@@ -43,7 +43,7 @@ class PPOAgent(object):
         self.encode = EncodeState(LATENT_DIM)
         """
         self.memory = Buffer()
-        self.town = town
+        self.town = town  # Fix to use generated track
 
         self.checkpoint_file_no = 0
 
