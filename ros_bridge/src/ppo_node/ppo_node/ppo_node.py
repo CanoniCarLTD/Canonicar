@@ -18,14 +18,14 @@ class PPOModelNode(Node):
         
         # CHANGE THE TOPIC PATH
         self.data_sub = self.create_subscription(
-            Float32MultiArray, "carla_demo_topic", self.data_callback, 100
+            Float32MultiArray, "carla_demo_topic", self.data_callback, 10
             #Float32MultiArray, "/carla/###/###", self.data_callback, 10
         )
 
         # Action publisher (Steering, Throttle, Brake)
         # CHANGE THE TOPIC PATH
         self.action_publisher = self.create_publisher(
-            Float32MultiArray, "/carla/vehicle_control", 100
+            Float32MultiArray, "/carla/vehicle_control", 10
         )
         
         self.get_logger().info("PPOModelNode initialized and subscribed to data topic.")

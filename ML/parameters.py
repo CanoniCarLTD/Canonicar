@@ -14,19 +14,19 @@ MEMORY_SIZE = 5000
 EPISODES = 1000
 
 # VAE Bottleneck
-LATENT_DIM = 95
+LATENT_DIM = 95 # CHANGE WITH ACCORDANCE TO OUR MODEL (ETAI)
 
 # NEED TO ADD FOR THE CONVOLUTION
 
 # Dueling DQN (hyper)parameters
-DQN_LEARNING_RATE = 0.0001
-EPSILON = 1.00
-EPSILON_END = 0.05
-EPSILON_DECREMENT = 0.00001
+# DQN_LEARNING_RATE = 0.0001
+# EPSILON = 1.00
+# EPSILON_END = 0.05
+# EPSILON_DECREMENT = 0.00001
 
-REPLACE_NETWORK = 5
-MODEL_ONLINE = "carla_dueling_dqn_online.pth"
-MODEL_TARGET = "carla_dueling_dqn_target.pth"
+# REPLACE_NETWORK = 5
+# MODEL_ONLINE = "carla_dueling_dqn_online.pth"
+# MODEL_TARGET = "carla_dueling_dqn_target.pth"
 
 
 # Proximal Policy Optimization (hyper)parameters
@@ -35,6 +35,7 @@ TOTAL_TIMESTEPS = 2e6
 ACTION_STD_INIT = 0.2
 TEST_TIMESTEPS = 5e4
 PPO_LEARNING_RATE = 1e-4
-PPO_CHECKPOINT_DIR = "preTrained_models/ppo/"
+PPO_CHECKPOINT_DIR = "preTrained_PPO_models/"
 POLICY_CLIP = 0.2
 OBS_DIM = 100
+
