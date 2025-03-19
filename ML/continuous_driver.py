@@ -136,13 +136,9 @@ class ContinuousDriver:
             "--train", default=True, action="store_true", help="is it training?"
         )
 
+        # Will replace the above line with the following line
         parser.add_argument(
-            "--town", type=str, default="Town07", help="which town do we load?"
-        )
-
-        # To replace the above line with the following line
-        parser.add_argument(
-            "--track", type=str, default="Town07", help="which track are we on?"
+            "--track", type=str, default="", help="which track are we on?"
         )
 
         parser.add_argument(
