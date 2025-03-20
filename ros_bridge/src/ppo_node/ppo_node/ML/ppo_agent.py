@@ -185,6 +185,7 @@ class PPOAgent:
         state = torch.tensor(state, dtype=torch.float32).to(device).unsqueeze(0)
         with torch.no_grad():
             action, log_prob = self.actor.sample_action(state)
+        print(f"Steering: {action[0]}, Throttle: {action[1]}, Brake: {action[2]}")
         return action.cpu().numpy()[0], log_prob
 
     def store_transition(self, state, action, prob, val, reward, done):

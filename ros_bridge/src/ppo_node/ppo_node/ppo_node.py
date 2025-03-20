@@ -41,7 +41,7 @@ class PPOModelNode(Node):
         self.publish_action()
 
     def get_action(self, data):
-        self.action = self.ppo_agent.select_action(data)
+        self.action, _ = self.ppo_agent.select_action(data)
 
     def publish_action(self):
         action_msg = Float32MultiArray()
