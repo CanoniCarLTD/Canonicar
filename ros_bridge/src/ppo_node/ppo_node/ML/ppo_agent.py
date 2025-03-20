@@ -18,7 +18,7 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 
 class ActorNetwork(nn.Module):
-    def __init__(self, input_dim, action_dim, action_std_init):
+    def __init__(self, input_dim, action_dim, action_std_init):  # Reordered arguments
         super(ActorNetwork, self).__init__()
         self.action_dim = action_dim
         self.action_var = torch.full(
@@ -63,7 +63,7 @@ class ActorNetwork(nn.Module):
     def sample_action(self, state):
         dist = self.get_dist(state)
         action = dist.sample()
-        action_logprob = dist.log_prob(action).sum(dim=1, keepdim=True)
+        action_logprob = dist.log_prob(action).sum(dim=-1, keepdim=True)
 
         # Clamp actions to appropriate ranges
         action_np = action.detach().cpu().numpy()
@@ -147,8 +147,11 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 class PPOAgent:
     def __init__(self, input_dim=203, action_dim=3):
         self.input_dim = input_dim if PPO_INPUT_DIM is None else PPO_INPUT_DIM
+        print(f"Action input dimension: {self.input_dim}")
         self.action_dim = action_dim
+        print(f"Action output dimension: {self.action_dim}")
         self.action_std = ACTION_STD_INIT
+        print(f"Action std init: {self.action_std}")
 
         # Initialize actor and critic networks
         self.actor = ActorNetwork(self.input_dim, action_dim, self.action_std).to(
@@ -183,9 +186,14 @@ class PPOAgent:
     def select_action(self, state):
         """Select an action and return its log probability."""
         state = torch.tensor(state, dtype=torch.float32).to(device).unsqueeze(0)
+        
+        # Check if the input dimension matches the expected input dimension
+        if state.shape[1] != self.input_dim:
+            raise ValueError(f"Expected input dimension {self.input_dim}, but got {state.shape[1]}")
+        
         with torch.no_grad():
             action, log_prob = self.actor.sample_action(state)
-        print(f"Steering: {action[0]}, Throttle: {action[1]}, Brake: {action[2]}")
+        print(f"\n\nSteering: {action[0][0]}, Throttle: {action[0][1]}, Brake: {action[0][2]}\n\n")
         return action.cpu().numpy()[0], log_prob
 
     def store_transition(self, state, action, prob, val, reward, done):

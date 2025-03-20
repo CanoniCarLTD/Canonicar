@@ -12,7 +12,7 @@ import os
 
 from .ML import ppo_agent
 from .ML import parameters
-
+from .ML.parameters import *
 
 class PPOModelNode(Node):
     def __init__(self):
@@ -32,8 +32,8 @@ class PPOModelNode(Node):
         self.get_logger().info(
             "PPOModelNode initialized,subscribed to data topic and PPO model loaded."
         )
-        self.get_logger().info(f"Model version: {parameters.VERSION}")
-        self.get_logger().info(f"Checkpoint directory: {parameters.PPO_CHECKPOINT_DIR}")
+        self.get_logger().info(f"Model version: {VERSION}")
+        self.get_logger().info(f"Checkpoint directory: {PPO_CHECKPOINT_DIR}")
 
     def data_callback(self, msg):
         self.get_logger().info(f"Received data in PPO node: {msg.data}")
