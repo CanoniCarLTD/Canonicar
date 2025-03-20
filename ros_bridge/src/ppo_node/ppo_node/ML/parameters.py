@@ -1,7 +1,5 @@
 """
-
-    All the hyper-parameters needed for the algorithm implementation. 
-
+All the hyper-parameters needed for the PPO algorithm implementation.
 """
 
 # Directory and version control for checkpoint saving and loading
@@ -11,24 +9,31 @@ VERSION = "1.0.0"
 MODEL_LOAD = False  # Set to True to resume training from checkpoint
 CHECKPOINT_FILE = None  # Specify file when MODEL_LOAD=True
 
+# Training configuration
 SEED = 0
-BATCH_SIZE = 64 # The number of timesteps collected before the model performs a single policy update.
-GAMMA = 0.99
+BATCH_SIZE = 64  # Number of timesteps collected before a policy update
+NUM_EPOCHS = 10  # PPO update epochs per batch (Best practice: 3-10)
 EPISODES = 1000
 
-PPO_INPUT_DIM = None # Can be dynamic using data colletor node
+# PPO-specific hyperparameters
+PPO_INPUT_DIM = 203  # Can be dynamically set using the Data Collector Node
+EPISODE_LENGTH = 7500  # Maximum timesteps per episode
+TOTAL_TIMESTEPS = 2e6  # Total number of timesteps for training
 
-# PPO hyper parameters
+# Discount Factor
+GAMMA = 0.99  # Discount factor for future rewards
 
-EPISODE_LENGTH = 7500 # Maximum number of timesteps the agent can take within a single episode.
-TOTAL_TIMESTEPS = 2e6 # Total number of timesteps allocated for training across ALL episodes
-
+# Exploration settings (action noise)
 ACTION_STD_INIT = 0.2
 ACTION_STD_DECAY_RATE = 0.05
 MIN_ACTION_STD = 0.05
 
-TEST_TIMESTEPS = 5e4
+# PPO optimization parameters
 LEARNING_RATE = 1e-4
 POLICY_CLIP = 0.2
 ENTROPY_COEF = 0.01
-LAMBDA_GAE = 0.95
+LAMBDA_GAE = 0.95  # Generalized Advantage Estimation lambda
+VF_COEF = 0.5  # Weight for value function loss in PPO
+
+# Evaluation settings
+TEST_TIMESTEPS = 5e4  # Number of timesteps before running evaluation tests
