@@ -65,16 +65,18 @@ class PPOModelNode(Node):
         
         # Check if it's time to train the PPO agent
         if self.timestep_counter % BATCH_SIZE == 0:
+            self.get_logger().info("Time to train the PPO agent!")
             self.ppo_agent.learn()
 
         # Check if the episode is done
         if self.done or self.timestep_counter % self.episode_length == 0:
+            self.get_logger().info(f"Episode {self.episode_counter} finished!")
             self.episode_counter += 1
             self.reset_environment()
 
     def get_action(self, data):
         self.action, _ = self.ppo_agent.select_action(data)
-        self.logger.info(f"Retured action: {self.action}")
+        self.get_logger().info(f"Retured action: {self.action}")
 
     def publish_action(self):
         action_msg = Float32MultiArray()

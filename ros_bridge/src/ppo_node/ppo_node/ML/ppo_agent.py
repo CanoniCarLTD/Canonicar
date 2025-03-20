@@ -78,8 +78,8 @@ class ActorNetwork(nn.Module):
 
     def evaluate_actions(self, state, action):
         dist = self.get_dist(state)
-        action_logprobs = dist.log_prob(action).sum(dim=1, keepdim=True)
-        dist_entropy = dist.entropy().sum(dim=1, keepdim=True)
+        action_logprobs = dist.log_prob(action).sum(dim=-1, keepdim=True)
+        dist_entropy = dist.entropy().sum(dim=-1, keepdim=True)
         return action_logprobs, dist_entropy
 
 
