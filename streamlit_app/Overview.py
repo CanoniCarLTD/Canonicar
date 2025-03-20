@@ -1,4 +1,11 @@
 import streamlit as st
+import os
+from dotenv import load_dotenv
+# Load environment variables from .env file
+load_dotenv()
+
+# Get the ETAY_IP from environment variables
+ETAY_IP = os.getenv("ETAY_IP", "localhost")
 
 # Set the title and icon for the app
 st.set_page_config(page_title="Canonicar", page_icon="🚗", layout="wide")
@@ -66,11 +73,11 @@ with main_col:
         if st.button("Open Foxglove", key="foxglove_button",
                      use_container_width=True,
                      type="primary"):
-            st.markdown("""
-            <script>
-            window.open('https://app.foxglove.dev/canonicar/view?ds=foxglove-websocket&ds.url=ws://5.29.228.0:8765&layoutId=lay_0dXyFqtjCo11IIVq', '_blank');
-            </script>
-            """, unsafe_allow_html=True)
+            foxglove_url = f'https://app.foxglove.dev/canonicar/view?ds=foxglove-websocket&ds.url=ws://{ETAY_IP}:8765&layoutId=lay_0dXyFqtjCo11IIVq'
+            st.markdown(f'<a href="{foxglove_url}" target="_blank">Click here if the page did not open automatically</a>', unsafe_allow_html=True)
+            # Use webbrowser to open URL
+            import webbrowser
+            webbrowser.open_new_tab(foxglove_url)
 
     # Add some spacing
     st.markdown("<br>", unsafe_allow_html=True)
