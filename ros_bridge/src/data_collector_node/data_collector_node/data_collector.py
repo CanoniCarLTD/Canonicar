@@ -124,10 +124,8 @@ class DataCollector(Node):
         )
 
     def process_image(self, image_msg):
-        """Process camera image data and extract convolutional features using PyTorch."""
-        raw_image = np.frombuffer(image_msg.data, dtype=np.uint8).reshape(
-            (image_msg.height, image_msg.width, -1)
-        )
+        """Process camera image data and extract convolutional features using PyTorch."""      
+        raw_image = np.frombuffer(image_msg.data, dtype=np.uint8).reshape((image_msg.height, image_msg.width, -1))
         if raw_image.shape[2] == 4:
             raw_image = raw_image[:, :, :3]  # Remove alpha channel if present
 
