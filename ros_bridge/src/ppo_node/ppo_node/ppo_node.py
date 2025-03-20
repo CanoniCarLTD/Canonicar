@@ -7,11 +7,12 @@ import numpy as np
 import sys
 import os
 
-# Fix the path to the ML folder, can't import the agent and ppo files
+# from ML.ppo_agent import PPOAgent
+# from ML.parameters import PPO_CHECKPOINT_DIR, VERSION
 
-# import ML.networks.agent as agent
-# import ML.networks.ppo as ppo
-
+from .ML import ppo_agent
+from .ML import parameters
+from .ML.parameters import *
 
 class PPOModelNode(Node):
     def __init__(self):
@@ -22,31 +23,34 @@ class PPOModelNode(Node):
         )
 
         # Action publisher (Steering, Throttle, Brake)
-        # CHANGE THE TOPIC PATH
         self.action_publisher = self.create_publisher(
             Float32MultiArray, "/carla/vehicle_control", 10
         )
 
-        self.get_logger().info("PPOModelNode initialized and subscribed to data topic.")
+        # Initialize PPO Agent (loads from checkpoint if available)
+        self.ppo_agent = ppo_agent.PPOAgent()
+        self.get_logger().info(
+            "PPOModelNode initialized,subscribed to data topic and PPO model loaded."
+        )
+        self.get_logger().info(f"Model version: {VERSION}")
+        self.get_logger().info(f"Checkpoint directory: {PPO_CHECKPOINT_DIR}")
 
     def data_callback(self, msg):
-        self.get_logger().info(
-            # f"Received image with resolution {msg.width}x{msg.height}"
-            f"Received data in PPO node: {msg.data}"
-        )
-    #     self.send_to_ppo(msg.data)
+        self.get_logger().info(f"Received data in PPO node: {msg.data}")
+        self.get_action(msg.data)
+        self.publish_action()
 
-    # def send_to_ppo(self, data):
-    #     # Send data to PPO model
-    #     ppoModel = agent.PPOAgent(town="Town10HD", action_std_init=0.4)
-    #     if ppoModel is not None:
-    #         print("PPO model is not None")
+    def get_action(self, data):
+        self.action, _ = self.ppo_agent.select_action(data)
+
+    def publish_action(self):
+        action_msg = Float32MultiArray()
+        action_msg.data = self.action.tolist()
+        self.action_publisher.publish(action_msg)
+        self.get_logger().info(f"Published action: {action_msg.data}")
 
 
 def main(args=None):
-    # print(torch.__version__)
-    # print(torch.cuda.is_available())
-    # print(torch.cuda.get_device_name(0))
     rclpy.init(args=args)
     node = PPOModelNode()
     rclpy.spin(node)
