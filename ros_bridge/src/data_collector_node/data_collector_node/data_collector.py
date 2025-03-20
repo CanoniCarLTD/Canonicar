@@ -15,6 +15,8 @@ from ament_index_python.packages import get_package_share_directory
 import torchvision.transforms as transforms
 from torchvision.models import MobileNet_V2_Weights, mobilenet_v2
 from std_msgs.msg import Float32MultiArray, String
+from vision_model.vision_model import VisionProcessor
+
 
 
 class DataCollector(Node):
@@ -31,7 +33,7 @@ class DataCollector(Node):
 
         self.data_buffer = []  # List of dictionaries to store synchronized data
         self.setup_subscribers()
-        self.vision_model = self.initialize_vision_model()
+        self.vision_processor = VisionProcessor(device='cuda')
         self.get_logger().info("DataCollector Node initialized.")
         self.start_vehicle_manager = self.create_publisher(
             String, "/start_vehicle_manager", 10
@@ -86,26 +88,7 @@ class DataCollector(Node):
         self.get_logger().info(f"Synchronizer slop: {self.ats.__dict__}")
         self.get_logger().info("Subscribers set up successfully.")
 
-    def initialize_vision_model(self):
-        """Initialize a convolutional model (e.g., MobileNetV2) to process images using PyTorch."""
-        weights = MobileNet_V2_Weights.IMAGENET1K_V1  # Use latest weight enum
-        model = mobilenet_v2(weights=weights)
-
-        model = nn.Sequential(
-            model.features, nn.AdaptiveAvgPool2d((1, 1)), nn.Flatten()
-        )
-        model.eval()  # Set the model to evaluation mode
-        self.transform = transforms.Compose(
-            [
-                transforms.Resize((224, 224)),
-                transforms.ToTensor(),
-                transforms.Normalize(
-                    mean=weights.transforms().mean, std=weights.transforms().std
-                ),
-            ]
-        )
-        self.get_logger().info("Vision model initialized successfully.")
-        return model
+    
 
     #   lidar_msg, imu_msg, gnss_msg
     def sync_callback(self, image_msg, lidar_msg, imu_msg,  gnss_msg):
@@ -114,57 +97,37 @@ class DataCollector(Node):
         self.data_buffer.append(processed_data)
         self.get_logger().info("Data appended to buffer.")
 
-    def process_data(self,image_msg, lidar_msg, imu_msg, gnss_msg):
+    def process_data(self, image_msg, lidar_msg, imu_msg, gnss_msg):
         self.get_logger().info("Processing data...")
+        
+        # Use the combined vision processor instead of separate processing
+        vision_features = self.process_vision_data(image_msg, lidar_msg)
+        
         return self.aggregate_state_vector(
-            self.process_image(image_msg),
-            self.process_lidar(lidar_msg),
+            vision_features,
             self.process_imu(imu_msg),
             self.process_gnss(gnss_msg),
         )
 
-    def process_image(self, image_msg):
-        """Process camera image data and extract convolutional features using PyTorch."""
+    def process_vision_data(self, image_msg, lidar_msg):
+        """Process both RGB and LiDAR data using our fusion model."""
+        # Convert image_msg to numpy array
         raw_image = np.frombuffer(image_msg.data, dtype=np.uint8).reshape(
             (image_msg.height, image_msg.width, -1)
         )
-        if raw_image.shape[2] == 4:
-            raw_image = raw_image[:, :, :3]  # Remove alpha channel if present
-
-        # Convert NumPy array to tensor (but do not use `ToTensor()` here)
-        input_image = (
-            torch.tensor(raw_image).permute(2, 0, 1).float() / 255.0
-        )  # Normalize to [0,1]
-
-        # Apply transformations properly (avoid calling `ToTensor()` on a tensor)
-        if isinstance(input_image, torch.Tensor):
-            input_image = transforms.Resize((224, 224))(input_image)  # Resize only
-            input_image = transforms.Normalize(
-                mean=self.transform.transforms[-1].mean,
-                std=self.transform.transforms[-1].std,
-            )(input_image)
-
-        input_image = input_image.unsqueeze(0)  # Add batch dimension
-
-        with torch.no_grad():
-            features = (
-                self.vision_model(input_image).squeeze(0).numpy()
-            )  # Extract features
-        return features[:20]  # Return 20 feature cells
-
-    def process_lidar(self, lidar_msg):
-        """Process LiDAR data."""
+        if raw_image.shape[2] == 4:  # BGRA format
+            raw_image = raw_image[:, :, :3]  # Remove alpha channel
+            raw_image = raw_image[:, :, ::-1]  # Convert BGR to RGB
+        
+        # Convert lidar_msg to point list
         points = [
             [point[0], point[1], point[2]]  # Extract x, y, z
             for point in struct.iter_unpack("ffff", lidar_msg.data)
         ]
-        self.get_logger().info(f"Received {len(points)} LiDAR points.")
-        mean_height = np.mean([p[2] for p in points]) if points else 0
-        density = len(points) / 100  # Normalize for density
-        self.get_logger().info(
-            f"Processing image data...\n Mean height: {mean_height}\n Density: {density}"
-        )
-        return [mean_height, density] + points[:13]  # Up to 15 features
+        
+        # Process using our vision model
+        fused_features = self.vision_processor.process_sensor_data(raw_image, points)
+        return fused_features
 
     def process_imu(self, imu_msg):
         """Process IMU data."""
@@ -219,27 +182,30 @@ class DataCollector(Node):
         return np.array([latitude, longitude, altitude, velocity, heading])
 
     # , lidar_features, imu_features, gnss_features
-    def aggregate_state_vector(self,image_features, lidar_features, imu_featurs, gnss_features):
+    def aggregate_state_vector(self, vision_features, imu_features, gnss_features):
         """Aggregate features into a single state vector.""" 
-
-        state_vector = np.zeros(46, dtype=np.float32)  # Adjusted to correct size
-        state_vector[:20] = image_features
-        state_vector[20:35] = (
-            np.array(lidar_features[:15]).flatten()
-            if isinstance(lidar_features, np.ndarray)
-            else np.zeros(15)
-        )
-        state_vector[35:41] = imu_featurs
-        state_vector[41:46] = gnss_features[:5]  # Now includes velocity and heading
-        self.get_logger().info(f"State Vector: {state_vector}")
-        self.get_logger().info("State vector aggregated successfully.")
-
+        
+        # Assuming vision_features is 192 dimensions from the SensorFusionModel
+        # Total vector size: 192 (vision) + 6 (IMU) + 5 (GNSS) = 203
+        state_vector = np.zeros(203, dtype=np.float32)
+        
+        # Fill with vision features (fused RGB + LiDAR)
+        state_vector[:192] = vision_features
+        
+        # Add IMU data
+        state_vector[192:198] = imu_features
+        
+        # Add GNSS data
+        state_vector[198:203] = gnss_features[:5]  # Includes velocity and heading
+        
+        self.get_logger().info(f"State Vector shape: {state_vector.shape}")
+        
         response = Float32MultiArray()
         response.data = state_vector.tolist()
         self.publish_to_PPO.publish(response)
-
+        
         return state_vector
-
+    
     def get_latest_data(self):
         """Retrieve the most recent synchronized data."""
         self.get_logger().info("Retrieving latest data...")
