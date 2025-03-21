@@ -45,13 +45,6 @@ class DataCollector(Node):
         self.publish_to_PPO = self.create_publisher(
             Float32MultiArray, "/data_to_ppo", 10
         )
-    #     self.timer = self.create_timer(5, self.publish_latest_data)
-
-    # def publish_latest_data(self):
-    #     print("Latest data: ", self.get_latest_data())
-    #     response = Float32MultiArray()
-    #     response.data = self.get_latest_data()
-    #     self.publish_to_PPO.publish(response)
 
     def lap_ending_callback(self, msg):
         """Callback function for lap completion."""

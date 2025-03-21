@@ -61,9 +61,9 @@ class SpawnVehicleNode(Node):
             "sensors_config.json",
         )
         
-        self.control_publisher = self.create_publisher(
-            Float32MultiArray, "/carla/vehicle/control", 10
-        )
+        # self.control_publisher = self.create_publisher(
+        #     Float32MultiArray, "/carla/vehicle/control", 10
+        # )
 
         self.vehicle = None
 
