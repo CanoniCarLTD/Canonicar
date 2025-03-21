@@ -4,12 +4,14 @@ All the hyper-parameters needed for the PPO algorithm implementation.
 
 # Directory and version control for checkpoint saving and loading
 PPO_CHECKPOINT_DIR = "preTrained_PPO_models/"
-VERSION = "1.0.0"
+VERSION = "v1.0.0"
 
 MODEL_LOAD = False  # Set to True to resume training from checkpoint
 CHECKPOINT_FILE = None  # Specify file when MODEL_LOAD=True
 
 TRAIN = True  # Set to False to disable training and only run inference
+DETERMINISTIC_CUDNN = True
+
 # Training configuration
 SEED = 0
 BATCH_SIZE = 64  # Number of timesteps collected before a policy update
@@ -17,7 +19,7 @@ NUM_EPOCHS = 10  # PPO update epochs per batch (Best practice: 3-10)
 EPISODES = 1000
 
 # PPO-specific hyperparameters
-PPO_INPUT_DIM = 11
+PPO_INPUT_DIM = 203
 EPISODE_LENGTH = 7500  # Maximum timesteps per episode
 TOTAL_TIMESTEPS = 2e6  # Total number of timesteps for training
 

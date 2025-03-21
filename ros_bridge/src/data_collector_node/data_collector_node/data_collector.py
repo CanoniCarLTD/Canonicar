@@ -15,13 +15,14 @@ from ament_index_python.packages import get_package_share_directory
 import torchvision.transforms as transforms
 from torchvision.models import MobileNet_V2_Weights, mobilenet_v2
 from std_msgs.msg import Float32MultiArray, String
-from .vision_model import VisionProcessor
+from vision_model.vision_model import VisionProcessor
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class DataCollector(Node):
     def __init__(self):
         super().__init__("data_collector")
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
         try:
             self.prev_gnss = (
                 None  # Store previous GNSS position for velocity calculation
@@ -71,8 +72,8 @@ class DataCollector(Node):
 
         # self.lidar_sub, self.imu_sub, self.gnss_sub
         self.ats = ApproximateTimeSynchronizer(
-            # [self.image_sub, self.lidar_sub, self.imu_sub, self.gnss_sub],
-            [self.imu_sub, self.gnss_sub],
+            [self.image_sub, self.lidar_sub, self.imu_sub, self.gnss_sub ],
+
             queue_size=100,
             slop=0.1,  # Adjusted for better synchronization
         )
@@ -83,22 +84,22 @@ class DataCollector(Node):
         self.get_logger().info("Subscribers set up successfully.")
 
     #   lidar_msg, imu_msg, gnss_msg
-    # def sync_callback(self, image_msg, lidar_msg, imu_msg,  gnss_msg):
-    def sync_callback(self,imu_msg,  gnss_msg):
+    def sync_callback(self, image_msg, lidar_msg, imu_msg,  gnss_msg):
+
         self.get_logger().info("Synchronized callback triggered.")
-        processed_data = self.process_data(imu_msg, gnss_msg)
+        processed_data = self.process_data(image_msg, lidar_msg, imu_msg, gnss_msg)
         self.data_buffer.append(processed_data)
         self.get_logger().info("Data appended to buffer.")
 
-    # def process_data(self, image_msg, lidar_msg, imu_msg, gnss_msg):
-    def process_data(self, imu_msg, gnss_msg):
+    def process_data(self, image_msg, lidar_msg, imu_msg, gnss_msg):
+
         self.get_logger().info("Processing data...")
-        
+
         # Use the combined vision processor instead of separate processing
-        # vision_features = self.process_vision_data(image_msg, lidar_msg)
-        
+        vision_features = self.process_vision_data(image_msg, lidar_msg)
+
         return self.aggregate_state_vector(
-            # vision_features,
+            vision_features,
 
             self.process_imu(imu_msg),
             self.process_gnss(gnss_msg),
@@ -112,13 +113,13 @@ class DataCollector(Node):
         )
         if raw_image.shape[2] == 4:  # BGRA format
             raw_image = raw_image[:, :, :3]  # Remove alpha channel
-            raw_image = np.copy(raw_image[:, :, ::-1])  # Convert BGR to RGB
+            raw_image = raw_image[:, :, ::-1]  # Convert BGR to RGB
         # Convert lidar_msg to point list
         points = [
             [point[0], point[1], point[2]]  # Extract x, y, z
             for point in struct.iter_unpack("ffff", lidar_msg.data)
         ]
-        
+
         # Process using our vision model
         fused_features = self.vision_processor.process_sensor_data(raw_image, points)
         return fused_features
@@ -162,7 +163,7 @@ class DataCollector(Node):
             delta_x = delta_lon * 111320  # Convert lon to meters
             delta_y = delta_lat * 110540  # Convert lat to meters
             distance = math.sqrt(delta_x**2 + delta_y**2)
-            # if delta_time > 0:
+#           if delta_time > 0:
             velocity = distance / delta_time  # Speed in meters per second
 
             # Compute heading (angle of movement)
@@ -177,31 +178,31 @@ class DataCollector(Node):
         return np.array([latitude, longitude, altitude, velocity, heading])
 
     # , lidar_features, imu_features, gnss_features
-    # def aggregate_state_vector(self, vision_features, imu_features, gnss_features):
-    def aggregate_state_vector(self, imu_features, gnss_features):
+    def aggregate_state_vector(self, vision_features, imu_features, gnss_features):
+
         """Aggregate features into a single state vector.""" 
-        
+
         # Assuming vision_features is 192 dimensions from the SensorFusionModel
         # Total vector size: 192 (vision) + 6 (IMU) + 5 (GNSS) = 203
-        # state_vector = np.zeros(203, dtype=np.float32)
-        state_vector = np.zeros(11, dtype=np.float32)
+        state_vector = np.zeros(203, dtype=np.float32)
+        
         # Fill with vision features (fused RGB + LiDAR)
-        # state_vector[:192] = vision_features
-        
+        state_vector[:192] = vision_features
+
         # Add IMU data
-        state_vector[:6] = imu_features
-        
+        state_vector[192:198] = imu_features
+
         # Add GNSS data
-        state_vector[6:] = gnss_features[:5]  # Includes velocity and heading
-        
+        state_vector[198:203] = gnss_features[:5]  # Includes velocity and heading
+
         self.get_logger().info(f"State Vector shape: {state_vector.shape}")
-        
+
         response = Float32MultiArray()
         response.data = state_vector.tolist()
         self.publish_to_PPO.publish(response)
-        
-        return state_vector[192:203 ]#the size we send is 11 
-    
+
+        return state_vector
+
     def get_latest_data(self):
         """Retrieve the most recent synchronized data."""
         self.get_logger().info("Retrieving latest data...")

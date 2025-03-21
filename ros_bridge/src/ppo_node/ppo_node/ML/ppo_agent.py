@@ -1,7 +1,6 @@
-
-'''
+"""
     ** Data saving and loading functions needs to be added **
-'''
+"""
 
 import os
 import torch
@@ -105,6 +104,7 @@ class CriticNetwork(nn.Module):
     PPOMemory WILL BE DELETED, BUT KEEPING FOR IDEAS OF WHAT TO SAVE
 """
 
+
 class PPOMemory:
     def __init__(self):
         self.states = []
@@ -186,18 +186,22 @@ class PPOAgent:
     def select_action(self, state):
         """Select an action and return its log probability."""
         state = torch.tensor(state, dtype=torch.float32).to(device).unsqueeze(0)
-        
+
         # Check if the input dimension matches the expected input dimension
         if state.shape[1] != self.input_dim:
-            raise ValueError(f"Expected input dimension {self.input_dim}, but got {state.shape[1]}")
-        
+            raise ValueError(
+                f"Expected input dimension {self.input_dim}, but got {state.shape[1]}"
+            )
+
         with torch.no_grad():
             action, log_prob = self.actor.sample_action(state)
-        print(f"\n\nSteering: {action[0][0]}, Throttle: {action[0][1]}, Brake: {action[0][2]}\n\n")
+        print(
+            f"\nSteering: {action[0][0]}, Throttle: {action[0][1]}, Brake: {action[0][2]}\n"
+        )
         return action.cpu().numpy()[0], log_prob
 
     def store_transition(self, state, action, prob, val, reward, done):
-        """Store experience for PPO updates. (every stored data will beused in the next update)"""
+        """Store experience for PPO updates. (every stored data will be used in the next update)"""
         self.states.append(state)
         self.actions.append(action)
         self.probs.append(prob)
@@ -205,27 +209,23 @@ class PPOAgent:
         self.rewards.append(reward)
         self.dones.append(done)
 
-    def save_models(self, version=VERSION):
+    def save_models(self, directory):
         print("... saving models ...")
         torch.save(
             self.actor.state_dict(),
-            os.path.join(PPO_CHECKPOINT_DIR, f"ppo_actor_{version}.pth"),
+            os.path.join(directory, "actor.pth"),
         )
         torch.save(
             self.critic.state_dict(),
-            os.path.join(PPO_CHECKPOINT_DIR, f"ppo_critic_{version}.pth"),
+            os.path.join(directory, "critic.pth"),
         )
 
-    def load_models(self, version=VERSION):
-        print(f"... loading models {version} ...")
+    def load_models(self, directory):
+        print(f"... loading models {directory} ...")
         try:
-            self.actor.load_state_dict(
-                torch.load(os.path.join(PPO_CHECKPOINT_DIR, f"ppo_actor_{version}.pth"))
-            )
+            self.actor.load_state_dict(torch.load(os.path.join(directory, "actor.pth")))
             self.critic.load_state_dict(
-                torch.load(
-                    os.path.join(PPO_CHECKPOINT_DIR, f"ppo_critic_{version}.pth")
-                )
+                torch.load(os.path.join(directory, "critic.pth"))
             )
             print("Models loaded successfully!")
         except Exception as e:
