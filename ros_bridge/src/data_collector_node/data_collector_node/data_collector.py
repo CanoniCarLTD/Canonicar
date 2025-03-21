@@ -15,7 +15,8 @@ from ament_index_python.packages import get_package_share_directory
 import torchvision.transforms as transforms
 from torchvision.models import MobileNet_V2_Weights, mobilenet_v2
 from std_msgs.msg import Float32MultiArray, String
-from vision_model.vision_model import VisionProcessor
+from vision_model import VisionProcessor
+
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -34,7 +35,7 @@ class DataCollector(Node):
 
         self.data_buffer = []  # List of dictionaries to store synchronized data
         self.setup_subscribers()
-        self.vision_processor = VisionProcessor(device)
+        self.vision_processor = VisionProcessor(device= device)
         self.get_logger().info("DataCollector Node initialized.")
         self.start_vehicle_manager = self.create_publisher(
             String, "/start_vehicle_manager", 10
@@ -83,6 +84,8 @@ class DataCollector(Node):
         self.get_logger().info(f"Synchronizer slop: {self.ats.__dict__}")
         self.get_logger().info("Subscribers set up successfully.")
 
+    
+
     #   lidar_msg, imu_msg, gnss_msg
     def sync_callback(self, image_msg, lidar_msg, imu_msg,  gnss_msg):
 
@@ -113,7 +116,7 @@ class DataCollector(Node):
         )
         if raw_image.shape[2] == 4:  # BGRA format
             raw_image = raw_image[:, :, :3]  # Remove alpha channel
-            raw_image = raw_image[:, :, ::-1]  # Convert BGR to RGB
+            raw_image = raw_image[:, :, ::-1].copy()  # Convert BGR to RGB
         # Convert lidar_msg to point list
         points = [
             [point[0], point[1], point[2]]  # Extract x, y, z
@@ -200,9 +203,9 @@ class DataCollector(Node):
         response = Float32MultiArray()
         response.data = state_vector.tolist()
         self.publish_to_PPO.publish(response)
-
+        
         return state_vector
-
+    
     def get_latest_data(self):
         """Retrieve the most recent synchronized data."""
         self.get_logger().info("Retrieving latest data...")
