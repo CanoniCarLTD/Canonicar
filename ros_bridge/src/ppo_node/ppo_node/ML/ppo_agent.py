@@ -12,12 +12,14 @@ from torch.distributions import MultivariateNormal
 import sys
 from .parameters import *
 
-# Set device to cuda if available, otherwise cpu
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
+##################################################################################################
+#                                       ACTOR AND CRITIC NETWORKS
+##################################################################################################
 
 class ActorNetwork(nn.Module):
-    def __init__(self, input_dim, action_dim, action_std_init):  # Reordered arguments
+    def __init__(self, input_dim, action_dim, action_std_init):
         super(ActorNetwork, self).__init__()
         self.action_dim = action_dim
         self.action_var = torch.full(
@@ -43,7 +45,6 @@ class ActorNetwork(nn.Module):
         )  # sigmoid to restrict to [0, 1]
         brake_mean = torch.sigmoid(action_mean[:, 2:3])  # sigmoid to restrict to [0, 1]
 
-        # Combine into a single action tensor
         action_mean = torch.cat([steering_mean, throttle_mean, brake_mean], dim=1)
         return action_mean
 
@@ -70,7 +71,6 @@ class ActorNetwork(nn.Module):
         action_np[:, 1] = np.clip(action_np[:, 1], 0.0, 1.0)  # throttle
         action_np[:, 2] = np.clip(action_np[:, 2], 0.0, 1.0)  # brake
 
-        # Convert back to tensor
         action = torch.FloatTensor(action_np).to(device)
 
         return action, action_logprob
@@ -86,7 +86,6 @@ class CriticNetwork(nn.Module):
     def __init__(self, input_dim):
         super(CriticNetwork, self).__init__()
 
-        # Critic network layers
         self.fc1 = nn.Linear(input_dim, 256)
         self.fc2 = nn.Linear(256, 128)
         self.fc3 = nn.Linear(128, 64)
@@ -100,49 +99,9 @@ class CriticNetwork(nn.Module):
         return value
 
 
-"""
-    PPOMemory WILL BE DELETED, BUT KEEPING FOR IDEAS OF WHAT TO SAVE
-"""
-
-
-class PPOMemory:
-    def __init__(self):
-        self.states = []
-        self.actions = []
-        self.probs = []
-        self.vals = []
-        self.rewards = []
-        self.dones = []
-
-    def store(self, state, action, prob, val, reward, done):
-        self.states.append(state)
-        self.actions.append(action)
-        self.probs.append(prob)
-        self.vals.append(val)
-        self.rewards.append(reward)
-        self.dones.append(done)
-
-    def clear(self):
-        self.states = []
-        self.actions = []
-        self.probs = []
-        self.vals = []
-        self.rewards = []
-        self.dones = []
-
-
-import os
-import torch
-import torch.nn as nn
-import torch.optim as optim
-import torch.nn.functional as F
-import numpy as np
-from torch.distributions import MultivariateNormal
-from .parameters import *
-
-# Set device
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-
+##################################################################################################
+#                                       PPO AGENT
+##################################################################################################
 
 class PPOAgent:
     def __init__(self, input_dim=203, action_dim=3):
@@ -183,6 +142,10 @@ class PPOAgent:
         if not os.path.exists(PPO_CHECKPOINT_DIR):
             os.makedirs(PPO_CHECKPOINT_DIR)
 
+    ##################################################################################################
+    #                                        SELECT ACTION
+    ##################################################################################################
+
     def select_action(self, state):
         """Select an action and return its log probability."""
         state = torch.tensor(state, dtype=torch.float32).to(device).unsqueeze(0)
@@ -200,6 +163,10 @@ class PPOAgent:
         )
         return action.cpu().numpy()[0], log_prob
 
+    ##################################################################################################
+    #                                     STORE LAST EXPERIENCE
+    ##################################################################################################
+
     def store_transition(self, state, action, prob, val, reward, done):
         """Store experience for PPO updates. (every stored data will be used in the next update)"""
         self.states.append(state)
@@ -209,30 +176,56 @@ class PPOAgent:
         self.rewards.append(reward)
         self.dones.append(done)
 
+    ##################################################################################################
+    #                                       SAVE AND LOAD MODELS
+    ##################################################################################################
+
     def save_checkpoint(self, directory):
         print("Saving PPO checkpoint...")
+        try:
 
-        # Save model parameters
-        torch.save(self.actor.state_dict(), os.path.join(directory, "actor.pth"))
-        torch.save(self.critic.state_dict(), os.path.join(directory, "critic.pth"))
+            # Save model parameters
+            torch.save(self.actor.state_dict(), os.path.join(directory, "actor.pth"))
+            torch.save(self.critic.state_dict(), os.path.join(directory, "critic.pth"))
 
-        # Save optimizer states
-        torch.save(self.actor_optimizer.state_dict(), os.path.join(directory, "actor_optim.pth"))
-        torch.save(self.critic_optimizer.state_dict(), os.path.join(directory, "critic_optim.pth"))
+            # Save optimizer states
+            torch.save(
+                self.actor_optimizer.state_dict(),
+                os.path.join(directory, "actor_optim.pth"),
+            )
+            torch.save(
+                self.critic_optimizer.state_dict(),
+                os.path.join(directory, "critic_optim.pth"),
+            )
 
-        print(f"✅ Model + optimizer checkpoint saved to {directory}")
-
+            print(f"✅ Model + optimizer checkpoint saved to {directory}")
+        except Exception as e:
+            print(f"❌ Error saving checkpoint: {e}")
 
     def load_checkpoint(self, directory):
-        print(f"... loading models {directory} ...")
+        print(f"Loading PPO checkpoint from: {directory}")
         try:
+            # Load model weights
             self.actor.load_state_dict(torch.load(os.path.join(directory, "actor.pth")))
             self.critic.load_state_dict(
                 torch.load(os.path.join(directory, "critic.pth"))
             )
-            print("Models loaded successfully!")
+
+            # Load optimizer states
+            self.actor_optimizer.load_state_dict(
+                torch.load(os.path.join(directory, "actor_optim.pth"))
+            )
+            self.critic_optimizer.load_state_dict(
+                torch.load(os.path.join(directory, "critic_optim.pth"))
+            )
+
+            print("✅ PPO model and optimizer states loaded successfully.")
         except Exception as e:
-            print(f"Error loading models: {e}")
+            print(f"❌ Error loading checkpoint: {e}")
+
+    ##################################################################################################
+    #                              DECAY ACTION STD AND NORMALIZE ADVANTAGES
+    ##################################################################################################
 
     def decay_action_std(self):
         """Decay action standard deviation for exploration-exploitation tradeoff."""
@@ -246,6 +239,10 @@ class PPOAgent:
     def normalize_advantages(self, advantages):
         """Normalize advantages for stability."""
         return (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+
+    ##################################################################################################
+    #                                       COMPUTE GAE
+    ##################################################################################################
 
     def compute_gae(self, values, rewards, dones, gamma=GAMMA, lam=LAMBDA_GAE):
         """Compute Generalized Advantage Estimation (GAE)."""
@@ -266,11 +263,19 @@ class PPOAgent:
 
         return self.normalize_advantages(advantages)
 
+    ##################################################################################################
+    #                                       NORMALIZE REWARDS
+    ##################################################################################################
+
     def normalize_rewards(self):
         """Normalize rewards before training."""
         self.rewards = (self.rewards - np.mean(self.rewards)) / (
             np.std(self.rewards) + 1e-8
         )
+
+    ##################################################################################################
+    #                                       MAIN PPO ALGORITHM
+    ##################################################################################################
 
     def learn(self):
         """
