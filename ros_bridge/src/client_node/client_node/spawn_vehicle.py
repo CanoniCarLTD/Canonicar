@@ -61,8 +61,13 @@ class SpawnVehicleNode(Node):
             "sensors_config.json",
         )
         
-        self.control_publisher = self.create_publisher(
-            Float32MultiArray, "/carla/vehicle/control", 10
+        # self.control_publisher = self.create_publisher(
+        #     Float32MultiArray, "/carla/vehicle/control", 10
+        # )
+        # Start to deploy vehicles after map is loaded
+
+        self.start_vehicle_manager = self.create_publisher(
+            String, "/start_vehicle_manager", 10
         )
 
         self.vehicle = None
@@ -93,7 +98,9 @@ class SpawnVehicleNode(Node):
         if self.map_loaded and self.data_collector_ready:
             self.get_logger().info("Starting to drive")
             self.spawn_objects_from_config()
+            self.start_vehicle_manager.publish(String(data="start with vehicle"))
             self.get_logger().info("Spanwed objects from config")
+        
         self.get_logger().info(
             f"Is map loaded?: {self.map_loaded}, Is data collector ready {self.data_collector_ready}"
         )

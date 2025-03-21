@@ -100,6 +100,19 @@ def generate_launch_description():
         name='ppo_node',
         output='screen'
     )
+    
+    vehicle_control_node = Node(
+        package='vehicle_control_node',
+        executable='vehicle_control_node',
+        name='vehicle_control_node',
+        output='screen',
+        parameters=[
+            {
+                'host': LaunchConfiguration('host'),
+                'port': LaunchConfiguration('port'),
+            }
+        ]
+    )
 
     ld = LaunchDescription()
     ld.add_action(host_arg)
@@ -108,5 +121,6 @@ def generate_launch_description():
     ld.add_action(run_load_map_node)
     ld.add_action(spawn_vehicle_launch)
     ld.add_action(delayed_data_collector)
+    ld.add_action(vehicle_control_node)
     
     return ld
