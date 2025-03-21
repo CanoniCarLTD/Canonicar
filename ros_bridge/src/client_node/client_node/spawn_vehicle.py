@@ -9,11 +9,11 @@ from ament_index_python.packages import get_package_share_directory
 import time
 from std_msgs.msg import String
 from rclpy.qos import QoSProfile, ReliabilityPolicy
+from  canonicar_interfaces.srv import VehicleReady
 
 # For ROS2 messages
 from sensor_msgs.msg import Image, PointCloud2, Imu, NavSatFix
 from std_msgs.msg import Header
-
 
 # Import conversion functions from sensors_data
 from sensors_data import (
@@ -30,14 +30,14 @@ class SpawnVehicleNode(Node):
 
         self.declare_parameter("host", "")
         self.declare_parameter("port", 2000)
-        self.declare_parameter("vehicle_type", "vehicle.tesla.model3")
+        self.declare_parameter("vehicle_type", "")
 
         self.host = self.get_parameter("host").value
         self.port = self.get_parameter("port").value
         self.vehicle_type = self.get_parameter("vehicle_type").value
 
         self.get_logger().info(
-            f"Connecting to CARLA server at {self.host}:{self.port} with vehicle {self.vehicle_type}"
+            f"Connecting to CARLA server at {self.host}:{self.port}"
         )
 
         try:
@@ -66,11 +66,22 @@ class SpawnVehicleNode(Node):
         # )
         # Start to deploy vehicles after map is loaded
 
-        self.start_vehicle_manager = self.create_publisher(
-            String, "/start_vehicle_manager", 10
-        )
+        # self.start_vehicle_manager = self.create_publisher(
+        #     String, "/start_vehicle_manager", 10
+        # )
 
         self.vehicle = None
+
+        
+        # Create vehicle_ready service client
+        self.vehicle_ready_client = self.create_client(VehicleReady, 'vehicle_ready')
+
+        # Wait for the service to be available
+        while not self.vehicle_ready_client.wait_for_service(timeout_sec=1.0):
+            self.get_logger().info('Vehicle ready service not available, waiting...')
+ 
+    
+
 
         self.lap_subscription = self.create_subscription(
             String,
@@ -79,40 +90,37 @@ class SpawnVehicleNode(Node):
             10,
         )
         self.get_logger().info("Creating start vehicle manager subscription")
-        self.start_subscription = self.create_subscription(
-            String, "/start_vehicle_manager", self.start_driving, 10  # QoS
-        )
+        # self.start_subscription = self.create_subscription(
+        #     String, "/start_vehicle_manager", self.start_driving, 10  # QoS
+        # )
         self.data_collector_ready = True
         self.map_loaded = False
 
         self.current_vehicle_index = 0
+        self.spawn_objects_from_config()
 
-    def start_driving(self, msg):
-        self.get_logger().info(f"Received start signal: {msg.data}")
-        if msg.data == "Map is loaded":
-            self.get_logger().info("Map is loaded")
-            self.map_loaded = True
-        if msg.data == "DataCollector is ready":
-            self.get_logger().info("DataCollector is ready")
-            self.data_collector_ready = True
-        if self.map_loaded and self.data_collector_ready:
-            self.get_logger().info("Starting to drive")
-            self.spawn_objects_from_config()
-            self.start_vehicle_manager.publish(String(data="start with vehicle"))
-            self.get_logger().info("Spanwed objects from config")
+    # def start_driving(self, msg):
+    #     self.get_logger().info(f"Received start signal: {msg.data}")
+    #     if msg.data == "Map is loaded":
+    #         self.get_logger().info("Map is loaded")
+    #         self.map_loaded = True
+    #     if msg.data == "DataCollector is ready":
+    #         self.get_logger().info("DataCollector is ready")
+    #         self.data_collector_ready = True
+    #     if self.map_loaded and self.data_collector_ready:
+    #         self.get_logger().info("Starting to drive")
+    #         self.spawn_objects_from_config()
+    #         self.start_vehicle_manager.publish(String(data="start with vehicle"))
+    #         self.get_logger().info("Spanwed objects from config")
         
-        self.get_logger().info(
-            f"Is map loaded?: {self.map_loaded}, Is data collector ready {self.data_collector_ready}"
-        )
+    #     self.get_logger().info(
+    #         f"Is map loaded?: {self.map_loaded}, Is data collector ready {self.data_collector_ready}"
+    #     )
 
     def lap_callback(self, msg):
         self.data_collector_ready = False
         self.get_logger().info(f"Lap completed! Destroy vehicle {self.vehicle_type}")
         self.destroy_actors()
-        self.vehicle_type = self.vehicle_types[self.current_vehicle_index]
-        self.current_vehicle_index = (self.current_vehicle_index + 1) % len(
-            self.vehicle_types
-        )
 
     def publish_vehicle_control(self):
         if self.vehicle is not None and self.vehicle.is_alive:
@@ -126,7 +134,6 @@ class SpawnVehicleNode(Node):
 
         self.get_logger().info("Waiting for map to fully load...")
         time.sleep(2.0)
-        self.get_logger().info("Spawning vehicle type " + self.vehicle_type)
 
         try:
             with open(self.sensor_config_file, "r") as f:
@@ -139,7 +146,7 @@ class SpawnVehicleNode(Node):
                 return
 
             ego_object = objects[0]
-            vehicle_type = self.vehicle_type
+            vehicle_type = ego_object.get("type", self.vehicle_type)
             if not vehicle_type.startswith("vehicle."):
                 self.get_logger().error("No valid vehicle object found in JSON.")
                 return
@@ -192,9 +199,12 @@ class SpawnVehicleNode(Node):
             if not self.vehicle:
                 self.get_logger().error("Failed to spawn at waypoint")
                 return
+            
 
             location = self.vehicle.get_location()
             self.get_logger().info(f"Spawned vehicle at {location}")
+
+            self.notify_vehicle_ready()
 
             collision_bp = blueprint_library.find("sensor.other.collision")
             if collision_bp:
@@ -225,6 +235,35 @@ class SpawnVehicleNode(Node):
             import traceback
 
             self.get_logger().error(traceback.format_exc())
+
+    def notify_vehicle_ready(self):
+        """Call the vehicle_ready service to notify the control node"""
+        if not self.vehicle or not self.vehicle.is_alive:
+            self.get_logger().error("Cannot notify - no valid vehicle")
+            return
+            
+        request = VehicleReady.Request()
+        request.vehicle_id = self.vehicle.id
+        
+        self.get_logger().info(f"Notifying vehicle_control that vehicle {self.vehicle.id} is ready")
+        
+        # Call the service asynchronously
+        future = self.vehicle_ready_client.call_async(request)
+        
+        # Add a callback to handle the service response
+        future.add_done_callback(self.vehicle_ready_callback)
+
+    def vehicle_ready_callback(self, future):
+        """Handle the response from the vehicle_ready service"""
+        try:
+            response = future.result()
+            if response.success:
+                self.get_logger().info(f"Vehicle control started successfully: {response.message}")
+            else:
+                self.get_logger().error(f"Failed to start vehicle control: {response.message}")
+        except Exception as e:
+            self.get_logger().error(f"Service call failed: {str(e)}")
+
 
     def _on_collision(self, event):
         """Callback for collision sensor to help debug vehicle disappearances"""

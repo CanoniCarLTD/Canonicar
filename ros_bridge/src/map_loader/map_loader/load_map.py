@@ -33,10 +33,10 @@ class LoadMapNode(Node):
             self.get_parameter("CARLA_SERVER_PORT").get_parameter_value().integer_value
         )
 
-        # Start to deploy vehicles after map is loaded
-        self.start_vehicle_manager = self.create_publisher(
-            String, "/start_vehicle_manager", 10
-        )
+        # # Start to deploy vehicles after map is loaded
+        # self.start_vehicle_manager = self.create_publisher(
+        #     String, "/start_vehicle_manager", 10
+        # )
 
         # Validate parameters
         if not all([self.host, self.TRACK_LINE, self.TRACK_XODR]):

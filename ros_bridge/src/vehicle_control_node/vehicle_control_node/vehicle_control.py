@@ -2,7 +2,7 @@ import rclpy
 from rclpy.node import Node
 from std_msgs.msg import Float32MultiArray, String
 from carla import Client, VehicleControl
-
+from  canonicar_interfaces.srv import VehicleReady
 class VehicleControlNode(Node):
     def __init__(self):
         super().__init__('vehicle_control_node')
@@ -30,16 +30,22 @@ class VehicleControlNode(Node):
         
         self.vehicle = None
 
-        self.get_logger().info("Creating start vehicle manager subscription")
-        self.start_subscription = self.create_subscription(
-            String, "/start_vehicle_manager", self.start_driving, 10  # QoS
-        )
-        
         self.control_sub = self.create_subscription(
             Float32MultiArray,
             '/carla/vehicle_control',
             self.control_callback,
             10
+        )
+        # self.get_logger().info("Creating start vehicle manager subscription")
+        # self.start_subscription = self.create_subscription(
+        #     String, "/start_vehicle_manager", self.start_driving, 10  # QoS
+        # )
+        
+        # Create vehicle ready service server
+        self.vehicle_ready_server = self.create_service(
+            VehicleReady,
+            'vehicle_ready',
+            self.handle_vehicle_ready
         )
         
         self.data_collector_ready = True
@@ -48,20 +54,45 @@ class VehicleControlNode(Node):
         self.current_vehicle_index = 0
         self.get_logger().info('VehicleControlNode initialized')
 
-    def start_driving(self, msg):
-        self.get_logger().info(f"Received start signal: {msg.data}")
-        if msg.data == "start with vehicle":
-            self.get_logger().info(f"Starting vehicle manager")
-            self.vehicle = self.find_vehicle()
+    
+    def handle_vehicle_ready(self, request, response):
+        """Service handler when spawn_vehicle_node notifies that a vehicle is ready"""
+        self.get_logger().info(f'Received vehicle_ready notification with vehicle ID: {request.vehicle_id}')
         
-    def find_vehicle(self):        
-        vehicles = self.world.get_actors().filter('vehicle.*')
-        if vehicles:
-            self.get_logger().info(f'Found {len(vehicles)} vehicles, using the first one.')
-            return vehicles[0]
-        else:
-            self.get_logger().error('No vehicles found in the world.')
-            return None
+        try:
+            # Find the vehicle with the provided ID
+            self.vehicle = self.world.get_actor(request.vehicle_id)
+            
+            if self.vehicle:
+                self.get_logger().info(f'Successfully found vehicle with ID: {request.vehicle_id}')
+                response.success = True
+                response.message = f"Vehicle control started for vehicle {request.vehicle_id}"
+            else:
+                self.get_logger().error(f'Could not find vehicle with ID: {request.vehicle_id}')
+                response.success = False
+                response.message = f"Vehicle with ID {request.vehicle_id} not found"
+        except Exception as e:
+            self.get_logger().error(f'Error finding vehicle: {str(e)}')
+            response.success = False
+            response.message = f"Error: {str(e)}"
+            
+        return response
+        
+
+    # def start_driving(self, msg):
+    #     self.get_logger().info(f"Received start signal: {msg.data}")
+    #     if msg.data == "start with vehicle":
+    #         self.get_logger().info(f"Starting vehicle manager")
+    #         self.vehicle = self.find_vehicle()
+        
+    # def find_vehicle(self):        
+    #     vehicles = self.world.get_actors().filter('vehicle.*')
+    #     if vehicles:
+    #         self.get_logger().info(f'Found {len(vehicles)} vehicles, using the first one.')
+    #         return vehicles[0]
+    #     else:
+    #         self.get_logger().error('No vehicles found in the world.')
+    #         return None
 
     def control_callback(self, msg):
         self.get_logger().info(f'Received message from ppo node: {msg.data}')
@@ -69,13 +100,13 @@ class VehicleControlNode(Node):
             self.get_logger().error('Control message must contain [throttle, steer, brake]')
             return
             
-        throttle, steer, brake = msg.data
-        self.get_logger().info(f'received: throttle={throttle}, steer={steer}, brake={brake}')
+        steer, throttle, brake = msg.data
+        self.get_logger().info(f'received: steer={steer}, throttle={throttle}, brake={brake}')
         
         if self.vehicle:
             control = VehicleControl()
-            control.throttle = float(throttle)
             control.steer = float(steer)
+            control.throttle = float(throttle)
             control.brake = float(brake)
             self.get_logger().info('Applying control to vehicle')   
             self.vehicle.apply_control(control)
