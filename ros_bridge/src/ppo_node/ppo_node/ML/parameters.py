@@ -16,7 +16,7 @@ NUM_EPOCHS = 10  # PPO update epochs per batch (Best practice: 3-10)
 EPISODES = 1000
 
 # PPO-specific hyperparameters
-PPO_INPUT_DIM = 46  ### Change to 203 after merge between branches
+PPO_INPUT_DIM = 203
 EPISODE_LENGTH = 7500  # Maximum timesteps per episode
 TOTAL_TIMESTEPS = 2e6  # Total number of timesteps for training
 
