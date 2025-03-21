@@ -14,12 +14,19 @@ from .ML.parameters import *
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+
 class PPOModelNode(Node):
     def __init__(self):
         super().__init__("ppo_model_node")
 
+        train = TRAIN
+        self.current_step_in_episode = 0
+
         self.data_sub = self.create_subscription(
-            Float32MultiArray, "/data_to_ppo", self.data_callback, 10
+            Float32MultiArray,
+            "/data_to_ppo",
+            self.training if train else self.testing,
+            10,
         )
 
         # Action publisher (Steering, Throttle, Brake)
@@ -31,48 +38,28 @@ class PPOModelNode(Node):
         self.ppo_agent = ppo_agent.PPOAgent()
         self.get_logger().info(f"Model version: {VERSION}")
         self.get_logger().info(f"Checkpoint directory: {PPO_CHECKPOINT_DIR}")
-        
+
         # Initialize state, action, reward, etc.
         self.state = None
         self.action = None
         self.reward = 0
         self.done = False
-        
+
         # Initialize episode counter and timestep counter
         self.episode_counter = 0
         self.timestep_counter = 0
         self.total_timesteps = TOTAL_TIMESTEPS
         self.episode_length = EPISODE_LENGTH
         self.current_ep_reward = 0
-        
-        self.get_logger().info(
-            "PPOModelNode initialized,subscribed to data topic and PPO model loaded.")
-            
-    def data_callback(self, msg):
-        self.get_logger().info(f"Received data in PPO node: {msg.data}")
-        self.state = np.array(msg.data, dtype=np.float32)
-        self.get_logger().info(f"State shape: {self.state.shape}")
-        self.get_action(self.state)
-        if self.state is None:
-            raise ValueError("State is None!")
-        self.get_logger().info(f"State shape: {self.state.shape}")
-        self.publish_action()
-        self.calculate_reward()
-        self.store_transition()
-        
-        # Increment timestep counter
-        self.timestep_counter += 1
-        
-        # Check if it's time to train the PPO agent
-        if self.timestep_counter % BATCH_SIZE == 0:
-            self.get_logger().info("Time to train the PPO agent!")
-            self.ppo_agent.learn()
 
-        # Check if the episode is done
-        if self.done or self.timestep_counter % self.episode_length == 0:
-            self.get_logger().info(f"Episode {self.episode_counter} finished!")
-            self.episode_counter += 1
-            self.reset_environment()
+        if DETERMINISTIC_CUDNN:
+            self.deterministic_cuda()
+
+        self.create_new_run_dir()
+
+        self.get_logger().info(
+            "PPOModelNode initialized,subscribed to data topic and PPO model loaded."
+        )
 
     def get_action(self, data):
         self.action, _ = self.ppo_agent.select_action(data)
@@ -83,19 +70,19 @@ class PPOModelNode(Node):
         action_msg.data = self.action.tolist()
         self.action_publisher.publish(action_msg)
         self.get_logger().info(f"Published action: {action_msg.data}")
-        
+
     def calculate_reward(self):
         # Implement reward calculation logic here
-        # For example:
-        if self.state[0] < 0:  # Example condition for punishment
-            self.reward = -1
-        else:
-            self.reward = 1  # Example condition for reward
+        self.reward = 1
 
     def store_transition(self):
         # Assuming you have access to the value and done flag
-        value = self.ppo_agent.critic(torch.tensor(self.state, dtype=torch.float32).to(device).unsqueeze(0)).item()
-        self.ppo_agent.store_transition(self.state, self.action, 0, value, self.reward, self.done)
+        value = self.ppo_agent.critic(
+            torch.tensor(self.state, dtype=torch.float32).to(device).unsqueeze(0)
+        ).item()
+        self.ppo_agent.store_transition(
+            self.state, self.action, 0, value, self.reward, self.done
+        )
 
     def reset_environment(self):
         # Implement your environment reset logic here
@@ -104,15 +91,18 @@ class PPOModelNode(Node):
         self.reward = 0
         self.done = False
         self.current_ep_reward = 0
-        self.get_logger().info(f"Episode {self.episode_counter} finished. Resetting environment.")
-    
-    def training(self):
-        while self.timestep_counter < self.total_timesteps:
-            observation = self.state
+        self.get_logger().info(
+            f"Episode {self.episode_counter} finished. Resetting environment."
+        )
+
+    def training(self, msg):
+        if self.timestep_counter < self.total_timesteps:
+            self.state = np.array(msg.data, dtype=np.float32)
             self.current_ep_reward = 0
             t1 = datetime.now()
-            for t in range(self.episode_length):
-                self.get_action(observation)
+            if self.current_step_in_episode < self.episode_length:
+                self.current_step_in_episode += 1
+                self.get_action(self.state)
                 self.publish_action()
                 self.calculate_reward()
                 self.store_transition()
@@ -125,21 +115,27 @@ class PPOModelNode(Node):
                     t2 = datetime.now()
                     t3 = t2 - t1
                     print(f"Episode duration: {t3}")
-                    break
-            self.reset_environment()
+                    self.save_checkpoint(self.run_dir)
+                    print(f"Checkpoint saved at {self.run_dir}")
+                    return 1
             print(
                 f"Episode: {self.episode_counter}, Timestep: {self.timestep_counter}, Reward: {self.current_ep_reward}"
             )
+        # self.reset_environment()
+        # decide what to do in the end of an episode
+        # exit(2)
 
-    def testing(self):
-        while self.timestep_counter < TEST_TIMESTEPS:
-            observation = self.state
+    def testing(self, msg):
+        if self.timestep_counter < TEST_TIMESTEPS:
+            self.state = np.array(msg.data, dtype=np.float32)
             self.current_ep_reward = 0
             t1 = datetime.now()
-            for t in range(self.episode_length):
-                self.get_action(observation)
+            if self.current_step_in_episode < self.episode_length:
+                self.current_step_in_episode += 1
+                self.get_action(self.state)
                 self.publish_action()
                 self.calculate_reward()
+                self.store_transition()
                 self.timestep_counter += 1
                 self.current_ep_reward += self.reward
                 if self.done:
@@ -147,11 +143,51 @@ class PPOModelNode(Node):
                     t2 = datetime.now()
                     t3 = t2 - t1
                     print(f"Episode duration: {t3}")
-                    break
-            self.reset_environment()
+                    self.save_checkpoint(self.run_dir)
+                    print(f"Checkpoint saved at {self.run_dir}")
+                    return 1
             print(
                 f"Episode: {self.episode_counter}, Timestep: {self.timestep_counter}, Reward: {self.current_ep_reward}"
             )
+        # self.reset_environment()
+        # decide what to do in the end of an episode
+        # exit(2)
+
+    def save_checkpoint(self, run_dir):
+        self.ppo_agent.save_model(run_dir)
+        # continue to save other stuff...
+        
+    def load_checkpoint(self, run_dir):
+        self.ppo_agent.load_model(run_dir)
+        # continue to load other stuff...
+        
+    # Set random seed for reproducibility
+    def deterministic_cuda(self):
+        if torch.cuda.is_available():
+            # Ensure CuDNN is enabled and set deterministic mode based on the user's preference
+            if torch.backends.cudnn.enabled:
+                print("CuDNN is enabled. Setting CuDNN to deterministic mode.")
+                torch.backends.cudnn.deterministic = True
+                torch.backends.cudnn.benchmark = (
+                    False  # Disable auto-tuner for deterministic behavior
+                )
+            else:
+                torch.backends.cudnn.deterministic = False
+                torch.backends.cudnn.benchmark = (
+                    True  # Enable auto-tuner for faster performance
+                )
+
+    def create_new_run_dir(self):
+        version_dir = os.path.join(PPO_CHECKPOINT_DIR, VERSION)
+        os.makedirs(version_dir, exist_ok=True)
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.run_name = f"run_{timestamp}"
+        self.run_dir = os.path.join(version_dir, self.run_name)
+        os.makedirs(self.run_dir, exist_ok=True)
+
+        self.get_logger().info(f"Run directory created: {self.run_dir}")
+
 
 def main(args=None):
     rclpy.init(args=args)
