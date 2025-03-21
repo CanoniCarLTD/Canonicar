@@ -128,8 +128,6 @@ class DataCollector(Node):
         return fused_features
 
 
-
-
     def process_imu(self, imu_msg):
         """Process IMU data."""
         self.get_logger().info("Processing IMU data...")
