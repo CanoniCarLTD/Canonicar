@@ -88,7 +88,6 @@ class PPOModelNode(Node):
             if self.current_episode < self.episode_length:
                 self.current_episode+=1
                 self.get_action(self.state)
-                
                 self.publish_action()
                 self.calculate_reward()
                 self.store_transition()
