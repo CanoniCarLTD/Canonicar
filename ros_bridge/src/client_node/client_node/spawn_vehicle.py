@@ -61,8 +61,13 @@ class SpawnVehicleNode(Node):
             "sensors_config.json",
         )
         
-        self.control_publisher = self.create_publisher(
-            Float32MultiArray, "/carla/vehicle/control", 10
+        # self.control_publisher = self.create_publisher(
+        #     Float32MultiArray, "/carla/vehicle/control", 10
+        # )
+        # Start to deploy vehicles after map is loaded
+
+        self.start_vehicle_manager = self.create_publisher(
+            String, "/start_vehicle_manager", 10
         )
 
         self.vehicle = None
@@ -93,7 +98,9 @@ class SpawnVehicleNode(Node):
         if self.map_loaded and self.data_collector_ready:
             self.get_logger().info("Starting to drive")
             self.spawn_objects_from_config()
+            self.start_vehicle_manager.publish(String(data="start with vehicle"))
             self.get_logger().info("Spanwed objects from config")
+        
         self.get_logger().info(
             f"Is map loaded?: {self.map_loaded}, Is data collector ready {self.data_collector_ready}"
         )
@@ -203,13 +210,16 @@ class SpawnVehicleNode(Node):
             sensors = ego_object.get("sensors", [])
             if sensors:
                 self.spawn_sensors(sensors)
-
+                
+            '''
+                AUTOPILOT
+            '''
             # self.traffic_manager.global_percentage_speed_difference(0)
             # self.traffic_manager.auto_lane_change(self.vehicle, False)
             # self.traffic_manager.random_left_lanechange_percentage(self.vehicle, 0)
             # self.traffic_manager.random_right_lanechange_percentage(self.vehicle, 0)
             # self.vehicle.set_autopilot(True, self.traffic_manager.get_port())
-
+            
         except Exception as e:
             self.get_logger().error(f"Error spawning vehicle: {e}")
             import traceback

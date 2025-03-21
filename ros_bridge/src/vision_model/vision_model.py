@@ -201,4 +201,7 @@ class VisionProcessor:
             features = self.model(rgb_tensor, lidar_tensor)
             
         return features.cpu().numpy()[0]  # Return as numpy array
+<<<<<<< HEAD
 
+=======
+>>>>>>> 620a5ce0922adeb39fefcc64c4d40e96ba2ef475

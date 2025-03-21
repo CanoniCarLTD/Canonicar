@@ -67,7 +67,7 @@ class LoadMapNode(Node):
             opendrive_params = carla.OpendriveGenerationParameters(
                 # vertex_distance=2.0,
                 # max_road_length=500.0,
-                wall_height=1.0,
+                wall_height=2.5,
                 # additional_width=20.0,
                 smooth_junctions=True,
                 enable_mesh_visibility=True,
