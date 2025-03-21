@@ -209,18 +209,21 @@ class PPOAgent:
         self.rewards.append(reward)
         self.dones.append(done)
 
-    def save_models(self, directory):
-        print("... saving models ...")
-        torch.save(
-            self.actor.state_dict(),
-            os.path.join(directory, "actor.pth"),
-        )
-        torch.save(
-            self.critic.state_dict(),
-            os.path.join(directory, "critic.pth"),
-        )
+    def save_checkpoint(self, directory):
+        print("Saving PPO checkpoint...")
 
-    def load_models(self, directory):
+        # Save model parameters
+        torch.save(self.actor.state_dict(), os.path.join(directory, "actor.pth"))
+        torch.save(self.critic.state_dict(), os.path.join(directory, "critic.pth"))
+
+        # Save optimizer states
+        torch.save(self.actor_optimizer.state_dict(), os.path.join(directory, "actor_optim.pth"))
+        torch.save(self.critic_optimizer.state_dict(), os.path.join(directory, "critic_optim.pth"))
+
+        print(f"✅ Model + optimizer checkpoint saved to {directory}")
+
+
+    def load_checkpoint(self, directory):
         print(f"... loading models {directory} ...")
         try:
             self.actor.load_state_dict(torch.load(os.path.join(directory, "actor.pth")))

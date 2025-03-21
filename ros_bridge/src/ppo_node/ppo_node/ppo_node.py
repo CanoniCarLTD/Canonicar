@@ -6,6 +6,7 @@ import torch
 import numpy as np
 import sys
 import os
+import json
 from datetime import datetime
 
 from .ML import ppo_agent
@@ -154,11 +155,11 @@ class PPOModelNode(Node):
         # exit(2)
 
     def save_checkpoint(self, run_dir):
-        self.ppo_agent.save_model(run_dir)
+        self.ppo_agent.save_checkpoint(run_dir)
         # continue to save other stuff...
         
     def load_checkpoint(self, run_dir):
-        self.ppo_agent.load_model(run_dir)
+        self.ppo_agent.load_checkpoint(run_dir)
         # continue to load other stuff...
         
     # Set random seed for reproducibility
