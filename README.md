@@ -97,6 +97,12 @@ ros2 launch ros_bridge_launch system_launch.py host:=your_host_ip_addres
   ```
   - if you are making changes at the nodes, and the containers are up and running, you have to do `colcon build` inside the container itself before launching the nodes.
 
+## Watching live training metrics progress (STILL NEEDS TESTING)
+
+```bash
+tensorboard --logdir tensorboard_logs
+```
+
 ## License
 
 This project is licensed under the [MIT License](LICENSE).

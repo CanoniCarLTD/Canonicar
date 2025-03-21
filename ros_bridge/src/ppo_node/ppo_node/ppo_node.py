@@ -8,6 +8,9 @@ import sys
 import os
 import json
 from datetime import datetime
+import random
+import csv
+from torch.utils.tensorboard import SummaryWriter
 
 from .ML import ppo_agent
 from .ML import parameters
@@ -55,6 +58,10 @@ class PPOModelNode(Node):
 
         if DETERMINISTIC_CUDNN:
             self.deterministic_cuda()
+            # Seeding to reproduce the results
+            random.seed(SEED)
+            np.random.seed(SEED)
+            torch.manual_seed(SEED)
 
         self.create_new_run_dir()
 
@@ -98,18 +105,21 @@ class PPOModelNode(Node):
         )
 
     ##################################################################################################
-    #                                       ENVIRONMENT RESET
+    #                                       RUN RESET
     ##################################################################################################
 
-    def reset_environment(self):
+    def reset_run(self):
+        ''' Reset the state, action, reward, done, current_ep_reward, and current_step_in_episode variables after an episode ends.
+        '''
         # Implement your environment reset logic here
         self.state = None
         self.action = None
         self.reward = 0
         self.done = False
         self.current_ep_reward = 0
+        self.current_step_in_episode = 0    
         self.get_logger().info(
-            f"Episode {self.episode_counter} finished. Resetting environment."
+            f"Episode {self.episode_counter} finished. Resetting."
         )
 
     ##################################################################################################
@@ -121,88 +131,180 @@ class PPOModelNode(Node):
             self.state = np.array(msg.data, dtype=np.float32)
             self.current_ep_reward = 0
             t1 = datetime.now()
+            
             if self.current_step_in_episode < self.episode_length:
                 self.current_step_in_episode += 1
                 self.get_action(self.state)
                 self.publish_action()
                 self.calculate_reward()
                 self.store_transition()
+                
                 self.timestep_counter += 1
                 self.current_ep_reward += self.reward
+                
                 if self.timestep_counter % BATCH_SIZE == 0:
-                    self.ppo_agent.learn()
+                    actor_loss, critic_loss, entropy = self.ppo_agent.learn()
+                    self.log_step_metrics(actor_loss, critic_loss, entropy)
+                    
                 if self.done:
-                    self.episode_counter += 1
                     t2 = datetime.now()
                     t3 = t2 - t1
                     print(f"Episode duration: {t3}")
+                    self.log_episode_metrics()
                     self.save_checkpoint(self.run_dir)
                     print(f"Checkpoint saved at {self.run_dir}")
+                    self.reset_run()
+                    self.episode_counter += 1
                     return 1
             print(
                 f"Episode: {self.episode_counter}, Timestep: {self.timestep_counter}, Reward: {self.current_ep_reward}"
             )
-        # self.reset_environment()
-        # decide what to do in the end of an episode
-        # exit(2)
+        else:
+            self.log_episode_metrics()
+            self.save_checkpoint(self.run_dir)
+            self.reset_run()
+            self.episode_counter += 1
+            # decide what to do in the end of an episode
+            # exit(2)
 
     def testing(self, msg):
         if self.timestep_counter < TEST_TIMESTEPS:
             self.state = np.array(msg.data, dtype=np.float32)
             self.current_ep_reward = 0
             t1 = datetime.now()
+            
             if self.current_step_in_episode < self.episode_length:
                 self.current_step_in_episode += 1
                 self.get_action(self.state)
                 self.publish_action()
                 self.calculate_reward()
                 self.store_transition()
+                
                 self.timestep_counter += 1
                 self.current_ep_reward += self.reward
+                
                 if self.done:
-                    self.episode_counter += 1
                     t2 = datetime.now()
                     t3 = t2 - t1
                     print(f"Episode duration: {t3}")
+                    self.log_episode_metrics()
                     self.save_checkpoint(self.run_dir)
                     print(f"Checkpoint saved at {self.run_dir}")
-                    return 1
+                    self.reset_run()
+                    self.episode_counter += 1
+                return 1
             print(
                 f"Episode: {self.episode_counter}, Timestep: {self.timestep_counter}, Reward: {self.current_ep_reward}"
             )
-        # self.reset_environment()
-        # decide what to do in the end of an episode
-        # exit(2)
+
+        else:
+            self.log_episode_metrics()
+            self.save_checkpoint(self.run_dir)
+            self.reset_run()
+            self.episode_counter += 1
+            # decide what to do in the end of an episode
+            # exit(2)
 
     ##################################################################################################
-    #                                       CHECKPOINTING
+    #                                   CHECKPOINTING AND LOGGING
     ##################################################################################################
 
     def save_checkpoint(self, run_dir):
         self.ppo_agent.save_checkpoint(run_dir)
         # continue to save other stuff...
-
+        # Save metadata
+        meta = {
+            "episode_counter": self.episode_counter,
+            "timestep_counter": self.timestep_counter,
+            "action_std": self.ppo_agent.action_std,
+            "current_ep_reward": self.current_ep_reward,
+            "current_step_in_episode": self.current_step_in_episode,
+        }
+        try:
+            meta_path = os.path.join(run_dir, "meta.json")
+            with open(meta_path, "w") as f:
+                json.dump(meta, f)
+            self.get_logger().info(f"✅ Metadata saved: {meta}")
+        except Exception as e:
+            self.get_logger().error(f"❌ Metadata not saved: {e}")
+        
     def load_checkpoint(self, run_dir):
         self.ppo_agent.load_checkpoint(run_dir)
         # continue to load other stuff...
-        # Load metadata if available
-        meta_path = os.path.join(run_dir, "meta.json")
-        if os.path.exists(meta_path):
-            with open(meta_path, "r") as f:
-                meta = json.load(f)
-            self.episode_counter = meta.get("episode_counter", 0)
-            self.timestep_counter = meta.get("timestep_counter", 0)
-            self.ppo_agent.action_std = meta.get("action_std", ACTION_STD_INIT)
-            self.current_ep_reward = meta.get("current_ep_reward", 0)
-            self.current_step_in_episode = meta.get("current_step_in_episode", 0)
-            self.get_logger().info(f"✅ Metadata loaded: {meta}")
-        else:
-            self.get_logger().warn(
-                f"No meta.json found in {run_dir}. Counters not restored."
-            )
+        # Load metadata
+        try:
+            meta_path = os.path.join(run_dir, "meta.json")
+            if os.path.exists(meta_path):
+                with open(meta_path, "r") as f:
+                    meta = json.load(f)
+                self.episode_counter = meta.get("episode_counter", 0)
+                self.timestep_counter = meta.get("timestep_counter", 0)
+                self.ppo_agent.action_std = meta.get("action_std", ACTION_STD_INIT)
+                self.current_ep_reward = meta.get("current_ep_reward", 0)
+                self.current_step_in_episode = meta.get("current_step_in_episode", 0)
+                self.get_logger().info(f"✅ Metadata loaded: {meta}")
+            else:
+                self.get_logger().warn(
+                    f"No meta.json found in {run_dir}. No metadata loaded."
+                )
+        except Exception as e:
+            self.get_logger().error(f"❌ Metadata not loaded: {e}")
 
+    def log_step_metrics(self, actor_loss, critic_loss, entropy):
+        '''
+        Logs the metrics into both a csv file and a TensorBoard after each step - for training only.
+        The csv file is for easy access to the metrics and debugging.
+        The TensorBoard logs are for visualization and monitoring the training process.
+        '''
+        log_file = os.path.join(self.run_dir, "training_log.csv")
+        row = {
+            "step": self.ppo_agent.learn_step_counter,
+            "timestep": self.timestep_counter,
+            "actor_loss": actor_loss,
+            "critic_loss": critic_loss,
+            "entropy": entropy,
+            "action_std": self.ppo_agent.action_std
+        }
+        write_header = not os.path.exists(log_file)
+        with open(log_file, "a", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=row.keys())
+            if write_header:
+                writer.writeheader()
+            writer.writerow(row)
+        
+        # TensorBoard logging
+        self.writer.add_scalar("Loss/actor", actor_loss, self.timestep_counter)
+        self.writer.add_scalar("Loss/critic", critic_loss, self.timestep_counter)
+        self.writer.add_scalar("Entropy", entropy, self.timestep_counter)
+        self.writer.add_scalar("Exploration/action_std", self.ppo_agent.action_std, self.timestep_counter)
+    
+    def log_episode_metrics(self):
+        '''
+        Logs the metrics into a csv file after each episode - for both training and testing.
+        '''
+        log_file = os.path.join(self.run_dir, "training_log.csv" if TRAIN else "testing_log.csv")
+        row = {
+            "episode": self.episode_counter,
+            "timestep": self.timestep_counter,
+            "episode_reward": self.current_ep_reward,
+            "episode_length": self.current_step_in_episode,
+            "action_std": self.ppo_agent.action_std
+        }
+        write_header = not os.path.exists(log_file)
+        with open(log_file, "a", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=row.keys())
+            if write_header:
+                writer.writeheader()
+            writer.writerow(row)
+        
+        # TensorBoard logging
+        prefix = "Train" if TRAIN else "Test"
+        self.writer.add_scalar(f"{prefix}/Episode Reward", self.current_ep_reward, self.episode_counter)
+        self.writer.add_scalar(f"{prefix}/Episode Length", self.current_step_in_episode, self.episode_counter)
+        self.writer.add_scalar(f"{prefix}/Action Std", self.ppo_agent.action_std, self.episode_counter)
+        
     ##################################################################################################
-    #                                       UTILITIES
+    #                                           UTILITIES
     ##################################################################################################
 
     def deterministic_cuda(self):
@@ -236,6 +338,46 @@ class PPOModelNode(Node):
         os.makedirs(self.run_dir, exist_ok=True)
 
         self.get_logger().info(f"Run directory created: {self.run_dir}")
+        
+        
+    def create_new_run_dir(self):
+        """
+        Creates for the current run - both a visually readable directory and a tensorboard log directory 
+        """
+        version_dir = os.path.join(PPO_CHECKPOINT_DIR, VERSION)
+        os.makedirs(version_dir, exist_ok=True)
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.run_name = f"run_{timestamp}"
+        self.run_dir = os.path.join(version_dir, self.run_name)
+        os.makedirs(self.run_dir, exist_ok=True)
+
+        self.get_logger().info(f"Run directory created: {self.run_dir}")
+
+        # SummaryWriter setup
+        tb_base = os.path.join("tensorboard_logs", VERSION)
+        os.makedirs(tb_base, exist_ok=True)
+
+        mode = "train" if TRAIN else "test"
+        self.tb_log_dir = os.path.join(tb_base, f"{self.run_name}_{mode}")
+        self.writer = SummaryWriter(log_dir=self.tb_log_dir)
+
+        # Log hyperparameters
+        hparams = {
+            "learning_rate": LEARNING_RATE,
+            "batch_size": BATCH_SIZE,
+            "gamma": GAMMA,
+            "lambda_gae": LAMBDA_GAE,
+            "entropy_coef": ENTROPY_COEF,
+            "policy_clip": POLICY_CLIP,
+            "input_dim": PPO_INPUT_DIM,
+            "episode_length": EPISODE_LENGTH,
+            "total_timesteps": TOTAL_TIMESTEPS,
+        }
+        self.writer.add_text(
+            "hyperparameters",
+            "|param|value|\n|-|-|\n%s" % "\n".join([f"|{k}|{v}|" for k, v in hparams.items()])
+        )
 
 
 def main(args=None):

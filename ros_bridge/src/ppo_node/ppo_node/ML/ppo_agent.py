@@ -11,6 +11,7 @@ import numpy as np
 from torch.distributions import MultivariateNormal
 import sys
 from .parameters import *
+from torch.utils.tensorboard import SummaryWriter
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -277,9 +278,11 @@ class PPOAgent:
     #                                       MAIN PPO ALGORITHM
     ##################################################################################################
 
+
     def learn(self):
         """
         Perform PPO training using stored experiences (from latest batch).
+        returns: actor_loss, critic_loss, entropy
         """
         # Convert lists to tensors
         states = torch.tensor(self.states, dtype=torch.float32).to(device)
@@ -294,7 +297,11 @@ class PPOAgent:
 
         # Compute advantages
         advantages = self.compute_gae(values, rewards, dones)
-
+        
+        total_actor_loss = 0.0
+        total_critic_loss = 0.0
+        total_entropy = 0.0
+        num_batches = 0
         # Perform PPO optimization steps
         for _ in range(NUM_EPOCHS):
             indices = np.arange(len(states))
@@ -347,6 +354,11 @@ class PPOAgent:
                     self.critic.parameters(), 0.5
                 )  # Gradient clipping
                 self.critic_optimizer.step()
+                
+                total_actor_loss += actor_loss.item()
+                total_critic_loss += critic_loss.item()
+                total_entropy += entropy.mean().item()
+                num_batches += 1
 
         # Increment learn step counter & decay action standard deviation
         self.learn_step_counter += 1
@@ -360,4 +372,10 @@ class PPOAgent:
             [],
             [],
             [],
+        )
+        # Return averaged metrics
+        return (
+            total_actor_loss / num_batches,
+            total_critic_loss / num_batches,
+            total_entropy / num_batches
         )
