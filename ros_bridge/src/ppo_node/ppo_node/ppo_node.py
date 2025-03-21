@@ -360,7 +360,7 @@ class PPOModelNode(Node):
 
         mode = "train" if TRAIN else "test"
         self.tb_log_dir = os.path.join(tb_base, f"{self.run_name}_{mode}")
-        self.writer = SummaryWriter(log_dir=self.tb_log_dir)
+        self.summary_writer = SummaryWriter(log_dir=self.tb_log_dir)
 
         # Log hyperparameters
         hparams = {
@@ -374,7 +374,7 @@ class PPOModelNode(Node):
             "episode_length": EPISODE_LENGTH,
             "total_timesteps": TOTAL_TIMESTEPS,
         }
-        self.writer.add_text(
+        self.summary_writer.add_text(
             "hyperparameters",
             "|param|value|\n|-|-|\n%s" % "\n".join([f"|{k}|{v}|" for k, v in hparams.items()])
         )
