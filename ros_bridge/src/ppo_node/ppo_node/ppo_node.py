@@ -17,9 +17,10 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 class PPOModelNode(Node):
     def __init__(self):
         super().__init__("ppo_model_node")
+        train = TRAIN
         self.current_episode = 0 
         self.data_sub = self.create_subscription(
-            Float32MultiArray, "/data_to_ppo", self.training, 10
+            Float32MultiArray, "/data_to_ppo", self.training if train else self.testing, 10
         )
 
         # Action publisher (Steering, Throttle, Brake)
@@ -109,15 +110,17 @@ class PPOModelNode(Node):
         else:
             pass
 
-    def testing(self):
-        while self.timestep_counter < TEST_TIMESTEPS:
-            observation = self.state
+    def testing(self, msg):
+        if self.timestep_counter < TEST_TIMESTEPS:
+            self.state = np.array(msg.data, dtype=np.float32)
             self.current_ep_reward = 0
             t1 = datetime.now()
-            for t in range(self.episode_length):
-                self.get_action(observation)
+            if self.current_episode < self.episode_length:
+                self.current_episode+=1
+                self.get_action(self.state)
                 self.publish_action()
                 self.calculate_reward()
+                self.store_transition()
                 self.timestep_counter += 1
                 self.current_ep_reward += self.reward
                 if self.done:
@@ -125,11 +128,14 @@ class PPOModelNode(Node):
                     t2 = datetime.now()
                     t3 = t2 - t1
                     print(f"Episode duration: {t3}")
-                    break
+                    return 1
             self.reset_environment()
             print(
                 f"Episode: {self.episode_counter}, Timestep: {self.timestep_counter}, Reward: {self.current_ep_reward}"
             )
+        # decide what to do in the end of an episode
+        else:
+            pass
 
 def main(args=None):
     rclpy.init(args=args)

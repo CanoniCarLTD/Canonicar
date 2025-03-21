@@ -9,6 +9,7 @@ VERSION = "1.0.0"
 MODEL_LOAD = False  # Set to True to resume training from checkpoint
 CHECKPOINT_FILE = None  # Specify file when MODEL_LOAD=True
 
+TRAIN = True  # Set to False to disable training and only run inference
 # Training configuration
 SEED = 0
 BATCH_SIZE = 64  # Number of timesteps collected before a policy update
