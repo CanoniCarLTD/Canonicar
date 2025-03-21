@@ -102,13 +102,10 @@ class PPOModelNode(Node):
                     t3 = t2 - t1
                     print(f"Episode duration: {t3}")
                     return 1
-            self.reset_environment()
-            print(
-                f"Episode: {self.episode_counter}, Timestep: {self.timestep_counter}, Reward: {self.current_ep_reward}"
-            )
+            print(f"Episode: {self.episode_counter}, Timestep: {self.timestep_counter}, Reward: {self.current_ep_reward}")
+        # self.reset_environment()
         # decide what to do in the end of an episode
-        else:
-            pass
+        # exit(2)
 
     def testing(self, msg):
         if self.timestep_counter < TEST_TIMESTEPS:
@@ -129,13 +126,10 @@ class PPOModelNode(Node):
                     t3 = t2 - t1
                     print(f"Episode duration: {t3}")
                     return 1
-            self.reset_environment()
-            print(
-                f"Episode: {self.episode_counter}, Timestep: {self.timestep_counter}, Reward: {self.current_ep_reward}"
-            )
+            print(f"Episode: {self.episode_counter}, Timestep: {self.timestep_counter}, Reward: {self.current_ep_reward}")
+        # self.reset_environment()
         # decide what to do in the end of an episode
-        else:
-            pass
+        # exit(2)
 
 def main(args=None):
     rclpy.init(args=args)
