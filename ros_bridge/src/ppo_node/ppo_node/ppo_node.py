@@ -17,9 +17,9 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 class PPOModelNode(Node):
     def __init__(self):
         super().__init__("ppo_model_node")
-
+        self.current_episode = 0 
         self.data_sub = self.create_subscription(
-            Float32MultiArray, "/data_to_ppo", self.data_callback, 10
+            Float32MultiArray, "/data_to_ppo", self.training, 10
         )
 
         # Action publisher (Steering, Throttle, Brake)
@@ -47,32 +47,6 @@ class PPOModelNode(Node):
         
         self.get_logger().info(
             "PPOModelNode initialized,subscribed to data topic and PPO model loaded.")
-            
-    def data_callback(self, msg):
-        self.get_logger().info(f"Received data in PPO node: {msg.data}")
-        self.state = np.array(msg.data, dtype=np.float32)
-        self.get_logger().info(f"State shape: {self.state.shape}")
-        self.get_action(self.state)
-        if self.state is None:
-            raise ValueError("State is None!")
-        self.get_logger().info(f"State shape: {self.state.shape}")
-        self.publish_action()
-        self.calculate_reward()
-        self.store_transition()
-        
-        # Increment timestep counter
-        self.timestep_counter += 1
-        
-        # Check if it's time to train the PPO agent
-        if self.timestep_counter % BATCH_SIZE == 0:
-            self.get_logger().info("Time to train the PPO agent!")
-            self.ppo_agent.learn()
-
-        # Check if the episode is done
-        if self.done or self.timestep_counter % self.episode_length == 0:
-            self.get_logger().info(f"Episode {self.episode_counter} finished!")
-            self.episode_counter += 1
-            self.reset_environment()
 
     def get_action(self, data):
         self.action, _ = self.ppo_agent.select_action(data)
@@ -105,14 +79,16 @@ class PPOModelNode(Node):
         self.done = False
         self.current_ep_reward = 0
         self.get_logger().info(f"Episode {self.episode_counter} finished. Resetting environment.")
-    
-    def training(self):
-        while self.timestep_counter < self.total_timesteps:
-            observation = self.state
+
+    def training(self, msg):
+        if self.timestep_counter < self.total_timesteps:
+            self.state = np.array(msg.data, dtype=np.float32)
             self.current_ep_reward = 0
             t1 = datetime.now()
-            for t in range(self.episode_length):
-                self.get_action(observation)
+            if self.current_episode < self.episode_length:
+                self.current_episode+=1
+                self.get_action(self.state)
+                
                 self.publish_action()
                 self.calculate_reward()
                 self.store_transition()
@@ -125,11 +101,14 @@ class PPOModelNode(Node):
                     t2 = datetime.now()
                     t3 = t2 - t1
                     print(f"Episode duration: {t3}")
-                    break
+                    return 1
             self.reset_environment()
             print(
                 f"Episode: {self.episode_counter}, Timestep: {self.timestep_counter}, Reward: {self.current_ep_reward}"
             )
+        # decide what to do in the end of an episode
+        else:
+            pass
 
     def testing(self):
         while self.timestep_counter < TEST_TIMESTEPS:
