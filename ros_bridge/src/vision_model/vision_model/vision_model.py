@@ -116,6 +116,8 @@ class VisionProcessor:
         # Convert to torch tensor and normalize
         if isinstance(rgb_image, np.ndarray):
             # Convert from [H, W, 3] to [3, H, W]
+            # Make sure the array is C-contiguous before converting to tensor
+            rgb_image = np.ascontiguousarray(rgb_image)
             rgb_tensor = torch.from_numpy(rgb_image).permute(2, 0, 1).float() / 255.0
             
             # Resize to expected input size (224x224 for MobileNetV2)
@@ -201,7 +203,3 @@ class VisionProcessor:
             features = self.model(rgb_tensor, lidar_tensor)
             
         return features.cpu().numpy()[0]  # Return as numpy array
-<<<<<<< HEAD
-
-=======
->>>>>>> 620a5ce0922adeb39fefcc64c4d40e96ba2ef475
