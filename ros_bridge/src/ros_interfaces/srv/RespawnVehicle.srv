@@ -1,0 +1,4 @@
+string reason  # Reason for respawn (e.g., "collision", "stuck", etc.)
+---
+bool success   # Whether the respawn was successful
+string message # Additional information about the respawn attempt

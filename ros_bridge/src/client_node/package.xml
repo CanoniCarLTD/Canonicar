@@ -20,6 +20,16 @@
   <exec_depend>carla</exec_depend>
   <exec_depend>open3d</exec_depend>
 
+  <depend>rosidl_default_generators</depend>
+  <exec_depend>rosidl_default_runtime</exec_depend>
+  <member_of_group>rosidl_interface_packages</member_of_group>
+  <depend>ros_interfaces</depend>
+
+  <depend>geometry_msgs</depend>
+  <buildtool_depend>rosidl_default_generators</buildtool_depend>
+  <exec_depend>rosidl_default_runtime</exec_depend>
+  <member_of_group>rosidl_interface_packages</member_of_group>
+
   <depend>sensors_data</depend>
   <depend>rclpy</depend>
   <depend>sensor_msgs</depend>
