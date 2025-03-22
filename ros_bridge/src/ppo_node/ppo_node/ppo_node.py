@@ -42,13 +42,12 @@ class PPOModelNode(Node):
         self.get_logger().info(f"Model version: {VERSION}")
         self.get_logger().info(f"Checkpoint directory: {PPO_CHECKPOINT_DIR}")
 
-        # Initialize state, action, reward, etc.
         self.state = None
         self.action = None
         self.reward = 0
         self.done = False
 
-        # Initialize episode counter and timestep counter
+        self.termination_reason = "unknown"
         self.episode_counter = 0
         self.timestep_counter = 0
         self.total_timesteps = TOTAL_TIMESTEPS
@@ -80,7 +79,7 @@ class PPOModelNode(Node):
 
     def get_action(self, data):
         self.action, _ = self.ppo_agent.select_action(data)
-        self.get_logger().info(f"Retured action: {self.action}")
+        self.get_logger().info(f"Returned action: {self.action}")
 
     ##################################################################################################
     #                                       ACTION PUBLISHING
@@ -116,13 +115,13 @@ class PPOModelNode(Node):
     def reset_run(self):
         ''' Reset the state, action, reward, done, current_ep_reward, and current_step_in_episode variables after an episode ends.
         '''
-        # Implement your environment reset logic here
         self.state = None
         self.action = None
         self.reward = 0
         self.done = False
         self.current_ep_reward = 0
-        self.current_step_in_episode = 0    
+        self.current_step_in_episode = 0
+        self.termination_reason = "unknown"
         self.get_logger().info(
             f"Episode {self.episode_counter} finished. Resetting."
         )
@@ -146,7 +145,13 @@ class PPOModelNode(Node):
                 # Mark episode as done if episode_length reached
                 if self.current_step_in_episode >= self.episode_length:
                     self.done = True
-
+                    self.termination_reason = "episode_length"
+                    
+                # Later, if we detect crashes or other done causes and want to respawn, update:
+                # self.termination_reason = "timeout"
+                # self.termination_reason = "collision"
+                # self.termination_reason = "goal_reached"
+                
                 self.store_transition()
                 self.timestep_counter += 1
                 self.current_ep_reward += self.reward
@@ -169,7 +174,7 @@ class PPOModelNode(Node):
                     self.episode_counter += 1
                     return 1
 
-            print(f"Episode: {self.episode_counter}, Timestep: {self.timestep_counter}, Reward: {self.current_ep_reward}")
+            self.get_logger().info(f"Episode: {self.episode_counter}, Timestep: {self.timestep_counter}, Reward: {self.current_ep_reward}")
 
         else:
             # End of training
@@ -227,19 +232,19 @@ class PPOModelNode(Node):
     ##################################################################################################
 
     
-    def save_training_state(self):
+    def save_training_state(self, run_dir):
         """
         Saves the model state dicts, optimizers, and metadata.
         """
-        self.ppo_agent.save_model_and_optimizers(self.state_dict_dir)
-        self.save_training_metadata()
+        self.ppo_agent.save_model_and_optimizers(run_dir)
+        self.save_training_metadata(run_dir)
 
-    def load_training_state(self):
+    def load_training_state(self, run_dir):
         """
         Loads model weights, optimizers, and training metadata.
         """
-        self.ppo_agent.load_model_and_optimizers(self.state_dict_dir)
-        self.load_training_metadata()
+        self.ppo_agent.load_model_and_optimizers(run_dir)
+        self.load_training_metadata(run_dir)
 
     def save_training_metadata(self):
         meta = {
@@ -308,7 +313,8 @@ class PPOModelNode(Node):
             "timestep": self.timestep_counter,
             "episode_reward": self.current_ep_reward,
             "episode_length": self.current_step_in_episode,
-            "action_std": self.ppo_agent.action_std
+            "action_std": self.ppo_agent.action_std,
+            "termination_reason": self.termination_reason
         }
         write_header = not os.path.exists(log_file)
         with open(log_file, "a", newline="") as f:
@@ -376,6 +382,8 @@ class PPOModelNode(Node):
         self.run_name = f"run_{timestamp}_{serial:04d}"
         self.run_dir = os.path.join(version_dir, self.run_name)
         os.makedirs(self.run_dir, exist_ok=True)
+        self.run_dir = os.path.join(version_dir, self.run_name)
+        os.makedirs(self.run_dir, exist_ok=True)
         self.get_logger().info(f"Run directory created: {self.run_dir}")
 
         # Subfolders
@@ -409,9 +417,9 @@ class PPOModelNode(Node):
             "|param|value|\n|-|-|\n%s" % "\n".join([f"|{k}|{v}|" for k, v in hparams.items()])
         )
 
-def shutdown_writer(self):
-    self.summary_writer.close()
-    self.get_logger().info("SummaryWriter closed.")
+    def shutdown_writer(self):
+        self.summary_writer.close()
+        self.get_logger().info("SummaryWriter closed.")
     
 def main(args=None):
     rclpy.init(args=args)
