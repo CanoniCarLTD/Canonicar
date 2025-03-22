@@ -1,0 +1,12 @@
+# Base requirements
+streamlit>=1.32.0
+websocket-client>=1.6.1
+numpy>=1.21.6
+plotly>=5.18.0
+opencv-python-headless>=4.8.1.78
+python-dotenv>=0.21.1
+
+# ROS requirements (for backend only)
+rclpy>=3.3.8
+sensor_msgs>=4.2.3
+cv_bridge>=3.2.1

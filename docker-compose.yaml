@@ -1,12 +1,10 @@
-
 services:
-
   # # Carla server container
   # carla:
   #   image: carlasim/carla:0.9.13
   #   container_name: carla_server
   #   runtime: nvidia
-  #   ports: 
+  #   ports:
   #     - 2000-2002:2000-2002
   #   command: >
   #     bash -c "
@@ -42,7 +40,7 @@ services:
   #   command: ros2 launch carla_ros_bridge carla_ros_bridge_with_example_ego_vehicle.launch.py host:=10.10.248.44 port:=2000 timeout:=15
   #   runtime: nvidia
   #   restart: always
-  #   depends_on: 
+  #   depends_on:
   #     carla:
   #       condition: service_started
 
@@ -53,7 +51,7 @@ services:
   #     dockerfile: Dockerfile
   #   container_name: ros2_container
   #   command: ros2 run ros2_utils list_topics_node
-  #   depends_on: 
+  #   depends_on:
   #     bridge:
   #       condition: service_started
 
@@ -74,11 +72,11 @@ services:
     volumes:
       - ./ros_bridge/src:/ros_bridge/src
     # restart: always
-    # depends_on: 
+    # depends_on:
     #   bridge:
     #     condition: service_started
 
-  # foxglove to visualize live data 
+  # foxglove to visualize live data
   foxglove_bridge:
     build:
       context: ./docker/foxglove_bridge/
@@ -88,8 +86,27 @@ services:
     container_name: foxglove_bridge
     command: ros2 launch foxglove_bridge foxglove_bridge_launch.xml port:=8765
     restart: always
-    # depends_on: 
+    # depends_on:
     #   bridge:
     #     condition: service_started
 
+    # Foxglove Studio service
 
+  data_server:
+    build:
+      context: ./app/server
+      dockerfile: Dockerfile
+    ports:
+      - "8766:8766"
+    container_name: carla_data_server
+    environment:
+      - ROS_DOMAIN_ID=0
+    networks:
+      - carla_network
+    depends_on:
+      - carla_client
+      - foxglove_bridge
+
+networks:
+  carla_network:
+    driver: bridge
