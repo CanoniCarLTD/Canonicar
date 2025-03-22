@@ -2,6 +2,7 @@ from sensor_msgs.msg import Image, PointCloud2, Imu, NavSatFix
 import rclpy
 from rclpy.node import Node
 from std_msgs.msg import Float32MultiArray
+from ros_interfaces.srv import RespawnVehicle
 import torch
 import numpy as np
 import sys
@@ -36,6 +37,8 @@ class PPOModelNode(Node):
         self.action_publisher = self.create_publisher(
             Float32MultiArray, "/carla/vehicle_control", 10
         )
+
+        self.respawn_srv = self.create_service(RespawnVehicle, 'respawn_vehicle_service', self.respawn_callback)
 
         # Initialize PPO Agent (loads from checkpoint if available)
         self.ppo_agent = ppo_agent.PPOAgent()
@@ -367,6 +370,14 @@ class PPOModelNode(Node):
     ##################################################################################################
     #                                           UTILITIES
     ##################################################################################################
+
+    def respawn_callback(self, request, response):
+        if request.reason.lower() == "collision":
+            self.collision = True
+
+        response.success = True
+        response.message = f"Respawn triggered due to {request.reason}"
+        return response
 
     def deterministic_cuda(self):
         """
