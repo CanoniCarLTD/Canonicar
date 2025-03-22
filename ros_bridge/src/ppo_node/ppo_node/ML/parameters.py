@@ -13,7 +13,7 @@ TRAIN = True  # Set to False to disable training and only run inference
 DETERMINISTIC_CUDNN = True
 
 # Training configuration
-SEED = 0
+SEED = 42
 BATCH_SIZE = 64  # Number of timesteps collected before a policy update
 NUM_EPOCHS = 10  # PPO update epochs per batch (Best practice: 3-10)
 EPISODES = 1000

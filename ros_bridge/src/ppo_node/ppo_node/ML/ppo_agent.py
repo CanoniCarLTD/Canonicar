@@ -1,7 +1,3 @@
-"""
-    ** Data saving and loading functions needs to be added **
-"""
-
 import os
 import torch
 import torch.nn as nn
@@ -181,8 +177,8 @@ class PPOAgent:
     #                                       SAVE AND LOAD MODELS
     ##################################################################################################
 
-    def save_checkpoint(self, directory):
-        print("Saving PPO checkpoint...")
+    def save_model_and_optimizers(self, directory):
+        print("Saving model + optimizer...")
         try:
 
             # Save model parameters
@@ -199,12 +195,12 @@ class PPOAgent:
                 os.path.join(directory, "critic_optim.pth"),
             )
 
-            print(f"✅ Model + optimizer checkpoint saved to {directory}")
+            print(f"✅ Model + optimizer saved to {directory}")
         except Exception as e:
-            print(f"❌ Error saving checkpoint: {e}")
+            print(f"❌ Error saving model + optimizer: {e}")
 
-    def load_checkpoint(self, directory):
-        print(f"Loading PPO checkpoint from: {directory}")
+    def load_model_and_optimizers(self, directory):
+        print(f"Loading model + optimizer from: {directory}")
         try:
             # Load model weights
             self.actor.load_state_dict(torch.load(os.path.join(directory, "actor.pth")))
@@ -220,9 +216,9 @@ class PPOAgent:
                 torch.load(os.path.join(directory, "critic_optim.pth"))
             )
 
-            print("✅ PPO model and optimizer states loaded successfully.")
+            print("✅ Model and optimizer states loaded successfully.")
         except Exception as e:
-            print(f"❌ Error loading checkpoint: {e}")
+            print(f"❌ Error loading model and optimizer: {e}")
 
     ##################################################################################################
     #                              DECAY ACTION STD AND NORMALIZE ADVANTAGES
