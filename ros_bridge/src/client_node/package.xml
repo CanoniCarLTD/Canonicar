@@ -23,7 +23,7 @@
   <depend>rosidl_default_generators</depend>
   <exec_depend>rosidl_default_runtime</exec_depend>
   <member_of_group>rosidl_interface_packages</member_of_group>
-  <depend>canonicar_interfaces</depend>
+  <depend>ros_interfaces</depend>
 
   <depend>geometry_msgs</depend>
   <buildtool_depend>rosidl_default_generators</buildtool_depend>

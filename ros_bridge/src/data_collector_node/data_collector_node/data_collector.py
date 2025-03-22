@@ -13,17 +13,14 @@ import torch
 import torch.nn as nn
 from ament_index_python.packages import get_package_share_directory
 import torchvision.transforms as transforms
-from torchvision.models import MobileNet_V2_Weights, mobilenet_v2
 from std_msgs.msg import Float32MultiArray, String
 from vision_model import VisionProcessor
-
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class DataCollector(Node):
     def __init__(self):
         super().__init__("data_collector")
-
         try:
             self.prev_gnss = (
                 None  # Store previous GNSS position for velocity calculation
@@ -37,9 +34,7 @@ class DataCollector(Node):
         self.setup_subscribers()
         self.vision_processor = VisionProcessor(device= device)
         self.get_logger().info("DataCollector Node initialized.")
-        self.start_vehicle_manager = self.create_publisher(
-            String, "/start_vehicle_manager", 10
-        )
+
         self.lap_subscription = self.create_subscription(
             String,
             "/lap_completed",  # Topic name for lap completion
@@ -55,7 +50,6 @@ class DataCollector(Node):
         self.get_logger().info("Lap completed.")
         request_msg = String()
         request_msg.data = "DataCollector is ready"
-        self.start_vehicle_manager.publish(request_msg)
         self.get_logger().info("Data collector is ready to start the next lap.")
 
     def setup_subscribers(self):
@@ -74,7 +68,6 @@ class DataCollector(Node):
         # self.lidar_sub, self.imu_sub, self.gnss_sub
         self.ats = ApproximateTimeSynchronizer(
             [self.image_sub, self.lidar_sub, self.imu_sub, self.gnss_sub ],
-
             queue_size=100,
             slop=0.1,  # Adjusted for better synchronization
         )
@@ -84,26 +77,19 @@ class DataCollector(Node):
         self.get_logger().info(f"Synchronizer slop: {self.ats.__dict__}")
         self.get_logger().info("Subscribers set up successfully.")
 
-    
-
     #   lidar_msg, imu_msg, gnss_msg
     def sync_callback(self, image_msg, lidar_msg, imu_msg,  gnss_msg):
-
         self.get_logger().info("Synchronized callback triggered.")
         processed_data = self.process_data(image_msg, lidar_msg, imu_msg, gnss_msg)
         self.data_buffer.append(processed_data)
         self.get_logger().info("Data appended to buffer.")
 
-    def process_data(self, image_msg, lidar_msg, imu_msg, gnss_msg):
-
+    def process_data(self,image_msg, lidar_msg, imu_msg, gnss_msg):
         self.get_logger().info("Processing data...")
 
-        # Use the combined vision processor instead of separate processing
         vision_features = self.process_vision_data(image_msg, lidar_msg)
-
         return self.aggregate_state_vector(
             vision_features,
-
             self.process_imu(imu_msg),
             self.process_gnss(gnss_msg),
         )
@@ -126,7 +112,6 @@ class DataCollector(Node):
         # Process using our vision model
         fused_features = self.vision_processor.process_sensor_data(raw_image, points)
         return fused_features
-
 
     def process_imu(self, imu_msg):
         """Process IMU data."""
@@ -180,7 +165,7 @@ class DataCollector(Node):
 
         return np.array([latitude, longitude, altitude, velocity, heading])
 
-    # , lidar_features, imu_features, gnss_features
+    # vision_features, imu_features, gnss_features
     def aggregate_state_vector(self, vision_features, imu_features, gnss_features):
 
         """Aggregate features into a single state vector.""" 
@@ -205,7 +190,7 @@ class DataCollector(Node):
         self.publish_to_PPO.publish(response)
         
         return state_vector
-    
+
     def get_latest_data(self):
         """Retrieve the most recent synchronized data."""
         self.get_logger().info("Retrieving latest data...")

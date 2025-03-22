@@ -33,11 +33,6 @@ class LoadMapNode(Node):
             self.get_parameter("CARLA_SERVER_PORT").get_parameter_value().integer_value
         )
 
-        # # Start to deploy vehicles after map is loaded
-        # self.start_vehicle_manager = self.create_publisher(
-        #     String, "/start_vehicle_manager", 10
-        # )
-
         # Validate parameters
         if not all([self.host, self.TRACK_LINE, self.TRACK_XODR]):
             self.get_logger().error("One or more required parameters are not set.")
@@ -86,7 +81,7 @@ class LoadMapNode(Node):
 
             request_msg = String()
             request_msg.data = "Map is loaded"
-            self.start_vehicle_manager.publish(request_msg)
+
             self.get_logger().info("Map setup complete.")
 
             # Visualize waypoints with better information

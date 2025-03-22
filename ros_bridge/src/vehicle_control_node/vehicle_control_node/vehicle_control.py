@@ -2,7 +2,7 @@ import rclpy
 from rclpy.node import Node
 from std_msgs.msg import Float32MultiArray, String
 from carla import Client, VehicleControl
-from  canonicar_interfaces.srv import VehicleReady
+from  ros_interfaces.srv import VehicleReady
 class VehicleControlNode(Node):
     def __init__(self):
         super().__init__('vehicle_control_node')
@@ -36,10 +36,6 @@ class VehicleControlNode(Node):
             self.control_callback,
             10
         )
-        # self.get_logger().info("Creating start vehicle manager subscription")
-        # self.start_subscription = self.create_subscription(
-        #     String, "/start_vehicle_manager", self.start_driving, 10  # QoS
-        # )
         
         # Create vehicle ready service server
         self.vehicle_ready_server = self.create_service(
@@ -47,11 +43,7 @@ class VehicleControlNode(Node):
             'vehicle_ready',
             self.handle_vehicle_ready
         )
-        
-        self.data_collector_ready = True
-        self.map_loaded = False
 
-        self.current_vehicle_index = 0
         self.get_logger().info('VehicleControlNode initialized')
 
     
@@ -78,22 +70,6 @@ class VehicleControlNode(Node):
             
         return response
         
-
-    # def start_driving(self, msg):
-    #     self.get_logger().info(f"Received start signal: {msg.data}")
-    #     if msg.data == "start with vehicle":
-    #         self.get_logger().info(f"Starting vehicle manager")
-    #         self.vehicle = self.find_vehicle()
-        
-    # def find_vehicle(self):        
-    #     vehicles = self.world.get_actors().filter('vehicle.*')
-    #     if vehicles:
-    #         self.get_logger().info(f'Found {len(vehicles)} vehicles, using the first one.')
-    #         return vehicles[0]
-    #     else:
-    #         self.get_logger().error('No vehicles found in the world.')
-    #         return None
-
     def control_callback(self, msg):
         self.get_logger().info(f'Received message from ppo node: {msg.data}')
         if len(msg.data) != 3:
