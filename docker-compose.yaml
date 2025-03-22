@@ -65,6 +65,8 @@ services:
     container_name: carla_client
     tty: true
     stdin_open: true
+    ports:
+      - 9090:9090
     command: bash -c "
       rosdep update && \
       rosdep install --from-paths src --ignore-src -r -y && \

@@ -69,7 +69,7 @@ class VehicleControlNode(Node):
             self.get_logger().error('Control message must contain [throttle, steer, brake]')
             return
             
-        throttle, steer, brake = msg.data
+        steer, throttle, brake = msg.data
         self.get_logger().info(f'received: throttle={throttle}, steer={steer}, brake={brake}')
         
         if self.vehicle:
@@ -77,7 +77,7 @@ class VehicleControlNode(Node):
             control.throttle = float(throttle)
             control.steer = float(steer)
             control.brake = float(brake)
-            self.get_logger().info('Applying control to vehicle')   
+            self.get_logger().info('Applying control to vehicle')
             self.vehicle.apply_control(control)
 
 def main(args=None):
