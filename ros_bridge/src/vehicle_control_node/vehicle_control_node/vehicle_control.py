@@ -84,7 +84,7 @@ class VehicleControlNode(Node):
             control.steer = float(steer)
             control.throttle = float(throttle)
             control.brake = float(brake)
-            self.get_logger().info('Applying control to vehicle')   
+            self.get_logger().info('Applying control to vehicle')
             self.vehicle.apply_control(control)
 
 def main(args=None):

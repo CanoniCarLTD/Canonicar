@@ -31,10 +31,8 @@ In our `parameters.py`, we define two key values:
 
 ---
 
-## **Should We Rename These Parameters?**
-| **Parameter** | **Current Name** | **Suggested Name** | **Reason for Change** |
-|--------------|----------------|-----------------|------------------|
-| `EPISODE_LENGTH` | `EPISODE_LENGTH` | `MAX_EPISODE_STEPS` | Clarifies that this is the **maximum** step count per episode |
-| `TOTAL_TIMESTEPS` | `TOTAL_TIMESTEPS` | (Keep as is) | The term is **widely used in RL** and already clear |
+## Watching live training metrics progress (STILL NEEDS TESTING)
 
-By understanding the relationship between **timesteps and episodes**, we can better **fine-tune training settings** for optimal reinforcement learning performance. 🚀  
+```bash
+tensorboard --logdir tensorboard_logs
+```
