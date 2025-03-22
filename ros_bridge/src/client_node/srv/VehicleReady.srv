@@ -1,4 +1,0 @@
-int64 vehicle_id
----
-bool success
-string message
