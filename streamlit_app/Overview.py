@@ -41,7 +41,7 @@ with main_col:
     # Quick navigation links section
     st.markdown("### Quick Navigation")
 
-    col_dash, col_fox = st.columns(2)
+    col_dash, col_fox , col_live = st.columns(3)
 
     with col_dash:
         st.markdown(
@@ -78,6 +78,21 @@ with main_col:
             # Use webbrowser to open URL
             import webbrowser
             webbrowser.open_new_tab(foxglove_url)
+    
+    with col_live:
+        st.markdown(
+            """
+            <div style="background-color:#e1e9f7;padding:20px;border-radius:10px;text-align:center;color:#333333;">
+                <h4 style="color:#000000;">Live View</h4>
+                <p>Real-time sensor data visualization</p>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+        if st.button("Open Live View", key="live_view_button",
+                        use_container_width=True,
+                        type="primary"):
+            st.switch_page("pages/LiveViewer.py")
 
     # Add some spacing
     st.markdown("<br>", unsafe_allow_html=True)
