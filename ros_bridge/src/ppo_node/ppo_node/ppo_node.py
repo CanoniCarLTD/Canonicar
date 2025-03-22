@@ -324,22 +324,7 @@ class PPOModelNode(Node):
                 torch.backends.cudnn.benchmark = (
                     True  # Enable auto-tuner for faster performance
                 )
-
-    def create_new_run_dir(self):
-        """
-        Create a new directory for the current run.
-        """
-        version_dir = os.path.join(PPO_CHECKPOINT_DIR, VERSION)
-        os.makedirs(version_dir, exist_ok=True)
-
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.run_name = f"run_{timestamp}"
-        self.run_dir = os.path.join(version_dir, self.run_name)
-        os.makedirs(self.run_dir, exist_ok=True)
-
-        self.get_logger().info(f"Run directory created: {self.run_dir}")
-        
-        
+                
     def create_new_run_dir(self):
         """
         Creates for the current run - both a visually readable directory and a tensorboard log directory 
@@ -379,12 +364,16 @@ class PPOModelNode(Node):
             "|param|value|\n|-|-|\n%s" % "\n".join([f"|{k}|{v}|" for k, v in hparams.items()])
         )
 
-
+def shutdown_writer(self):
+    self.summary_writer.close()
+    self.get_logger().info("SummaryWriter closed.")
+    
 def main(args=None):
     rclpy.init(args=args)
     node = PPOModelNode()
     rclpy.spin(node)
     node.destroy_node()
+    node.shutdown_writer()
     rclpy.shutdown()
 
 
