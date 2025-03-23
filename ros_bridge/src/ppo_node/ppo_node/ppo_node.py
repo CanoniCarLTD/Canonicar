@@ -1,8 +1,8 @@
 from sensor_msgs.msg import Image, PointCloud2, Imu, NavSatFix
 import rclpy
 from rclpy.node import Node
-from std_msgs.msg import Float32MultiArray
-from ros_interfaces.srv import RespawnVehicle
+from std_msgs.msg import Float32MultiArray, String
+from ros_interfaces.srv import VehicleReady, GetTrackWaypoints
 import torch
 import numpy as np
 import sys
@@ -12,6 +12,7 @@ from datetime import datetime
 import random
 import csv
 from torch.utils.tensorboard import SummaryWriter
+import math
 
 from .ML import ppo_agent
 from .ML import parameters
@@ -38,7 +39,11 @@ class PPOModelNode(Node):
             Float32MultiArray, "/carla/vehicle_control", 10
         )
 
-        self.respawn_srv = self.create_service(RespawnVehicle, 'respawn_vehicle_service', self.respawn_callback)
+        self.vehicle_ready_server = self.create_service(
+            VehicleReady,
+            'vehicle_ready',
+            self.handle_vehicle_ready
+        )
 
         # Initialize PPO Agent (loads from checkpoint if available)
         self.ppo_agent = ppo_agent.PPOAgent()
@@ -58,6 +63,39 @@ class PPOModelNode(Node):
         self.total_timesteps = TOTAL_TIMESTEPS
         self.episode_length = EPISODE_LENGTH
         self.current_ep_reward = 0
+
+        # Track waypoints related variables
+        self.track_waypoints = []  # List of (x, y) tuples
+        self.track_length = 0.0    # Total track length in meters
+        self.closest_waypoint_idx = 0  # Index of closest waypoint
+        self.start_point = None
+        self.prev_progress_distance = 0.0
+        self.lap_completed = False
+        self.lap_count = 0
+        self.vehicle_location = None
+        self.lap_start_time = None
+        self.lap_end_time = None
+        self.lap_time = None
+
+
+        self.collision_sub = self.create_subscription(
+            String,
+            "/collision_detected",
+            self.collision_callback,
+            10
+        )
+
+        # Create client for the waypoints service
+        self.waypoints_client = self.create_client(
+            GetTrackWaypoints, 'get_track_waypoints'
+        )
+        
+        # Check if the service is available
+        while not self.waypoints_client.wait_for_service(timeout_sec=1.0):
+            self.get_logger().info('Waiting for track waypoints service...')
+        
+        # Request track waypoints
+        self.request_track_waypoints()
 
         if DETERMINISTIC_CUDNN:
             self.deterministic_cuda()
@@ -371,12 +409,166 @@ class PPOModelNode(Node):
     #                                           UTILITIES
     ##################################################################################################
 
-    def respawn_callback(self, request, response):
-        if request.reason.lower() == "collision":
+    def collision_callback(self, msg):
+        """Handle collision notifications from topic"""
+        if not self.collision:  # Prevent duplicate penalties
             self.collision = True
+            self.get_logger().warn(f"Collision detected: {msg.data}")
+            self.termination_reason = "collision"
+            
+            # Update reward immediately
+            self.calculate_reward()
+            
+            # Log the collision penalty
+            self.get_logger().info(f"Applied collision penalty: {self.reward}")
 
-        response.success = True
-        response.message = f"Respawn triggered due to {request.reason}"
+    def request_track_waypoints(self):
+        """Request track waypoints from the map loader service"""
+        self.get_logger().info("Requesting track waypoints...")
+        
+        request = GetTrackWaypoints.Request()
+        future = self.waypoints_client.call_async(request)
+        
+        # Add a callback for when the service call completes
+        future.add_done_callback(self.process_waypoints_response)
+
+    
+    def process_waypoints_response(self, future):
+        """Process the waypoints received from the service"""
+        try:
+            response = future.result()
+            
+            # Extract waypoints from the response
+            waypoints_x = response.waypoints_x
+            waypoints_y = response.waypoints_y
+            self.track_length = response.track_length
+            
+            # Combine into list of (x, y) tuples
+            self.track_waypoints = list(zip(waypoints_x, waypoints_y))
+            
+            self.get_logger().info(f"Received {len(self.track_waypoints)} waypoints")
+            self.get_logger().info(f"Track length: {self.track_length:.2f} meters")
+        
+        except Exception as e:
+            self.get_logger().error(f'Service call failed: {e}')
+
+    def location_callback(self, msg):
+        """Process vehicle location data"""
+        self.vehicle_location = msg.data
+        
+        if not self.track_waypoints:
+            self.get_logger().warn("No track waypoints available yet")
+            return
+            
+        if self.start_point is None:
+            self.start_point = self.vehicle_location
+            self.get_logger().info(f"Start position recorded: {self.start_point}")
+            self.lap_start_time = self.get_clock().now()
+            self.get_logger().info(f"Lap timer started at: {self.lap_start_time}")
+            time.sleep(1)  # Wait for a second before starting
+            return
+        
+        # Calculate progress around the track
+        self.update_track_progress()
+        
+        # Check if we've completed a lap (close to start point and made progress around track)
+        distance_to_start = self.calculate_distance(self.start_point, self.vehicle_location)
+        if distance_to_start < 5.0 and self.track_progress > 0.9:
+            if not self.lap_completed:
+                self.lap_completed = True
+                self.lap_count += 1
+                self.lap_end_time = self.get_clock().now()
+                self.lap_time = self.lap_end_time - self.lap_start_time
+                self.lap_start_time = self.get_clock().now()
+                self.get_logger().info(f"Lap {self.lap_count} completed!")
+                self.get_logger().info(f"Lap time: {self.lap_time} seconds")
+                # Reset progress for next lap
+                self.track_progress = 0.0
+                self.prev_progress_distance = 0.0
+        else:
+            self.lap_completed = False
+
+    def update_track_progress(self):
+        """Update the track progress based on current position"""
+        if not self.track_waypoints or self.vehicle_location is None:
+            return
+            
+        # Find the closest waypoint
+        min_dist = float('inf')
+        closest_idx = 0
+        
+        for i, (wx, wy) in enumerate(self.track_waypoints):
+            dist = ((self.vehicle_location[0] - wx)**2 + 
+                    (self.vehicle_location[1] - wy)**2)**0.5
+            if dist < min_dist:
+                min_dist = dist
+                closest_idx = i
+        
+        # Calculate distance traveled along track since start
+        if closest_idx > self.closest_waypoint_idx:
+            # Moving forward along the track
+            segments_traveled = closest_idx - self.closest_waypoint_idx
+            # Calculate distance between these waypoints
+            distance = 0.0
+            for i in range(self.closest_waypoint_idx, closest_idx):
+                next_i = i + 1
+                x1, y1 = self.track_waypoints[i]
+                x2, y2 = self.track_waypoints[next_i]
+                segment_length = ((x2-x1)**2 + (y2-y1)**2)**0.5
+                distance += segment_length
+                
+            self.prev_progress_distance += distance
+            
+        elif closest_idx < self.closest_waypoint_idx:
+            # Crossed the finish line or moving backwards
+            if self.closest_waypoint_idx > len(self.track_waypoints) * 0.8 and closest_idx < len(self.track_waypoints) * 0.2:
+                # Likely crossed the finish line - add remaining distance
+                distance = 0.0
+                for i in range(self.closest_waypoint_idx, len(self.track_waypoints)):
+                    next_i = (i + 1) % len(self.track_waypoints)
+                    x1, y1 = self.track_waypoints[i]
+                    x2, y2 = self.track_waypoints[next_i]
+                    segment_length = ((x2-x1)**2 + (y2-y1)**2)**0.5
+                    distance += segment_length
+                
+                # Plus distance from start to current waypoint
+                for i in range(0, closest_idx):
+                    next_i = i + 1
+                    x1, y1 = self.track_waypoints[i]
+                    x2, y2 = self.track_waypoints[next_i]
+                    segment_length = ((x2-x1)**2 + (y2-y1)**2)**0.5
+                    distance += segment_length
+                    
+                self.prev_progress_distance += distance
+            # Otherwise, we're moving backwards or jumped positions
+        
+        # Update closest waypoint index
+        self.closest_waypoint_idx = closest_idx
+        
+        # Calculate progress as a ratio of distance traveled to total track length
+        self.track_progress = min(1.0, self.prev_progress_distance / self.track_length)
+        
+        # Every few seconds, log the progress
+        if self.track_progress > 0 and int(self.get_clock().now().nanoseconds / 1e9) % 5 == 0:
+            self.get_logger().info(f"Track progress: {self.track_progress:.2f} ({self.prev_progress_distance:.1f}m / {self.track_length:.1f}m)")
+
+
+    def calculate_distance(self, point1, point2):
+        if point1 is None or point2 is None:
+            return float("inf")
+        return math.sqrt(sum((p1 - p2) ** 2 for p1, p2 in zip(point1, point2)))
+        
+
+    def handle_vehicle_ready(self, request, response):
+        """Service handler when spawn_vehicle_node notifies that a vehicle is ready"""
+        self.get_logger().info(f'Received vehicle_ready notification: {request.vehicle_id}')
+        self.collision = False
+        # Reset track progress variables for new vehicle
+        self.track_progress = 0.0
+        self.prev_progress_distance = 0.0
+        self.closest_waypoint_idx = 0
+        self.lap_completed = False
+        
         return response
 
     def deterministic_cuda(self):

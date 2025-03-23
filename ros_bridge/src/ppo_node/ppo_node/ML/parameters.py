@@ -4,7 +4,7 @@ All the hyper-parameters needed for the PPO algorithm implementation.
 
 # Directory and version control for checkpoint saving and loading
 PPO_CHECKPOINT_DIR = "preTrained_PPO_models"
-VERSION = "v1.0.0"
+VERSION = "v1.1.0"
 
 MODEL_LOAD = False  # Set to True to resume training from checkpoint
 CHECKPOINT_FILE = None  # Specify file when MODEL_LOAD=True
