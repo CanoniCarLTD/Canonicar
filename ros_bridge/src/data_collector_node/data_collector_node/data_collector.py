@@ -187,7 +187,11 @@ class DataCollector(Node):
 
         response = Float32MultiArray()
         response.data = state_vector.tolist()
-        self.publish_to_PPO.publish(response)
+        # if theres a nan, throw an error
+        if np.isnan(state_vector).any():
+            self.get_logger().error("State vector contains NaN values.")
+        else:
+            self.publish_to_PPO.publish(response)
         
         return state_vector
 
