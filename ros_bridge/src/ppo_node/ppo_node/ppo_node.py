@@ -143,7 +143,6 @@ class PPOModelNode(Node):
     def training(self, msg):
         if self.timestep_counter < self.total_timesteps:
             self.state = np.array(msg.data, dtype=np.float32)
-            self.current_ep_reward = 0
             self.t1 = datetime.now()
 
             if self.current_step_in_episode < self.episode_length:
@@ -197,7 +196,6 @@ class PPOModelNode(Node):
     def testing(self, msg):
         if self.timestep_counter < TEST_TIMESTEPS:
             self.state = np.array(msg.data, dtype=np.float32)
-            self.current_ep_reward = 0
             self.t1 = datetime.now()
 
             if self.current_step_in_episode < self.episode_length:
