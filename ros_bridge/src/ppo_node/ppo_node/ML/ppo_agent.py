@@ -72,9 +72,9 @@ class ActorNetwork(nn.Module):
         try:
             steering_mean = torch.tanh(action_mean[:, 0:1])  # tanh to restrict to [-1, 1]
             throttle_mean = torch.sigmoid(action_mean[:, 1:2])  # sigmoid to restrict to [0, 1]
-            brake_mean = torch.sigmoid(action_mean[:, 2:3])  # sigmoid to restrict to [0, 1]
+            #brake_mean = torch.sigmoid(action_mean[:, 2:3])  # sigmoid to restrict to [0, 1]
 
-            action_mean = torch.cat([steering_mean, throttle_mean, brake_mean], dim=1)
+            action_mean = torch.cat([steering_mean, throttle_mean], dim=1)
             if torch.isnan(action_mean).any():
                 raise ValueError("NaN detected after concatenating means in ActorNetwork")
         except ValueError as e:
@@ -120,7 +120,7 @@ class ActorNetwork(nn.Module):
         action_np = action.detach().cpu().numpy()
         action_np[:, 0] = np.clip(action_np[:, 0], -1.0, 1.0)  # steering
         action_np[:, 1] = np.clip(action_np[:, 1], 0.0, 1.0)  # throttle
-        action_np[:, 2] = np.clip(action_np[:, 2], 0.0, 1.0)  # brake
+        #action_np[:, 2] = np.clip(action_np[:, 2], 0.0, 1.0)  # brake
 
         action = torch.FloatTensor(action_np).to(device)
 
@@ -161,7 +161,7 @@ class CriticNetwork(nn.Module):
 ##################################################################################################
 
 class PPOAgent:
-    def __init__(self, input_dim=203, action_dim=3):
+    def __init__(self, input_dim=203, action_dim=2):
         
         print("\nInitializing PPO Agent...\n")
         print("device: ", device)
