@@ -67,6 +67,7 @@ services:
     stdin_open: true
     ports:
       - 9090:9090
+      - 6006:6006  # for TensorBoard
     command: bash -c "
       rosdep update && \
       rosdep install --from-paths src --ignore-src -r -y && \
@@ -75,6 +76,16 @@ services:
       tail -f /dev/null"
     volumes:
       - ./ros_bridge/src:/ros_bridge/src
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
     # restart: always
     # depends_on: 
     #   bridge:

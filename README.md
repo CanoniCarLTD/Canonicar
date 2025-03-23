@@ -77,6 +77,13 @@ ros2 launch ros_bridge_launch system_launch.py host:=your_host_ip_addres
 ```
 **Replace `your_host_ip_address` with the actual IP address of your host machine.**
 
+
+### Watching live training metrics progress (STILL NEEDS TESTING)
+
+```bash
+tensorboard --logdir=/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models --bind_all
+```
+
 ## Troubleshooting
 
 - **Cannot Connect to CARLA Host:**
@@ -96,6 +103,12 @@ ros2 launch ros_bridge_launch system_launch.py host:=your_host_ip_addres
   ros2 pkg create --build-type ament_python --license Apache-2.0 <package_name>
   ```
   - if you are making changes at the nodes, and the containers are up and running, you have to do `colcon build` inside the container itself before launching the nodes.
+
+## Watching live training metrics progress (STILL NEEDS TESTING)
+
+```bash
+tensorboard --logdir tensorboard_logs
+```
 
 ## License
 

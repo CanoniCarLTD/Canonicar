@@ -14,6 +14,7 @@ setup(
         (os.path.join('share', package_name, 'launch'), glob('launch/*.py')),
         ('share/' + package_name + '/client_node',
              ['client_node/sensors_config.json']),
+
     ],
     install_requires=['setuptools','sensors_data'],
     zip_safe=True,
