@@ -77,6 +77,13 @@ ros2 launch ros_bridge_launch system_launch.py host:=your_host_ip_addres
 ```
 **Replace `your_host_ip_address` with the actual IP address of your host machine.**
 
+
+### Watching live training metrics progress (STILL NEEDS TESTING)
+
+```bash
+tensorboard --logdir=/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models --bind_all
+```
+
 ## Troubleshooting
 
 - **Cannot Connect to CARLA Host:**

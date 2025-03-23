@@ -9,7 +9,7 @@ import sys
 from .parameters import *
 from torch.utils.tensorboard import SummaryWriter
 
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 ##################################################################################################
 #                                       ACTOR AND CRITIC NETWORKS
@@ -102,6 +102,9 @@ class CriticNetwork(nn.Module):
 
 class PPOAgent:
     def __init__(self, input_dim=203, action_dim=3):
+        
+        print("\nInitializing PPO Agent...\n")
+        print("device: ", device)
         self.input_dim = input_dim if PPO_INPUT_DIM is None else PPO_INPUT_DIM
         print(f"Action input dimension: {self.input_dim}")
         self.action_dim = action_dim
@@ -130,10 +133,6 @@ class PPOAgent:
         )
 
         self.learn_step_counter = 0  # Track PPO updates
-
-        # Load model if specified
-        if MODEL_LOAD and CHECKPOINT_FILE:
-            self.load_models(CHECKPOINT_FILE)
 
         # Ensure checkpoint directory exists
         if not os.path.exists(PPO_CHECKPOINT_DIR):

@@ -25,9 +25,15 @@ RUN python3 -m pip install --upgrade pip && python3 -m pip install numpy pygame 
 RUN  python3 -m pip install tensorboard
 
 RUN rm -rf /usr/lib/python3/dist-packages/PyYAML-5.3.1.egg-info && rm -rf /usr/lib/python3/dist-packages/yaml && python3 -m pip install pyyaml open3d
+
 RUN python3 -m pip install 'carla==0.9.13'
 RUN apt-get install -y ros-foxy-derived-object-msgs ros-foxy-std-msgs ros-foxy-carla-msgs
 RUN source /opt/ros/foxy/setup.bash
+
+
+# Add the fix for typing-extensions without changing previous layers
+RUN python3 -m pip install --upgrade typing-extensions>=4.8.0
+
 
 # Set default entrypoint to bash (useful for debugging)
 CMD ["/bin/bash"]
