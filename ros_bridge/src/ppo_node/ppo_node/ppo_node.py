@@ -141,6 +141,9 @@ class PPOModelNode(Node):
     def publish_action(self):
         action_msg = Float32MultiArray()
         action_msg.data = self.action.tolist()
+        # reduce brake value
+        
+        action_msg.data.append(0.0)
         self.action_publisher.publish(action_msg)
         self.get_logger().info(f"Published action: {action_msg.data}")
 
@@ -150,7 +153,7 @@ class PPOModelNode(Node):
 
     def calculate_reward(self):
         collision_penalty = -10.0       
-        time_penalty = -0.01            
+        time_penalty = -0.1            
         progress_reward_factor = 100.0  
         finish_bonus = 50.0            
         
