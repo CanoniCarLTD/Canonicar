@@ -19,7 +19,7 @@ class LoadMapNode(Node):
         self.declare_parameter("host", "")
         self.declare_parameter("TRACK_LINE", "")
         self.declare_parameter("TRACK_XODR", "")
-        self.declare_parameter("CARLA_SERVER_PORT", 2000)
+        self.declare_parameter("port", 2000)
 
         # Retrieve parameter values
         self.host = self.get_parameter("host").get_parameter_value().string_value
@@ -30,7 +30,7 @@ class LoadMapNode(Node):
             self.get_parameter("TRACK_XODR").get_parameter_value().string_value
         )
         self.CARLA_SERVER_PORT = (
-            self.get_parameter("CARLA_SERVER_PORT").get_parameter_value().integer_value
+            self.get_parameter("port").get_parameter_value().integer_value
         )
 
         # Validate parameters
