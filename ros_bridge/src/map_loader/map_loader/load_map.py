@@ -8,6 +8,7 @@ import open3d as o3d
 import os
 import xml.etree.ElementTree as ET
 from std_msgs.msg import String
+from ros_interfaces.srv import GetTrackWaypoints
 
 
 class LoadMapNode(Node):
@@ -19,7 +20,7 @@ class LoadMapNode(Node):
         self.declare_parameter("host", "")
         self.declare_parameter("TRACK_LINE", "")
         self.declare_parameter("TRACK_XODR", "")
-        self.declare_parameter("CARLA_SERVER_PORT", 2000)
+        self.declare_parameter("port", 2000)
 
         # Retrieve parameter values
         self.host = self.get_parameter("host").get_parameter_value().string_value
@@ -30,7 +31,7 @@ class LoadMapNode(Node):
             self.get_parameter("TRACK_XODR").get_parameter_value().string_value
         )
         self.CARLA_SERVER_PORT = (
-            self.get_parameter("CARLA_SERVER_PORT").get_parameter_value().integer_value
+            self.get_parameter("port").get_parameter_value().integer_value
         )
 
         # Validate parameters
@@ -38,6 +39,14 @@ class LoadMapNode(Node):
             self.get_logger().error("One or more required parameters are not set.")
             self.destroy_node()
             return
+        
+        # Add waypoints service
+        self.waypoints_service = self.create_service(
+            GetTrackWaypoints, 'get_track_waypoints', self.handle_waypoints_request
+        )
+        
+        self.track_waypoints = []  # Will store (x, y) waypoints
+        self.track_length = 0.0    # Total track length
 
         # Initialize CARLA client and setup map
         try:
@@ -86,10 +95,46 @@ class LoadMapNode(Node):
 
             # Visualize waypoints with better information
             self.visualize_track()
+            self.extract_track_waypoints()
+            self.get_logger().info(f"Extracted {len(self.track_waypoints)} waypoints from track")
+            self.get_logger().info(f"Track length: {self.track_length:.2f} meters")
 
         except Exception as e:
             self.get_logger().error(f"Error during map setup: {e}")
             self.destroy_node()
+
+    def extract_track_waypoints(self):
+        """Extract waypoints and calculate track length"""
+        waypoints = self.map.generate_waypoints(2.0)  # Get waypoints every 2 meters
+        
+        # Sort waypoints by their s-value (distance along the track)
+        waypoints.sort(key=lambda wp: wp.s)
+        
+        self.track_waypoints = []
+        for wp in waypoints:
+            loc = wp.transform.location
+            self.track_waypoints.append((loc.x, loc.y))
+        
+        # Calculate track length from waypoints
+        self.track_length = 0.0
+        for i in range(len(self.track_waypoints)):
+            next_idx = (i + 1) % len(self.track_waypoints)
+            x1, y1 = self.track_waypoints[i]
+            x2, y2 = self.track_waypoints[next_idx]
+            segment_length = ((x2-x1)**2 + (y2-y1)**2)**0.5
+            self.track_length += segment_length
+
+    def handle_waypoints_request(self, request, response):
+        """Service handler for waypoint requests"""
+        self.get_logger().info("Received request for track waypoints")
+        
+        # Fill the response with waypoints data
+        response.waypoints_x = [wp[0] for wp in self.track_waypoints]
+        response.waypoints_y = [wp[1] for wp in self.track_waypoints]
+        response.track_length = float(self.track_length)
+        
+        self.get_logger().info(f"Returning {len(self.track_waypoints)} waypoints")
+        return response
 
     def visualize_track(self):
         """Create detailed track visualization with waypoint information"""

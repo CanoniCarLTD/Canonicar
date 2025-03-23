@@ -63,8 +63,19 @@ class SpawnVehicleNode(Node):
 
         self.vehicle = None
         self.respawn_in_progress = False
-        
-        # Create vehicle_ready service client
+
+        self.collision_publisher = self.create_publisher(
+            String,
+            "/collision_detected",
+            10
+        )
+
+        self.location_publisher = self.create_publisher(
+            Float32MultiArray, "/carla/vehicle/location", 10
+        )  # To data_process node
+        self.timer = self.create_timer(0.1, self.publish_vehicle_location)
+
+            # Create vehicle_ready service client
         self.vehicle_ready_client = self.create_client(VehicleReady, 'vehicle_ready')
 
         # Wait for the service to be available
@@ -85,6 +96,7 @@ class SpawnVehicleNode(Node):
             self.lap_callback,
             10,
         )
+        
         
         self.data_collector_ready = True
         self.map_loaded = False
@@ -156,7 +168,7 @@ class SpawnVehicleNode(Node):
 
             road_waypoints.sort(key=lambda wp: wp.s)
 
-            spawn_waypoint = road_waypoints[3]
+            spawn_waypoint = road_waypoints[0]
             self.get_logger().info(
                 f"Using waypoint at s={spawn_waypoint.s:.1f} for spawn"
             )
@@ -205,6 +217,13 @@ class SpawnVehicleNode(Node):
 
             self.get_logger().error(traceback.format_exc())
 
+    def publish_vehicle_location(self):
+        if self.vehicle is not None and self.vehicle.is_alive:
+            location = self.vehicle.get_location()
+            msg = Float32MultiArray()
+            msg.data = [location.x, location.y, location.z]
+            self.location_publisher.publish(msg)
+
     def notify_vehicle_ready(self):
         """Call the vehicle_ready service to notify the control node"""
         if not self.vehicle or not self.vehicle.is_alive:
@@ -243,6 +262,11 @@ class SpawnVehicleNode(Node):
             f"COLLISION: vehicle hit {collision_type} at "
             f"({collision_location.x:.1f}, {collision_location.y:.1f}, {collision_location.z:.1f})"
         )
+
+        collision_msg = String()
+        collision_msg.data = f"collision_with_{collision_type}"
+        self.collision_publisher.publish(collision_msg)
+
         # Trigger vehicle respawn on collision
         if not self.respawn_in_progress:
             self.trigger_respawn(f"Collision with {collision_type}")

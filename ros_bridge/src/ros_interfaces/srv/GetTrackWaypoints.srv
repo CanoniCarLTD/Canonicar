@@ -1,0 +1,5 @@
+---
+# Response
+float32[] waypoints_x  # x coordinates of waypoints
+float32[] waypoints_y  # y coordinates of waypoints
+float32 track_length   # total track length

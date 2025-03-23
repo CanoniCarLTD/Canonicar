@@ -13,6 +13,7 @@ find_package(builtin_interfaces REQUIRED)  # Added dependency
 set(srv_files
   "srv/VehicleReady.srv"
   "srv/RespawnVehicle.srv"
+  "srv/GetTrackWaypoints.srv"
 )
 
 rosidl_generate_interfaces(${PROJECT_NAME}
