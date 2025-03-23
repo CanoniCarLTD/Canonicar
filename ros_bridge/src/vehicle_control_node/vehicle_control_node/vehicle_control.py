@@ -16,7 +16,7 @@ class VehicleControlNode(Node):
         self.vehicle_type = self.get_parameter("vehicle_type").value
         
         try:
-            self.client = Client(self.host, 2000)
+            self.client = Client(self.host, self.port)
             self.client.set_timeout(10.0)
             self.world = self.client.get_world()
         except Exception as e:

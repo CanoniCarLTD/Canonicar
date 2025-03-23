@@ -7,9 +7,9 @@ import numpy as np
 from torch.distributions import MultivariateNormal
 import sys
 from .parameters import *
-from torch.utils.tensorboard import SummaryWriter
+# from torch.utils.tensorboard import SummaryWriter
 
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 ##################################################################################################
 #                                       ACTOR AND CRITIC NETWORKS
@@ -28,21 +28,60 @@ class ActorNetwork(nn.Module):
         self.fc2 = nn.Linear(256, 128)
         self.fc3 = nn.Linear(128, 64)
         self.fc4 = nn.Linear(64, action_dim)  # Output layer for all actions
+        
+        self.init_weights()
+    
+    def init_weights(self):
+        for layer in [self.fc1, self.fc2, self.fc3, self.fc4]:
+            nn.init.kaiming_normal_(layer.weight)
+            nn.init.zeros_(layer.bias)
 
-    def forward(self, state):
-        x = F.relu(self.fc1(state))
-        x = F.relu(self.fc2(x))
-        x = F.relu(self.fc3(x))
+    def forward(self, state):        
+        try:
+            x = F.relu(self.fc1(state))
+            if torch.isnan(x).any():
+                raise ValueError(f"NaN detected after fc1 in ActorNetwork{x}")
+        except ValueError as e:
+            print(e)
+            return None
 
-        # Get mean values for each control
-        action_mean = self.fc4(x)
-        steering_mean = torch.tanh(action_mean[:, 0:1])  # tanh to restrict to [-1, 1]
-        throttle_mean = torch.sigmoid(
-            action_mean[:, 1:2]
-        )  # sigmoid to restrict to [0, 1]
-        brake_mean = torch.sigmoid(action_mean[:, 2:3])  # sigmoid to restrict to [0, 1]
+        try:
+            x = F.relu(self.fc2(x))
+            if torch.isnan(x).any():
+                raise ValueError(f"NaN detected after fc2 in ActorNetwork{x}")
+        except ValueError as e:
+            print(e)
+            return None
 
-        action_mean = torch.cat([steering_mean, throttle_mean, brake_mean], dim=1)
+        try:
+            x = F.relu(self.fc3(x))
+            if torch.isnan(x).any():
+                raise ValueError(f"NaN detected after fc3 in ActorNetwork {x}")
+        except ValueError as e:
+            print(e)
+            return None
+
+        try:
+            action_mean = self.fc4(x)
+            if torch.isnan(action_mean).any():
+                raise ValueError(f"NaN detected after fc4 in ActorNetwork{x}")
+        except ValueError as e:
+            print(e)
+            return None
+
+        try:
+            steering_mean = torch.tanh(action_mean[:, 0:1])  # tanh to restrict to [-1, 1]
+            throttle_mean = torch.sigmoid(action_mean[:, 1:2])  # sigmoid to restrict to [0, 1]
+            brake_mean = torch.sigmoid(action_mean[:, 2:3])  # sigmoid to restrict to [0, 1]
+
+            action_mean = torch.cat([steering_mean, throttle_mean, brake_mean], dim=1)
+            if torch.isnan(action_mean).any():
+                raise ValueError("NaN detected after concatenating means in ActorNetwork")
+        except ValueError as e:
+            print(e)
+            return None
+
+
         return action_mean
 
     def set_action_std(self, new_action_std):
@@ -53,13 +92,28 @@ class ActorNetwork(nn.Module):
     def get_dist(self, state):
         action_mean = self.forward(state)
         action_var = self.action_var.expand_as(action_mean)
+        
+        # Check for NaNs after expand_as
+        if torch.isnan(action_var).any():
+            raise ValueError("NaN detected after expand_as in ActorNetwork")
+        
         cov_mat = torch.diag_embed(action_var)
+                
+        # Check for NaNs after diag_embed
+        if torch.isnan(cov_mat).any():
+            raise ValueError("NaN detected after diag_embed in ActorNetwork")
+        
         dist = MultivariateNormal(action_mean, cov_mat)
         return dist
 
     def sample_action(self, state):
         dist = self.get_dist(state)
         action = dist.sample()
+        
+        # Check for NaNs after sampling action
+        if torch.isnan(action).any():
+            raise ValueError("NaN detected after sampling action in ActorNetwork")
+        
         action_logprob = dist.log_prob(action).sum(dim=-1, keepdim=True)
 
         # Clamp actions to appropriate ranges
@@ -87,7 +141,13 @@ class CriticNetwork(nn.Module):
         self.fc2 = nn.Linear(256, 128)
         self.fc3 = nn.Linear(128, 64)
         self.fc4 = nn.Linear(64, 1)
-
+        self.init_weights()
+    
+    def init_weights(self):
+        for layer in [self.fc1, self.fc2, self.fc3, self.fc4]:
+            nn.init.kaiming_normal_(layer.weight)
+            nn.init.zeros_(layer.bias)
+            
     def forward(self, state):
         x = F.relu(self.fc1(state))
         x = F.relu(self.fc2(x))
@@ -102,6 +162,9 @@ class CriticNetwork(nn.Module):
 
 class PPOAgent:
     def __init__(self, input_dim=203, action_dim=3):
+        
+        print("\nInitializing PPO Agent...\n")
+        print("device: ", device)
         self.input_dim = input_dim if PPO_INPUT_DIM is None else PPO_INPUT_DIM
         print(f"Action input dimension: {self.input_dim}")
         self.action_dim = action_dim
@@ -131,10 +194,6 @@ class PPOAgent:
 
         self.learn_step_counter = 0  # Track PPO updates
 
-        # Load model if specified
-        if MODEL_LOAD and CHECKPOINT_FILE:
-            self.load_models(CHECKPOINT_FILE)
-
         # Ensure checkpoint directory exists
         if not os.path.exists(PPO_CHECKPOINT_DIR):
             os.makedirs(PPO_CHECKPOINT_DIR)
@@ -152,12 +211,14 @@ class PPOAgent:
             raise ValueError(
                 f"Expected input dimension {self.input_dim}, but got {state.shape[1]}"
             )
+            
+        # Check for NaN values in the input state
+        if torch.isnan(state).any():
+            raise ValueError(f"NaN detected in input state: {state}")
 
         with torch.no_grad():
             action, log_prob = self.actor.sample_action(state)
-        print(
-            f"\nSteering: {action[0][0]}, Throttle: {action[0][1]}, Brake: {action[0][2]}\n"
-        )
+        # print(f"\nSteering: {action[0][0]}, Throttle: {action[0][1]}, Brake: {action[0][2]}\n")
         return action.cpu().numpy()[0], log_prob
 
     ##################################################################################################
@@ -280,13 +341,21 @@ class PPOAgent:
         Perform PPO training using stored experiences (from latest batch).
         returns: actor_loss, critic_loss, entropy
         """
+        # Convert lists to numpy arrays first
+        states = np.array(self.states, dtype=np.float32)
+        actions = np.array(self.actions, dtype=np.float32)
+        old_probs = np.array(self.probs, dtype=np.float32)
+        values = np.array(self.vals, dtype=np.float32)
+        rewards = np.array(self.rewards, dtype=np.float32)
+        dones = np.array(self.dones, dtype=np.float32)
+        
         # Convert lists to tensors
-        states = torch.tensor(self.states, dtype=torch.float32).to(device)
-        actions = torch.tensor(self.actions, dtype=torch.float32).to(device)
-        old_probs = torch.tensor(self.probs, dtype=torch.float32).to(device).detach()
-        values = torch.tensor(self.vals, dtype=torch.float32).to(device).detach()
-        rewards = torch.tensor(self.rewards, dtype=torch.float32).to(device)
-        dones = torch.tensor(self.dones, dtype=torch.float32).to(device)
+        states = torch.tensor(states).to(device)
+        actions = torch.tensor(actions).to(device)
+        old_probs = torch.tensor(old_probs).to(device).detach()
+        values = torch.tensor(values).to(device).detach()
+        rewards = torch.tensor(rewards).to(device)
+        dones = torch.tensor(dones).to(device)
 
         # Normalize rewards
         self.normalize_rewards()
