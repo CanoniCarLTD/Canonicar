@@ -2,6 +2,7 @@ from sensor_msgs.msg import Image, PointCloud2, Imu, NavSatFix
 import rclpy
 from rclpy.node import Node
 from std_msgs.msg import Float32MultiArray
+from ros_interfaces.srv import RespawnVehicle
 import torch
 import numpy as np
 import sys
@@ -40,6 +41,8 @@ class PPOModelNode(Node):
             Float32MultiArray, "/carla/vehicle_control", 10
         )
 
+        self.respawn_srv = self.create_service(RespawnVehicle, 'respawn_vehicle_service', self.respawn_callback)
+
         # Initialize PPO Agent (loads from checkpoint if available)
         self.ppo_agent = ppo_agent.PPOAgent()
         self.get_logger().info(f"Model version: {VERSION}")
@@ -51,6 +54,8 @@ class PPOModelNode(Node):
         self.done = False
 
         self.termination_reason = "unknown"
+        self.collision = False
+        self.track_progress = 0
         self.episode_counter = 0
         self.timestep_counter = 0
         self.total_timesteps = TOTAL_TIMESTEPS
@@ -106,8 +111,20 @@ class PPOModelNode(Node):
     ##################################################################################################
 
     def calculate_reward(self):
-        # Implement reward calculation logic here
-        self.reward = 1
+        collision_penalty = -10.0       
+        time_penalty = -0.01            
+        progress_reward_factor = 100.0  
+        finish_bonus = 50.0            
+        
+        if self.collision:
+            self.reward = collision_penalty
+        else:
+            progress_reward = progress_reward_factor * self.track_progress
+
+            if self.track_progress >= 1.0:
+                progress_reward += finish_bonus
+
+            self.reward = progress_reward + time_penalty
         
         
     def store_transition(self):
@@ -378,6 +395,14 @@ class PPOModelNode(Node):
     ##################################################################################################
     #                                           UTILITIES
     ##################################################################################################
+
+    def respawn_callback(self, request, response):
+        if request.reason.lower() == "collision":
+            self.collision = True
+
+        response.success = True
+        response.message = f"Respawn triggered due to {request.reason}"
+        return response
 
     def deterministic_cuda(self):
         """
