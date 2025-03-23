@@ -41,7 +41,7 @@ class SpawnVehicleNode(Node):
         )
 
         try:
-            self.client = Client(self.host, 2000)
+            self.client = Client(self.host, self.port)
             self.client.set_timeout(10.0)
             self.world = self.client.get_world()
             settings = self.world.get_settings()
