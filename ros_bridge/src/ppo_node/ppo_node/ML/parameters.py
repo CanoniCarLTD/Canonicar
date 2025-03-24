@@ -6,7 +6,7 @@ All the hyper-parameters needed for the PPO algorithm implementation.
 PPO_CHECKPOINT_DIR = "/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models"
 VERSION = "v1.1.1"
 
-MODEL_LOAD = False  # Set to True to resume training from checkpoint
+MODEL_LOAD = True  # Set to True to resume training from checkpoint
 CHECKPOINT_FILE = "/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models/v1.1.1/run_20250324_0001" # Specify file when MODEL_LOAD=True, else set to NONE
 
 TRAIN = True  # Set to False to disable training and only run inference
