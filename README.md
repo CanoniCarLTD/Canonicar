@@ -107,7 +107,7 @@ tensorboard --logdir=/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models 
 ## Watching live training metrics progress (STILL NEEDS TESTING)
 
 ```bash
-tensorboard --logdir tensorboard_logs
+tensorboard --logdir=/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models --bind_all
 ```
 
 ## License

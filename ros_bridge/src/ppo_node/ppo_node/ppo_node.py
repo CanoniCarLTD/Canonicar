@@ -141,9 +141,6 @@ class PPOModelNode(Node):
     def publish_action(self):
         action_msg = Float32MultiArray()
         action_msg.data = self.action.tolist()
-        # reduce brake value
-        
-        action_msg.data.append(0.0)
         self.action_publisher.publish(action_msg)
         self.get_logger().info(f"Published action: {action_msg.data}")
 
