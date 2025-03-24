@@ -49,6 +49,24 @@ class PPOModelNode(Node):
             'vehicle_ready',
             self.handle_vehicle_ready
         )
+        
+        self.episode_metrics_pub = self.create_publisher(
+            String,
+            '/training/episode_metrics',
+            10
+        )
+        
+        self.performance_metrics_pub = self.create_publisher(
+            String,
+            '/training/performance_metrics',
+            10
+        )
+        
+        self.error_logs_pub = self.create_publisher(
+            String,
+            '/training/error_logs',
+            10
+        )
 
         self.collision_sub = self.create_subscription(
             String,
@@ -549,6 +567,66 @@ class PPOModelNode(Node):
                 writer.writeheader()
             writer.writerow(row)
 
+        prefix = "Train" if TRAIN else "Test"
+        self.summary_writer.add_scalar(f"{prefix}/Episode Duration (s)", (self.t2 - self.t1).total_seconds(), self.episode_counter)
+        self.summary_writer.add_scalar(f"{prefix}/Episode Reward", self.current_ep_reward, self.episode_counter)
+        self.summary_writer.add_scalar(f"{prefix}/Episode Length", self.current_step_in_episode, self.episode_counter)
+        self.summary_writer.add_scalar(f"{prefix}/Action Std", self.ppo_agent.action_std, self.episode_counter)
+        
+        # Publish episode metrics
+    def log_and_publish_episode_metrics(self):
+        metrics = {
+        "episode": self.episode_counter,
+        "episode_reward": self.current_ep_reward,
+        "actor_loss": float(self.last_actor_loss) if self.last_actor_loss else None,
+        "critic_loss": float(self.last_critic_loss) if self.last_critic_loss else None,
+        "entropy": float(self.last_entropy) if self.last_entropy else None,
+        "duration": (self.t2 - self.t1).total_seconds(),
+        "episode_length": self.current_step_in_episode,
+        "train": TRAIN
+    }
+    
+        msg = String()
+        msg.data = json.dumps(metrics)
+        self.episode_metrics_pub.publish(msg)
+    
+    
+    def log_and_publish_performance_metrics(self):    
+        # Publish performance metrics
+        performance = {
+            "episode_id": f"ep_{self.episode_counter}",
+            "lap_times": [], # Add actual lap times if available
+            "track_progress": self.track_progress,
+            "collisions": 1 if self.collision else 0,
+            "lap_progress": self.track_progress
+        }
+        
+        msg = String()
+        msg.data = json.dumps(performance)
+        self.performance_metrics_pub.publish(msg)
+        
+    def save_episode_trajectory(self):
+        # IT THINK IT IS RUDUNDENT. PLEASE TELL ME WHAT YOU THINK.
+        os.makedirs(self.trajectory_dir, exist_ok=True)
+        episode_file = os.path.join(self.trajectory_dir, f"episode_{self.episode_counter:04d}.csv")
+        fieldnames = ["step", "timestep", "state", "action", "reward", "done"]
+        try:
+            with open(episode_file, "w", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=fieldnames)
+                writer.writeheader()
+                for i in range(len(self.ppo_agent.states)):
+                    if i % 512 == 0:  # Save every 512 steps
+                        writer.writerow({
+                            "step": i,
+                            "timestep": self.timestep_counter - len(self.ppo_agent.states) + i + 1,
+                            "state": np.array2string(self.ppo_agent.states[i], separator=","),
+                            "action": np.array2string(self.ppo_agent.actions[i], separator=","),
+                            "reward": self.ppo_agent.rewards[i],
+                            "done": self.ppo_agent.dones[i]
+                        })
+            self.get_logger().info(f"📊 Episode trajectory saved to {episode_file}")
+        except Exception as e:
+            self.get_logger().error(f"❌ Could not save episode CSV: {e}")
         self.summary_writer.add_scalar("episode duration (s)", (self.t2 - self.t1).total_seconds(), self.episode_counter)
         self.summary_writer.add_scalar("Rewards/reward per episode", self.current_ep_reward, self.episode_counter)
         self.summary_writer.add_scalar("episode length", self.current_step_in_episode, self.episode_counter)
