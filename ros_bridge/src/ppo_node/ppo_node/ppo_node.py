@@ -152,9 +152,9 @@ class PPOModelNode(Node):
     ##################################################################################################
 
     def calculate_reward(self):
-        collision_penalty = -10.0       
+        collision_penalty = -5.0       
         time_penalty = -0.1            
-        progress_reward_factor = 100.0  
+        progress_reward_factor = 300.0  
         finish_bonus = 50.0            
         
         if self.collision:
@@ -493,7 +493,6 @@ class PPOModelNode(Node):
             self.get_logger().info(f"Start position recorded: {self.start_point}")
             self.lap_start_time = self.get_clock().now()
             self.get_logger().info(f"Lap timer started at: {self.lap_start_time}")
-            time.sleep(1)  # Wait for a second before starting
             return
         
         # Calculate progress around the track

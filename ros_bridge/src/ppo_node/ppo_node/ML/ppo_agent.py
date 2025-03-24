@@ -296,7 +296,10 @@ class PPOAgent:
 
     def normalize_advantages(self, advantages):
         """Normalize advantages for stability."""
-        return (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+        if advantages.numel() > 1:
+            return (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+        else:
+            return advantages
 
     ##################################################################################################
     #                                       COMPUTE GAE
@@ -402,8 +405,7 @@ class PPOAgent:
                 )
 
                 # Critic loss
-                critic_loss = VF_COEF * F.mse_loss(state_values, batch_returns.detach())
-
+                critic_loss = VF_COEF * F.mse_loss(state_values.view(-1), batch_returns.detach().view(-1))
                 # Optimize actor
                 self.actor_optimizer.zero_grad()
                 actor_loss.backward()
