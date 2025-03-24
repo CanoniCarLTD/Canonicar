@@ -55,17 +55,17 @@ class PPOModelNode(Node):
 
         self.state = None
         self.action = None
-        self.reward = 0
+        self.reward = 0.0
         self.done = False
 
         self.termination_reason = "unknown"
         self.collision = False
-        self.track_progress = 0
+        self.track_progress = 0.0
         self.episode_counter = 0
         self.timestep_counter = 0
         self.total_timesteps = TOTAL_TIMESTEPS
         self.episode_length = EPISODE_LENGTH
-        self.current_ep_reward = 0
+        self.current_ep_reward = 0.0
 
         # Track waypoints related variables
         self.track_waypoints = []  # List of (x, y) tuples
@@ -131,7 +131,8 @@ class PPOModelNode(Node):
     ##################################################################################################
 
     def get_action(self, data):
-        self.action, _ = self.ppo_agent.select_action(data)
+        self.state = data # might be redundant but just to make sure
+        self.action, self.log_prob = self.ppo_agent.select_action(data)
         self.get_logger().info(f"Returned action: {self.action}")
 
     ##################################################################################################
@@ -156,6 +157,8 @@ class PPOModelNode(Node):
         
         if self.collision:
             self.reward = collision_penalty
+            self.done = True # CHECK IF WE WANT TO DO THIS
+            self.termination_reason = "collision"
         else:
             progress_reward = progress_reward_factor * self.track_progress
 
@@ -164,18 +167,21 @@ class PPOModelNode(Node):
 
             self.reward = progress_reward + time_penalty
         
-        
+    ##################################################################################################
+    #                                       STORE TRANSITION
+    ##################################################################################################
+    
     def store_transition(self):
-        # Assuming you have access to the value and done flag
         value = self.ppo_agent.critic(
             torch.tensor(self.state, dtype=torch.float32).to(device).unsqueeze(0)
         ).item()
+        
         self.ppo_agent.store_transition(
-            self.state, self.action, 0, value, self.reward, self.done
+            self.state, self.action, float(self.log_prob), value, self.reward, self.done
         )
 
     ##################################################################################################
-    #                                       RUN RESET
+    #                                           RUN RESET
     ##################################################################################################
 
     def reset_run(self):
@@ -183,10 +189,13 @@ class PPOModelNode(Node):
         '''
         self.state = None
         self.action = None
-        self.reward = 0
+        self.reward = 0.0
         self.done = False
-        self.current_ep_reward = 0
-        self.current_step_in_episode = 0
+        self.current_ep_reward = 0.0
+        self.current_step_in_episode = 0.0
+        self.collision = False
+        self.lap_completed = False
+        self.track_progress=0.0
         self.termination_reason = "unknown"
         self.get_logger().info(
             f"Episode {self.episode_counter} finished. Resetting."
@@ -221,7 +230,7 @@ class PPOModelNode(Node):
                 self.timestep_counter += 1
                 self.current_ep_reward += self.reward
                 
-                if self.timestep_counter % BATCH_SIZE == 0:
+                if self.timestep_counter % LEARN_EVERY_N_STEPS == 0:
                     actor_loss, critic_loss, entropy = self.ppo_agent.learn()
                     self.log_step_metrics(actor_loss, critic_loss, entropy)
 
@@ -233,16 +242,17 @@ class PPOModelNode(Node):
                     self.save_training_state(self.run_dir)
                     self.save_episode_trajectory()
                     self.log_episode_metrics()
-
                     self.get_logger().info(f"Checkpoint saved at {self.run_dir}")
                     self.reset_run()
                     self.episode_counter += 1
+                    self.ppo_agent.decay_action_std(self.episode_counter)
                     return 1
 
             self.get_logger().info(f"Episode: {self.episode_counter}, Timestep: {self.timestep_counter}, Reward: {self.current_ep_reward}")
 
         else:
             # End of training
+            self.ppo_agent.decay_action_std(self.episode_counter)
             self.log_episode_metrics()
             self.save_training_state(self.run_dir)
             self.save_episode_trajectory()
@@ -650,8 +660,10 @@ class PPOModelNode(Node):
     
         # Log hyperparameters
         hparams = {
-            "learning_rate": LEARNING_RATE,
-            "batch_size": BATCH_SIZE,
+            "actor learning_rate": ACTOR_LEARNING_RATE,
+            "critic learning_rate": CRITIC_LEARNING_RATE,
+            "learn_every_N_steps": LEARN_EVERY_N_STEPS,
+            "minibatch_size": MINIBATCH_SIZE,
             "gamma": GAMMA,
             "lambda_gae": LAMBDA_GAE,
             "entropy_coef": ENTROPY_COEF,
