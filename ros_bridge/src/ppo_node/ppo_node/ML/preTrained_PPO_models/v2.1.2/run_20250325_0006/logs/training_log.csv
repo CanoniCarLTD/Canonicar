@@ -1,0 +1,3 @@
+episode,step,timestep,actor_loss,critic_loss,entropy,action_std,step_reward,cumulative_reward
+0,1,128,-0.24275784691174826,0.893690899014473,59.02028147379557,0.2,-5.0,-17.69999999999997
+0,128,-17.69999999999997,128,0.2,collision
