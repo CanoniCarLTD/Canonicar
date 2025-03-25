@@ -4,10 +4,10 @@ All the hyper-parameters needed for the PPO algorithm implementation.
 
 # Directory and version control for checkpoint saving and loading
 PPO_CHECKPOINT_DIR = "/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models"
-VERSION = "v2.0.0"
+VERSION = "v2.1.2"
 
-MODEL_LOAD = True  # Set to True to resume training from checkpoint
-CHECKPOINT_FILE = "/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models/v2.0.0/run_20250324_0002" # Specify file when MODEL_LOAD=True, else set to NONE
+MODEL_LOAD = False  # Set to True to resume training from checkpoint
+CHECKPOINT_FILE = "/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models/v2.1.2/run_20250325_0001" # Specify file when MODEL_LOAD=True, else set to NONE
 
 TRAIN = True  # Set to False to disable training and only run inference
 DETERMINISTIC_CUDNN = True
@@ -18,6 +18,7 @@ LEARN_EVERY_N_STEPS = 128 # Number of timesteps collected before a policy update
 MINIBATCH_SIZE = 32  # Number of samples in each minibatch
 NUM_EPOCHS = 6  # PPO update epochs per batch (Best practice: 3-10)
 EPISODES = 100000
+SAVE_EVERY_N_TIMESTEPS = LEARN_EVERY_N_STEPS * 10
 
 # PPO-specific hyperparameters
 PPO_INPUT_DIM = 203

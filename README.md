@@ -109,6 +109,11 @@ tensorboard --logdir=/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models 
 ```bash
 tensorboard --logdir=/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models --bind_all
 ```
+## Watch nvidia-smi live for GPU machines
+
+```bash
+watch -n 1 nvidia-smi
+```
 
 ## License
 

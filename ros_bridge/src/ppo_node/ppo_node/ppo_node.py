@@ -49,28 +49,8 @@ class PPOModelNode(Node):
         )
         
         self.summary_writer = None
-        
-        # Initialize PPO Agent (loads from checkpoint if available)
-        self.ppo_agent = ppo_agent.PPOAgent(summary_writer=self.summary_writer)
-        self.get_logger().info(f"Model version: {VERSION}")
-        self.get_logger().info(f"Checkpoint directory: {PPO_CHECKPOINT_DIR}")
-        
-        if MODEL_LOAD and CHECKPOINT_FILE:
-            self.run_dir = CHECKPOINT_FILE
-            if os.path.exists(self.run_dir):
-                self.get_logger().info(f"📂 Resuming from checkpoint: {self.run_dir}")
-                self.load_training_state(self.run_dir)
-                self.log_dir = os.path.join(self.run_dir, "logs")
-                # self.trajectory_dir = os.path.join(self.log_dir, "trajectories")
-                self.tensorboard_dir = os.path.join(self.run_dir, "tensorboard")
-                self.summary_writer = SummaryWriter(log_dir=self.tensorboard_dir)
-                self.ppo_agent.summary_writer = self.summary_writer
-            else:
-                raise FileNotFoundError(f"❌ Checkpoint file not found: {self.run_dir}")
-        else:
-            self.create_new_run_dir()
-            self.get_logger().info(f"🆕 Starting a new training run in: {self.run_dir}")
-            
+        if DETERMINISTIC_CUDNN:
+            self.set_global_seed_and_determinism(SEED, DETERMINISTIC_CUDNN)
         self.state = None
         self.action = None
         self.reward = 0.0
@@ -97,7 +77,29 @@ class PPOModelNode(Node):
         self.lap_start_time = None
         self.lap_end_time = None
         self.lap_time = None
-
+        
+        # Initialize PPO Agent (loads from checkpoint if available)
+        self.ppo_agent = ppo_agent.PPOAgent(summary_writer=self.summary_writer)
+        self.get_logger().info(f"Model version: {VERSION}")
+        self.get_logger().info(f"Checkpoint directory: {PPO_CHECKPOINT_DIR}")
+        
+        if MODEL_LOAD and CHECKPOINT_FILE:
+            self.run_dir = CHECKPOINT_FILE
+            if os.path.exists(self.run_dir):
+                self.get_logger().info(f"📂 Resuming from checkpoint: {self.run_dir}")
+                self.load_training_state(self.run_dir)
+                self.log_dir = os.path.join(self.run_dir, "logs")
+                # self.trajectory_dir = os.path.join(self.log_dir, "trajectories")
+                self.tensorboard_dir = os.path.join(self.run_dir, "tensorboard")
+                self.summary_writer = SummaryWriter(log_dir=self.tensorboard_dir)
+                self.ppo_agent.summary_writer = self.summary_writer
+            else:
+                raise FileNotFoundError(f"❌ Checkpoint file not found: {self.run_dir}")
+        else:
+            self.create_new_run_dir()
+            self.get_logger().info(f"🆕 Starting a new training run in: {self.run_dir}")
+        
+        self.get_logger().info(f"Initial action std: {self.ppo_agent.actor.log_std.exp().detach().cpu().numpy()}") # To check that log_std.exp() is around ACTION_STD_INIT:
 
         self.collision_sub = self.create_subscription(
             String,
@@ -118,12 +120,6 @@ class PPOModelNode(Node):
         # Request track waypoints
         self.request_track_waypoints()
 
-        if DETERMINISTIC_CUDNN:
-            self.deterministic_cuda()
-            # Seeding to reproduce the results
-            random.seed(SEED)
-            np.random.seed(SEED)
-            torch.manual_seed(SEED)
 
         self.get_logger().info(
             "PPOModelNode initialized,subscribed to data topic and PPO model loaded."
@@ -249,7 +245,8 @@ class PPOModelNode(Node):
                         # Try to recover - empty cache and continue
                         if torch.cuda.is_available():
                             torch.cuda.empty_cache()
-                        
+                if self.timestep_counter % SAVE_EVERY_N_TIMESTEPS == 0:
+                    self.save_training_state(self.run_dir)
                 if self.done:
                     self.t2 = datetime.now()
                     self.get_logger().info(f"Episode duration: {self.t2 - self.t1}")
@@ -261,14 +258,14 @@ class PPOModelNode(Node):
                     self.get_logger().info(f"Checkpoint saved at {self.run_dir}")
                     self.reset_run()
                     self.episode_counter += 1
-                    self.ppo_agent.decay_action_std(self.episode_counter)
+                    # self.ppo_agent.decay_action_std(self.episode_counter) # Trying a learnable log_std instead
                     return 1
 
             self.get_logger().info(f"Episode: {self.episode_counter}, Timestep: {self.timestep_counter}, Reward: {self.current_ep_reward}")
 
         else:
             # End of training
-            self.ppo_agent.decay_action_std(self.episode_counter)
+            # self.ppo_agent.decay_action_std(self.episode_counter) # Trying a learnable log_std instead
             self.log_episode_metrics()
             self.save_training_state(self.run_dir)
             # self.save_episode_trajectory()
@@ -294,7 +291,6 @@ class PPOModelNode(Node):
                     
                 # Later, if we detect crashes or other done causes and want to respawn, update:
                 # self.termination_reason = "timeout"
-                # self.termination_reason = "collision"
                 # self.termination_reason = "goal_reached"
                 
                 self.store_transition()
@@ -352,10 +348,11 @@ class PPOModelNode(Node):
         self.load_training_metadata(state_dict_dir)
 
     def save_training_metadata(self, state_dict_dir):
+        log_std = self.ppo_agent.actor.log_std.detach().cpu().tolist()  # convert tensor to list
         meta = {
             "episode_counter": self.episode_counter,
             "timestep_counter": self.timestep_counter,
-            "action_std": self.ppo_agent.action_std,
+            "log_std": log_std,
             "current_ep_reward": self.current_ep_reward,
             "current_step_in_episode": self.current_step_in_episode,
         }
@@ -375,10 +372,13 @@ class PPOModelNode(Node):
                     meta = json.load(f)
                 self.episode_counter = meta.get("episode_counter", 0)
                 self.timestep_counter = meta.get("timestep_counter", 0)
-                action_std = meta.get("action_std", ACTION_STD_INIT)
-                self.ppo_agent.actor.set_action_std(action_std)
                 self.current_ep_reward = meta.get("current_ep_reward", 0)
                 self.current_step_in_episode = meta.get("current_step_in_episode", 0)
+                log_std_list = meta.get("log_std")
+                if log_std_list is not None:
+                    log_std_tensor = torch.tensor(log_std_list, dtype=torch.float32, device=device)
+                with torch.no_grad():
+                    self.ppo_agent.actor.log_std.copy_(log_std_tensor)
                 self.get_logger().info(f"✅ Metadata loaded: {meta}")
             else:
                 self.get_logger().warn(f"No meta.json found in {state_dict_dir}. No metadata loaded.")
@@ -485,7 +485,6 @@ class PPOModelNode(Node):
         
         # Add a callback for when the service call completes
         future.add_done_callback(self.process_waypoints_response)
-
     
     def process_waypoints_response(self, future):
         """Process the waypoints received from the service"""
@@ -605,13 +604,11 @@ class PPOModelNode(Node):
         if self.track_progress > 0 and int(self.get_clock().now().nanoseconds / 1e9) % 5 == 0:
             self.get_logger().info(f"Track progress: {self.track_progress:.2f} ({self.prev_progress_distance:.1f}m / {self.track_length:.1f}m)")
 
-
     def calculate_distance(self, point1, point2):
         if point1 is None or point2 is None:
             return float("inf")
         return math.sqrt(sum((p1 - p2) ** 2 for p1, p2 in zip(point1, point2)))
         
-
     def handle_vehicle_ready(self, request, response):
         """Service handler when spawn_vehicle_node notifies that a vehicle is ready"""
         self.get_logger().info(f'Received vehicle_ready notification: {request.vehicle_id}')
@@ -624,28 +621,39 @@ class PPOModelNode(Node):
         
         return response
 
-    def deterministic_cuda(self):
+    def set_global_seed_and_determinism(self, seed=42, deterministic_cudnn=True):
         """
-        Set CuDNN to deterministic mode for reproducibility.
+        Sets global seeds for full reproducibility and configures CuDNN for deterministic behavior.
+        Call this at the start of training before any randomness or model initialization.
         """
+        print(f"🔒 [SEEDING] Setting global seed to {seed}")
+
+        random.seed(seed)
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+        os.environ["PYTHONHASHSEED"] = str(seed)
+
         if torch.cuda.is_available():
-            print ("✅ CUDA is available.")
-            # Ensure CuDNN is enabled and set deterministic mode based on the user's preference
-            if torch.backends.cudnn.enabled:
-                print("✅ CuDNN is enabled. Setting CuDNN to deterministic mode.")
-                torch.backends.cudnn.deterministic = True
-                torch.backends.cudnn.benchmark = (
-                    False  # Disable auto-tuner for deterministic behavior
-                )
+            torch.cuda.manual_seed(seed)
+            torch.cuda.manual_seed_all(seed)
+            print("✅ CUDA is available.")
+
+            if hasattr(torch.backends, "cudnn") and torch.backends.cudnn.enabled:
+                if deterministic_cudnn:
+                    torch.backends.cudnn.deterministic = True
+                    torch.backends.cudnn.benchmark = False
+                    print("✅ CuDNN deterministic mode enabled.")
+                else:
+                    torch.backends.cudnn.deterministic = False
+                    torch.backends.cudnn.benchmark = True
+                    print("⚠️ CuDNN benchmarking mode enabled (faster but nondeterministic).")
             else:
-                torch.backends.cudnn.deterministic = False
-                torch.backends.cudnn.benchmark = (
-                    True  # Enable auto-tuner for faster performance
-                )
+                print("⚠️ CuDNN is not enabled or available.")
         else:
-            print("CUDA is not available.")
-            
-            
+            print("⚠️ CUDA is not available. Running on CPU.")
+
+        print("✅ Global seed and determinism setup complete.")
+             
     def create_new_run_dir(self, base_dir=None):
         version_dir = os.path.join(PPO_CHECKPOINT_DIR, VERSION)
         os.makedirs(version_dir, exist_ok=True)

@@ -20,9 +20,11 @@ class ActorNetwork(nn.Module):
     def __init__(self, input_dim, action_dim, action_std_init):
         super(ActorNetwork, self).__init__()
         self.action_dim = action_dim
-        self.action_var = torch.full(
-            (action_dim,), action_std_init * action_std_init
-        ).to(device)
+        # self.action_var = torch.full(
+        #     (action_dim,), action_std_init * action_std_init
+        # ).to(device) # Been replaced by the line below log_std
+        self.log_std = nn.Parameter(torch.ones(action_dim) * np.log(action_std_init))  # log_std is learnable
+
 
         # Actor network layers
         self.fc1 = nn.Linear(input_dim, 256)
@@ -85,20 +87,20 @@ class ActorNetwork(nn.Module):
 
         return action_mean
 
-    def set_action_std(self, new_action_std):
-        self.action_var = torch.full(
-            (self.action_dim,), new_action_std * new_action_std
-        ).to(device)
+    # def set_action_std(self, new_action_std):
+    #     self.action_var = torch.full((self.action_dim,), new_action_std * new_action_std).to(device)
 
     def get_dist(self, state):
         action_mean = self.forward(state)
-        action_var = self.action_var.expand_as(action_mean)
+        # action_var = self.action_var.expand_as(action_mean) # Been replaced by the line below action_std
+        action_std = torch.exp(self.log_std)
         
         # Check for NaNs after expand_as
-        if torch.isnan(action_var).any():
+        if torch.isnan(action_std).any():
             raise ValueError("NaN detected after expand_as in ActorNetwork")
         
-        cov_mat = torch.diag_embed(action_var)
+        # cov_mat = torch.diag_embed(action_var) # Been replaced by the line below cov_mat
+        cov_mat = torch.diag_embed(action_std.expand_as(action_mean))
                 
         # Check for NaNs after diag_embed
         if torch.isnan(cov_mat).any():
@@ -194,6 +196,8 @@ class PPOAgent:
         )
 
         self.learn_step_counter = 0  # Track PPO updates
+        
+        # print(f"Initial action std: {self.actor.log_std.exp().detach().cpu().numpy()}") # To check that log_std.exp() is around ACTION_STD_INIT:
 
         # Ensure checkpoint directory exists
         if not os.path.exists(PPO_CHECKPOINT_DIR):
@@ -283,30 +287,36 @@ class PPOAgent:
             print(f"❌ Error loading model and optimizer: {e}")
 
     ##################################################################################################
-    #                              DECAY ACTION STD AND NORMALIZE ADVANTAGES
+    #                                  DECAY ACTION STD - NOT USED
     ##################################################################################################
 
-    def decay_action_std(self, episode_num):
-        """
-        Decay the action standard deviation for the exploration-exploitation tradeoff.
-        At the beginning of training, the agent should explore more, so the action_std is higher.
-        Due to frequent collisions at the start of training, we wait for more episodes before starting to decay the action_std.
-        As training progresses, the agent should exploit more, so the action_std is gradually reduced.
-        """
+    # Removed for now - trying to use a learnable log_std instead of decaying action_std
+    
+    # def decay_action_std(self, episode_num): 
+    #     """
+    #     Decay the action standard deviation for the exploration-exploitation tradeoff.
+    #     At the beginning of training, the agent should explore more, so the action_std is higher.
+    #     Due to frequent collisions at the start of training, we wait for more episodes before starting to decay the action_std.
+    #     As training progresses, the agent should exploit more, so the action_std is gradually reduced.
+    #     """
         
-        if episode_num < 1000:
-            decay_freq = 500
-        else:
-            decay_freq = 100
+    #     if episode_num < 5000:
+    #         decay_freq = 2500
+    #     else:
+    #         decay_freq = 1000
 
-        if episode_num % decay_freq == 0 and self.action_std > MIN_ACTION_STD:
-            self.action_std = max(
-                MIN_ACTION_STD, self.action_std - ACTION_STD_DECAY_RATE
-            )
-            self.actor.set_action_std(self.action_std)
-            if self.summary_writer is not None:
-                self.summary_writer.add_scalar("Exploration/ActionStd", self.action_std, episode_num)
-
+    #     if episode_num % decay_freq == 0 and self.action_std > MIN_ACTION_STD:
+    #         self.action_std = max(
+    #             MIN_ACTION_STD, self.action_std - ACTION_STD_DECAY_RATE
+    #         )
+    #         self.actor.set_action_std(self.action_std)
+    #         if self.summary_writer is not None:
+    #             self.summary_writer.add_scalar("Exploration/ActionStd", self.action_std, episode_num)
+    
+    ##################################################################################################
+    #                                       NORMALIZE ADVANTAGES
+    ##################################################################################################
+    
     def normalize_advantages(self, advantages):
         """Normalize advantages for stability."""
         if advantages.numel() > 1:
@@ -315,7 +325,7 @@ class PPOAgent:
             return advantages
 
     ##################################################################################################
-    #                                       COMPUTE GAE
+    #                                           COMPUTE GAE
     ##################################################################################################
 
     def compute_gae(self, values, rewards, dones, gamma=GAMMA, lam=LAMBDA_GAE):
@@ -436,7 +446,10 @@ class PPOAgent:
                     self.actor.parameters(), 0.5
                 )  # Gradient clipping
                 self.actor_optimizer.step()
-
+                
+                with torch.no_grad(): 
+                    self.actor.log_std.clamp_(np.log(0.05), np.log(1.5)) # Prevent entropy from exploding
+                    
                 # Optimize critic
                 self.critic_optimizer.zero_grad()
                 critic_loss.backward()
@@ -459,14 +472,23 @@ class PPOAgent:
                 # Log to tensorboard
                 if self.summary_writer is not None:
                     self.summary_writer.add_scalar("PPO/KL_Divergence", kl_div.item(), self.learn_step_counter)
-                # Optional: stop update early if KL is too high
-                if kl_div.item() > MAX_KL:
-                    print(f"[KL WARNING] KL divergence {kl_div.item():.4f} too high. Breaking PPO epoch early.")
-                    break
+                # # Optional: stop update early if KL is too high
+                # if kl_div.item() > MAX_KL:
+                #     print(f"[KL WARNING] KL divergence {kl_div.item():.4f} too high. Breaking PPO epoch early.")
+                #     break
 
-        # Increment learn step counter & decay action standard deviation
+        # Increment learn step counter
         self.learn_step_counter += 1
-        # self.decay_action_std() # Moved to training function in ppo_node.py
+        
+        if self.summary_writer is not None:
+            current_action_std = torch.exp(self.actor.log_std).mean().item()
+            current_log_std = self.actor.log_std.data.cpu().numpy()
+            
+            print(f"[Learn Step {self.learn_step_counter}] log_std: {current_log_std}, action_std: {current_action_std}")
+
+            self.summary_writer.add_scalar("PPO/Learned_Action_Std", current_action_std, self.learn_step_counter)
+            self.summary_writer.add_scalar("Exploration/MeanLogStd", current_log_std.mean(), self.learn_step_counter)
+
 
         # Clear stored experiences
         self.states, self.actions, self.probs, self.vals, self.rewards, self.dones = (
