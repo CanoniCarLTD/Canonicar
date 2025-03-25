@@ -470,10 +470,10 @@ class PPOAgent:
                 old_log_probs = batch_old_probs
                 new_log_probs = new_probs
                 kl_div = (old_log_probs - new_log_probs).mean()
-                print(f"{self.prefix}/KL Divergence: {kl_div.item():.4f}")
+                print("KL Divergence: {kl_div.item():.4f}")
                 # Log to tensorboard
                 if self.summary_writer is not None:
-                    self.summary_writer.add_scalar(f"{self.prefix}/PPO/KL divergence", kl_div.item(), self.learn_step_counter)
+                    self.summary_writer.add_scalar("Exploration/KL divergence", kl_div.item(), self.learn_step_counter)
                 # # Optional: stop update early if KL is too high
                 # if kl_div.item() > MAX_KL:
                 #     print(f"[KL WARNING] KL divergence {kl_div.item():.4f} too high. Breaking PPO epoch early.")
@@ -488,8 +488,8 @@ class PPOAgent:
             
             print(f"[Learn Step {self.learn_step_counter}] log_std: {current_log_std}, action_std: {current_action_std}")
 
-            self.summary_writer.add_scalar(f"{self.prefix}/Exploration/learned action std", current_action_std, self.learn_step_counter)
-            self.summary_writer.add_scalar(f"{self.prefix}/Exploration/mean log std", current_log_std.mean().item(), self.learn_step_counter)
+            self.summary_writer.add_scalar("Exploration/learned action std", current_action_std, self.learn_step_counter)
+            self.summary_writer.add_scalar("Exploration/mean log std", current_log_std.mean().item(), self.learn_step_counter)
 
 
         # Clear stored experiences

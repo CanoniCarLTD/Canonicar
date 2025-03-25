@@ -34,7 +34,7 @@ In our `parameters.py`, we define two key values:
 ## Watching live training metrics progress (STILL NEEDS TESTING)
 
 ```bash
-tensorboard --logdir=/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models/new_log_settings --bind_all
+tensorboard --logdir=/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models --bind_all
 ```
 
 # Versions

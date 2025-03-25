@@ -229,8 +229,8 @@ class PPOModelNode(Node):
                 self.current_ep_reward += self.reward
                 
                 # Log reward at every step (add this line)
-                self.summary_writer.add_scalar(f"{self.train}/Rewards/step reward", self.reward, self.timestep_counter)
-                self.summary_writer.add_scalar(f"{self.train}/Rewards/episode reward", self.current_ep_reward, self.episode_counter)
+                self.summary_writer.add_scalar("Rewards/step reward", self.reward, self.timestep_counter)
+                self.summary_writer.add_scalar("Rewards/episode reward", self.current_ep_reward, self.episode_counter)
                 
                 if self.timestep_counter % LEARN_EVERY_N_STEPS == 0:
                     try:
@@ -242,6 +242,7 @@ class PPOModelNode(Node):
                         actor_loss, critic_loss, entropy = self.ppo_agent.learn()
                         self.get_logger().info(f"entropy: {entropy}")
                         self.log_step_metrics(actor_loss, critic_loss, entropy)
+                        self.log_system_metrics()
                     except RuntimeError as e:
                         # Handle CUDA errors more gracefully
                         self.get_logger().error(f"CUDA Error during learning: {e}")
@@ -256,22 +257,19 @@ class PPOModelNode(Node):
 
                     # Save state, log data
                     self.save_training_state(self.run_dir)
-                    # self.save_episode_trajectory()
                     self.log_episode_metrics()
+                    self.log_system_metrics()
                     self.get_logger().info(f"Checkpoint saved at {self.run_dir}")
                     self.reset_run()
                     self.episode_counter += 1
-                    # self.ppo_agent.decay_action_std(self.episode_counter) # Trying a learnable log_std instead
                     return 1
 
             self.get_logger().info(f"Episode: {self.episode_counter}, Timestep: {self.timestep_counter}, Reward: {self.current_ep_reward}")
 
         else:
             # End of training
-            # self.ppo_agent.decay_action_std(self.episode_counter) # Trying a learnable log_std instead
             self.log_episode_metrics()
             self.save_training_state(self.run_dir)
-            # self.save_episode_trajectory()
             self.reset_run()
             self.episode_counter += 1
 
@@ -310,7 +308,51 @@ class PPOModelNode(Node):
                     self.get_logger().info(f"Episode duration: {self.t2 - self.t1}")
 
                     self.save_training_state(self.run_dir)
-                    # self.save_episode_trajectory()
+                    self.log_episode_metrics()
+                    self.get_logger().info(f"Checkpoint saved at {self.run_dir}")
+
+                    self.reset_run()
+                    self.episode_counter += 1
+                return 1
+            
+        else:
+            self.log_episode_metrics()
+            self.save_training_state(self.run_dir)
+            self.reset_run()
+            self.episode_counter += 1
+            
+    def testing(self, msg):
+        if self.timestep_counter < TEST_TIMESTEPS:
+            self.state = np.array(msg.data, dtype=np.float32)
+            self.t1 = datetime.now()
+
+            if self.current_step_in_episode < self.episode_length:
+                self.current_step_in_episode += 1
+                self.get_action(self.state)
+                self.publish_action()
+                self.calculate_reward()
+                if self.current_step_in_episode % 128 == 0:
+                    self.log_system_metrics()
+                # Episode termination logic
+                if self.current_step_in_episode >= self.episode_length:
+                    self.done = True
+                    self.termination_reason = "episode_length"
+                    # optionally: self.termination_reason = "timeout" / "goal_reached" / etc.
+
+                self.store_transition()
+                self.timestep_counter += 1
+                self.current_ep_reward += self.reward
+
+                # Logging per step
+                self.summary_writer.add_scalar("Rewards/step reward", self.reward, self.timestep_counter)
+                self.summary_writer.add_scalar("Rewards/episode reward so far", self.current_ep_reward, self.timestep_counter)
+
+                if self.done:
+                    self.t2 = datetime.now()
+                    self.get_logger().info(f"Episode duration: {self.t2 - self.t1}")
+
+                    self.log_system_metrics()
+                    self.save_training_state(self.run_dir)
                     self.log_episode_metrics()
                     self.get_logger().info(f"Checkpoint saved at {self.run_dir}")
 
@@ -318,14 +360,15 @@ class PPOModelNode(Node):
                     self.episode_counter += 1
                 return 1
 
+            # Per-step console info
             print(f"Episode: {self.episode_counter}, Timestep: {self.timestep_counter}, Reward: {self.current_ep_reward}")
 
         else:
             self.log_episode_metrics()
             self.save_training_state(self.run_dir)
-            # self.save_episode_trajectory()
             self.reset_run()
             self.episode_counter += 1
+
 
 
     ##################################################################################################
@@ -408,9 +451,6 @@ class PPOModelNode(Node):
                 writer.writeheader()
             writer.writerow(row)
 
-        self.summary_writer.add_scalar(f"{self.train}/Step", self.ppo_agent.learn_step_counter, self.timestep_counter)
-        self.summary_writer.add_scalar(f"{self.train}/Timestep", self.timestep_counter, self.timestep_counter)
-        
         # old log settings - will be deprecated in the next push    
         
         # self.summary_writer.add_scalar("Loss/actor", actor_loss, self.timestep_counter)
@@ -419,11 +459,11 @@ class PPOModelNode(Node):
                 
         # new log settings
         
-        self.summary_writer.add_scalar(f"{self.prefix}/Loss/actor", actor_loss, self.timestep_counter)
-        self.summary_writer.add_scalar(f"{self.prefix}/Loss/critic", critic_loss, self.timestep_counter)
-        self.summary_writer.add_scalar(f"{self.prefix}/Exploration/entropy", entropy, self.timestep_counter)
-        self.summary_writer.add_scalar(f"{self.prefix}/Rewards/step reward", self.reward, self.timestep_counter)
-        self.summary_writer.add_scalar(f"{self.prefix}/Rewards/cumulative reward", self.current_ep_reward, self.timestep_counter)
+        self.summary_writer.add_scalar("Loss/actor", actor_loss, self.timestep_counter)
+        self.summary_writer.add_scalar("Loss/critic", critic_loss, self.timestep_counter)
+        self.summary_writer.add_scalar("Exploration/entropy", entropy, self.timestep_counter)
+        self.summary_writer.add_scalar("Rewards/step reward", self.reward, self.timestep_counter)
+        self.summary_writer.add_scalar("Rewards/cumulative reward", self.current_ep_reward, self.timestep_counter)
 
     def log_episode_metrics(self):
         log_file = os.path.join(self.log_dir, "training_log.csv" if TRAIN else "testing_log.csv")
@@ -441,9 +481,9 @@ class PPOModelNode(Node):
                 writer.writeheader()
             writer.writerow(row)
 
-        self.summary_writer.add_scalar(f"{self.prefix}/episode duration (s)", (self.t2 - self.t1).total_seconds(), self.episode_counter)
-        self.summary_writer.add_scalar(f"{self.prefix}/Rewards/reward per episode", self.current_ep_reward, self.episode_counter)
-        self.summary_writer.add_scalar(f"{self.prefix}/episode length", self.current_step_in_episode, self.episode_counter)
+        self.summary_writer.add_scalar("episode duration (s)", (self.t2 - self.t1).total_seconds(), self.episode_counter)
+        self.summary_writer.add_scalar("Rewards/reward per episode", self.current_ep_reward, self.episode_counter)
+        self.summary_writer.add_scalar("episode length", self.current_step_in_episode, self.episode_counter)
         
     import psutil
     import torch
@@ -455,16 +495,16 @@ class PPOModelNode(Node):
         process = psutil.Process()
         process_mem_mb = process.memory_info().rss / 1024**2  # in MB
 
-        self.summary_writer.add_scalar(f"{self.prefix}/System/CPU_Usage (%)", cpu_percent, self.timestep_counter)
-        self.summary_writer.add_scalar(f"{self.prefix}/System/RAM_Usage (%)", ram_percent, self.timestep_counter)
-        self.summary_writer.add_scalar(f"{self.prefix}/System/Process_RAM (MB)", process_mem_mb, self.timestep_counter)
+        self.summary_writer.add_scalar("System/CPU_Usage (%)", cpu_percent, self.timestep_counter)
+        self.summary_writer.add_scalar("System/RAM_Usage (%)", ram_percent, self.timestep_counter)
+        self.summary_writer.add_scalar("System/Process_RAM (MB)", process_mem_mb, self.timestep_counter)
 
         # GPU (if available)
         if torch.cuda.is_available():
             gpu_mem_allocated = torch.cuda.memory_allocated() / 1024**2
             gpu_mem_reserved = torch.cuda.memory_reserved() / 1024**2
-            self.summary_writer.add_scalar(f"{self.prefix}/System/GPU_Memory_Allocated (MB)", gpu_mem_allocated, self.timestep_counter)
-            self.summary_writer.add_scalar(f"{self.prefix}/System/GPU_Memory_Reserved (MB)", gpu_mem_reserved, self.timestep_counter)
+            self.summary_writer.add_scalar("System/GPU_Memory_Allocated (MB)", gpu_mem_allocated, self.timestep_counter)
+            self.summary_writer.add_scalar("System/GPU_Memory_Reserved (MB)", gpu_mem_reserved, self.timestep_counter)
 
         
     # def save_episode_trajectory(self):

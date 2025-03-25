@@ -104,11 +104,6 @@ tensorboard --logdir=/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models 
   ```
   - if you are making changes at the nodes, and the containers are up and running, you have to do `colcon build` inside the container itself before launching the nodes.
 
-## Watching live training metrics progress (STILL NEEDS TESTING)
-
-```bash
-tensorboard --logdir=/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models --bind_all
-```
 ## Watch nvidia-smi live for GPU machines
 
 ```bash
