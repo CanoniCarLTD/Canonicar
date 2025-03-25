@@ -294,10 +294,10 @@ class PPOAgent:
         As training progresses, the agent should exploit more, so the action_std is gradually reduced.
         """
         
-        if episode_num < 1000:
-            decay_freq = 500
+        if episode_num < 5000:
+            decay_freq = 2500
         else:
-            decay_freq = 100
+            decay_freq = 1000
 
         if episode_num % decay_freq == 0 and self.action_std > MIN_ACTION_STD:
             self.action_std = max(

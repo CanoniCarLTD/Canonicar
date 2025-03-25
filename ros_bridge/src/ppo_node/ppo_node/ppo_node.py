@@ -50,27 +50,6 @@ class PPOModelNode(Node):
         
         self.summary_writer = None
         
-        # Initialize PPO Agent (loads from checkpoint if available)
-        self.ppo_agent = ppo_agent.PPOAgent(summary_writer=self.summary_writer)
-        self.get_logger().info(f"Model version: {VERSION}")
-        self.get_logger().info(f"Checkpoint directory: {PPO_CHECKPOINT_DIR}")
-        
-        if MODEL_LOAD and CHECKPOINT_FILE:
-            self.run_dir = CHECKPOINT_FILE
-            if os.path.exists(self.run_dir):
-                self.get_logger().info(f"📂 Resuming from checkpoint: {self.run_dir}")
-                self.load_training_state(self.run_dir)
-                self.log_dir = os.path.join(self.run_dir, "logs")
-                # self.trajectory_dir = os.path.join(self.log_dir, "trajectories")
-                self.tensorboard_dir = os.path.join(self.run_dir, "tensorboard")
-                self.summary_writer = SummaryWriter(log_dir=self.tensorboard_dir)
-                self.ppo_agent.summary_writer = self.summary_writer
-            else:
-                raise FileNotFoundError(f"❌ Checkpoint file not found: {self.run_dir}")
-        else:
-            self.create_new_run_dir()
-            self.get_logger().info(f"🆕 Starting a new training run in: {self.run_dir}")
-            
         self.state = None
         self.action = None
         self.reward = 0.0
@@ -97,6 +76,28 @@ class PPOModelNode(Node):
         self.lap_start_time = None
         self.lap_end_time = None
         self.lap_time = None
+        
+        # Initialize PPO Agent (loads from checkpoint if available)
+        self.ppo_agent = ppo_agent.PPOAgent(summary_writer=self.summary_writer)
+        self.get_logger().info(f"Model version: {VERSION}")
+        self.get_logger().info(f"Checkpoint directory: {PPO_CHECKPOINT_DIR}")
+        
+        if MODEL_LOAD and CHECKPOINT_FILE:
+            self.run_dir = CHECKPOINT_FILE
+            if os.path.exists(self.run_dir):
+                self.get_logger().info(f"📂 Resuming from checkpoint: {self.run_dir}")
+                self.load_training_state(self.run_dir)
+                self.log_dir = os.path.join(self.run_dir, "logs")
+                # self.trajectory_dir = os.path.join(self.log_dir, "trajectories")
+                self.tensorboard_dir = os.path.join(self.run_dir, "tensorboard")
+                self.summary_writer = SummaryWriter(log_dir=self.tensorboard_dir)
+                self.ppo_agent.summary_writer = self.summary_writer
+            else:
+                raise FileNotFoundError(f"❌ Checkpoint file not found: {self.run_dir}")
+        else:
+            self.create_new_run_dir()
+            self.get_logger().info(f"🆕 Starting a new training run in: {self.run_dir}")
+            
 
 
         self.collision_sub = self.create_subscription(
@@ -249,7 +250,8 @@ class PPOModelNode(Node):
                         # Try to recover - empty cache and continue
                         if torch.cuda.is_available():
                             torch.cuda.empty_cache()
-                        
+                if self.timestep_counter % SAVE_EVERY_N_TIMESTEPS == 0:
+                    self.save_training_state(self.run_dir)
                 if self.done:
                     self.t2 = datetime.now()
                     self.get_logger().info(f"Episode duration: {self.t2 - self.t1}")
@@ -294,7 +296,6 @@ class PPOModelNode(Node):
                     
                 # Later, if we detect crashes or other done causes and want to respawn, update:
                 # self.termination_reason = "timeout"
-                # self.termination_reason = "collision"
                 # self.termination_reason = "goal_reached"
                 
                 self.store_transition()
@@ -485,7 +486,6 @@ class PPOModelNode(Node):
         
         # Add a callback for when the service call completes
         future.add_done_callback(self.process_waypoints_response)
-
     
     def process_waypoints_response(self, future):
         """Process the waypoints received from the service"""
@@ -605,13 +605,11 @@ class PPOModelNode(Node):
         if self.track_progress > 0 and int(self.get_clock().now().nanoseconds / 1e9) % 5 == 0:
             self.get_logger().info(f"Track progress: {self.track_progress:.2f} ({self.prev_progress_distance:.1f}m / {self.track_length:.1f}m)")
 
-
     def calculate_distance(self, point1, point2):
         if point1 is None or point2 is None:
             return float("inf")
         return math.sqrt(sum((p1 - p2) ** 2 for p1, p2 in zip(point1, point2)))
         
-
     def handle_vehicle_ready(self, request, response):
         """Service handler when spawn_vehicle_node notifies that a vehicle is ready"""
         self.get_logger().info(f'Received vehicle_ready notification: {request.vehicle_id}')
@@ -644,8 +642,7 @@ class PPOModelNode(Node):
                 )
         else:
             print("CUDA is not available.")
-            
-            
+                 
     def create_new_run_dir(self, base_dir=None):
         version_dir = os.path.join(PPO_CHECKPOINT_DIR, VERSION)
         os.makedirs(version_dir, exist_ok=True)
