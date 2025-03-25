@@ -74,18 +74,14 @@ class DataCollector(Node):
 
         # Print information about the synchronizer
         self.ats.registerCallback(self.sync_callback)
-        self.get_logger().info(f"Synchronizer slop: {self.ats.__dict__}")
         self.get_logger().info("Subscribers set up successfully.")
 
     #   lidar_msg, imu_msg, gnss_msg
     def sync_callback(self, image_msg, lidar_msg, imu_msg,  gnss_msg):
-        self.get_logger().info("Synchronized callback triggered.")
         processed_data = self.process_data(image_msg, lidar_msg, imu_msg, gnss_msg)
         self.data_buffer.append(processed_data)
-        self.get_logger().info("Data appended to buffer.")
 
     def process_data(self,image_msg, lidar_msg, imu_msg, gnss_msg):
-        self.get_logger().info("Processing data...")
 
         vision_features = self.process_vision_data(image_msg, lidar_msg)
         return self.aggregate_state_vector(
@@ -115,7 +111,6 @@ class DataCollector(Node):
 
     def process_imu(self, imu_msg):
         """Process IMU data."""
-        self.get_logger().info("Processing IMU data...")
         imu_data = [
             imu_msg.linear_acceleration.x,
             imu_msg.linear_acceleration.y,
@@ -124,7 +119,6 @@ class DataCollector(Node):
             imu_msg.angular_velocity.y,
             imu_msg.angular_velocity.z,
         ]
-        self.get_logger().info(f"IMU data: {imu_data}")
         return imu_data
 
     # use geopy.distance for safer calculations.
@@ -183,8 +177,6 @@ class DataCollector(Node):
         # Add GNSS data
         state_vector[198:203] = gnss_features[:5]  # Includes velocity and heading
 
-        self.get_logger().info(f"State Vector shape: {state_vector.shape}")
-
         response = Float32MultiArray()
         response.data = state_vector.tolist()
         # if theres a nan, throw an error
@@ -197,12 +189,10 @@ class DataCollector(Node):
 
     def get_latest_data(self):
         """Retrieve the most recent synchronized data."""
-        self.get_logger().info("Retrieving latest data...")
         return self.data_buffer[-1] if self.data_buffer else None
 
     def clear_buffer(self):
         """Clear the stored data buffer."""
-        self.get_logger().info("Clearing data buffer...")
         self.data_buffer.clear()
 
 

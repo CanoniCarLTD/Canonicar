@@ -7,7 +7,8 @@ import numpy as np
 from torch.distributions import MultivariateNormal
 import sys
 from .parameters import *
-# from torch.utils.tensorboard import SummaryWriter
+
+import ppo_node # check that it doesnt affect something badly
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -72,9 +73,9 @@ class ActorNetwork(nn.Module):
         try:
             steering_mean = torch.tanh(action_mean[:, 0:1])  # tanh to restrict to [-1, 1]
             throttle_mean = torch.sigmoid(action_mean[:, 1:2])  # sigmoid to restrict to [0, 1]
-            #brake_mean = torch.sigmoid(action_mean[:, 2:3])  # sigmoid to restrict to [0, 1]
+            brake_mean = torch.sigmoid(action_mean[:, 2:3])  # sigmoid to restrict to [0, 1]
 
-            action_mean = torch.cat([steering_mean, throttle_mean], dim=1)
+            action_mean = torch.cat([steering_mean, throttle_mean, brake_mean], dim=1)
             if torch.isnan(action_mean).any():
                 raise ValueError("NaN detected after concatenating means in ActorNetwork")
         except ValueError as e:
@@ -120,7 +121,7 @@ class ActorNetwork(nn.Module):
         action_np = action.detach().cpu().numpy()
         action_np[:, 0] = np.clip(action_np[:, 0], -1.0, 1.0)  # steering
         action_np[:, 1] = np.clip(action_np[:, 1], 0.0, 1.0)  # throttle
-        #action_np[:, 2] = np.clip(action_np[:, 2], 0.0, 1.0)  # brake
+        action_np[:, 2] = np.clip(action_np[:, 2], 0.0, 1.0)  # brake
 
         action = torch.FloatTensor(action_np).to(device)
 
@@ -161,8 +162,8 @@ class CriticNetwork(nn.Module):
 ##################################################################################################
 
 class PPOAgent:
-    def __init__(self, input_dim=203, action_dim=2):
-        
+    def __init__(self, input_dim=203, action_dim=3, summary_writer=None):
+        self.summary_writer = summary_writer
         print("\nInitializing PPO Agent...\n")
         print("device: ", device)
         self.input_dim = input_dim if PPO_INPUT_DIM is None else PPO_INPUT_DIM
@@ -179,8 +180,8 @@ class PPOAgent:
         self.critic = CriticNetwork(self.input_dim).to(device)
 
         # Optimizers
-        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=LEARNING_RATE)
-        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=LEARNING_RATE)
+        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=ACTOR_LEARNING_RATE)
+        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=CRITIC_LEARNING_RATE)
 
         # Experience storage
         self.states, self.actions, self.probs, self.vals, self.rewards, self.dones = (
@@ -285,18 +286,33 @@ class PPOAgent:
     #                              DECAY ACTION STD AND NORMALIZE ADVANTAGES
     ##################################################################################################
 
-    def decay_action_std(self):
-        """Decay action standard deviation for exploration-exploitation tradeoff."""
-        if self.learn_step_counter % (TOTAL_TIMESTEPS // 10) == 0:
+    def decay_action_std(self, episode_num):
+        """
+        Decay the action standard deviation for the exploration-exploitation tradeoff.
+        At the beginning of training, the agent should explore more, so the action_std is higher.
+        Due to frequent collisions at the start of training, we wait for more episodes before starting to decay the action_std.
+        As training progresses, the agent should exploit more, so the action_std is gradually reduced.
+        """
+        
+        if episode_num < 1000:
+            decay_freq = 500
+        else:
+            decay_freq = 100
+
+        if episode_num % decay_freq == 0 and self.action_std > MIN_ACTION_STD:
             self.action_std = max(
                 MIN_ACTION_STD, self.action_std - ACTION_STD_DECAY_RATE
             )
             self.actor.set_action_std(self.action_std)
-            print(f"Action std decayed to: {self.action_std}")
+            if self.summary_writer is not None:
+                self.summary_writer.add_scalar("Exploration/ActionStd", self.action_std, episode_num)
 
     def normalize_advantages(self, advantages):
         """Normalize advantages for stability."""
-        return (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+        if advantages.numel() > 1:
+            return (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+        else:
+            return advantages
 
     ##################################################################################################
     #                                       COMPUTE GAE
@@ -371,8 +387,8 @@ class PPOAgent:
         for _ in range(NUM_EPOCHS):
             indices = np.arange(len(states))
             np.random.shuffle(indices)  # Shuffle indices for mini-batch sampling
-            for start in range(0, len(indices), BATCH_SIZE):
-                batch = indices[start : start + BATCH_SIZE]
+            for start in range(0, len(indices), MINIBATCH_SIZE):
+                batch = indices[start : start + MINIBATCH_SIZE]
 
                 batch_states = states[batch]
                 batch_actions = actions[batch]
@@ -400,10 +416,19 @@ class PPOAgent:
                 actor_loss = (
                     -torch.min(surr1, surr2).mean() - ENTROPY_COEF * entropy.mean()
                 )
-
-                # Critic loss
-                critic_loss = VF_COEF * F.mse_loss(state_values, batch_returns.detach())
-
+                
+                # A new suggestion to calculate the critic loss
+                old_values_batch = values[batch].detach().view(-1)  # use stored values
+                new_values = state_values.view(-1)
+                clipped_values = old_values_batch + (new_values - old_values_batch).clamp(-0.2, 0.2)
+                
+                value_loss_unclipped = F.mse_loss(new_values, batch_returns.detach().view(-1))
+                value_loss_clipped = F.mse_loss(clipped_values, batch_returns.detach().view(-1))
+                critic_loss = VF_COEF * torch.max(value_loss_unclipped, value_loss_clipped)
+                
+                # Critic loss - Old implementation
+                # critic_loss = VF_COEF * F.mse_loss(state_values.view(-1), batch_returns.detach().view(-1))
+                
                 # Optimize actor
                 self.actor_optimizer.zero_grad()
                 actor_loss.backward()
@@ -419,15 +444,29 @@ class PPOAgent:
                     self.critic.parameters(), 0.5
                 )  # Gradient clipping
                 self.critic_optimizer.step()
-                
+    
                 total_actor_loss += actor_loss.item()
                 total_critic_loss += critic_loss.item()
                 total_entropy += entropy.mean().item()
                 num_batches += 1
+                   
+            # For KL divergence monitoring
+            with torch.no_grad():
+                old_log_probs = batch_old_probs
+                new_log_probs = new_probs
+                kl_div = (old_log_probs - new_log_probs).mean()
+                print(f"KL Divergence: {kl_div.item():.4f}")
+                # Log to tensorboard
+                if self.summary_writer is not None:
+                    self.summary_writer.add_scalar("PPO/KL_Divergence", kl_div.item(), self.learn_step_counter)
+                # Optional: stop update early if KL is too high
+                if kl_div.item() > MAX_KL:
+                    print(f"[KL WARNING] KL divergence {kl_div.item():.4f} too high. Breaking PPO epoch early.")
+                    break
 
         # Increment learn step counter & decay action standard deviation
         self.learn_step_counter += 1
-        self.decay_action_std()
+        # self.decay_action_std() # Moved to training function in ppo_node.py
 
         # Clear stored experiences
         self.states, self.actions, self.probs, self.vals, self.rewards, self.dones = (

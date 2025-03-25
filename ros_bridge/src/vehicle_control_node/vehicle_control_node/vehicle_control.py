@@ -71,20 +71,17 @@ class VehicleControlNode(Node):
         return response
         
     def control_callback(self, msg):
-        self.get_logger().info(f'Received message from ppo node: {msg.data}')
         if len(msg.data) != 3:
             self.get_logger().error('Control message must contain [throttle, steer, brake]')
             return
             
         steer, throttle, brake = msg.data
-        self.get_logger().info(f'received: steer={steer}, throttle={throttle}, brake={brake}')
         
         if self.vehicle:
             control = VehicleControl()
             control.steer = float(steer)
             control.throttle = float(throttle)
             control.brake = float(brake)
-            self.get_logger().info('Applying control to vehicle')
             self.vehicle.apply_control(control)
 
 def main(args=None):

@@ -47,25 +47,43 @@ class PPOModelNode(Node):
             'vehicle_ready',
             self.handle_vehicle_ready
         )
-
+        
+        self.summary_writer = None
+        
         # Initialize PPO Agent (loads from checkpoint if available)
-        self.ppo_agent = ppo_agent.PPOAgent()
+        self.ppo_agent = ppo_agent.PPOAgent(summary_writer=self.summary_writer)
         self.get_logger().info(f"Model version: {VERSION}")
         self.get_logger().info(f"Checkpoint directory: {PPO_CHECKPOINT_DIR}")
-
+        
+        if MODEL_LOAD and CHECKPOINT_FILE:
+            self.run_dir = CHECKPOINT_FILE
+            if os.path.exists(self.run_dir):
+                self.get_logger().info(f"📂 Resuming from checkpoint: {self.run_dir}")
+                self.load_training_state(self.run_dir)
+                self.log_dir = os.path.join(self.run_dir, "logs")
+                # self.trajectory_dir = os.path.join(self.log_dir, "trajectories")
+                self.tensorboard_dir = os.path.join(self.run_dir, "tensorboard")
+                self.summary_writer = SummaryWriter(log_dir=self.tensorboard_dir)
+                self.ppo_agent.summary_writer = self.summary_writer
+            else:
+                raise FileNotFoundError(f"❌ Checkpoint file not found: {self.run_dir}")
+        else:
+            self.create_new_run_dir()
+            self.get_logger().info(f"🆕 Starting a new training run in: {self.run_dir}")
+            
         self.state = None
         self.action = None
-        self.reward = 0
+        self.reward = 0.0
         self.done = False
 
         self.termination_reason = "unknown"
         self.collision = False
-        self.track_progress = 0
+        self.track_progress = 0.0
         self.episode_counter = 0
         self.timestep_counter = 0
         self.total_timesteps = TOTAL_TIMESTEPS
         self.episode_length = EPISODE_LENGTH
-        self.current_ep_reward = 0
+        self.current_ep_reward = 0.0
 
         # Track waypoints related variables
         self.track_waypoints = []  # List of (x, y) tuples
@@ -106,21 +124,6 @@ class PPOModelNode(Node):
             random.seed(SEED)
             np.random.seed(SEED)
             torch.manual_seed(SEED)
-            
-        if MODEL_LOAD and CHECKPOINT_FILE:
-            self.run_dir = CHECKPOINT_FILE
-            if os.path.exists(self.run_dir):
-                self.get_logger().info(f"📂 Resuming from checkpoint: {self.run_dir}")
-                self.load_training_state(self.run_dir)
-                self.log_dir = os.path.join(self.run_dir, "logs")
-                self.trajectory_dir = os.path.join(self.log_dir, "trajectories")
-                self.tensorboard_dir = os.path.join(self.run_dir, "tensorboard")
-                self.summary_writer = SummaryWriter(log_dir=self.tensorboard_dir)
-            else:
-                raise FileNotFoundError(f"❌ Checkpoint file not found: {self.run_dir}")
-        else:
-            self.create_new_run_dir()
-            self.get_logger().info(f"🆕 Starting a new training run in: {self.run_dir}")
 
         self.get_logger().info(
             "PPOModelNode initialized,subscribed to data topic and PPO model loaded."
@@ -131,8 +134,8 @@ class PPOModelNode(Node):
     ##################################################################################################
 
     def get_action(self, data):
-        self.action, _ = self.ppo_agent.select_action(data)
-        self.get_logger().info(f"Returned action: {self.action}")
+        self.state = data # might be redundant but just to make sure
+        self.action, self.log_prob = self.ppo_agent.select_action(data)
 
     ##################################################################################################
     #                                       ACTION PUBLISHING
@@ -141,24 +144,21 @@ class PPOModelNode(Node):
     def publish_action(self):
         action_msg = Float32MultiArray()
         action_msg.data = self.action.tolist()
-        # reduce brake value
-        
-        action_msg.data.append(0.0)
         self.action_publisher.publish(action_msg)
-        self.get_logger().info(f"Published action: {action_msg.data}")
 
     ##################################################################################################
     #                                       REWARD FUNCTION
     ##################################################################################################
 
     def calculate_reward(self):
-        collision_penalty = -10.0       
+        collision_penalty = -5.0       
         time_penalty = -0.1            
-        progress_reward_factor = 100.0  
+        progress_reward_factor = 300.0  
         finish_bonus = 50.0            
         
         if self.collision:
             self.reward = collision_penalty
+            self.done = True # CHECK IF WE WANT TO DO THIS
         else:
             progress_reward = progress_reward_factor * self.track_progress
 
@@ -167,18 +167,21 @@ class PPOModelNode(Node):
 
             self.reward = progress_reward + time_penalty
         
-        
+    ##################################################################################################
+    #                                       STORE TRANSITION
+    ##################################################################################################
+    
     def store_transition(self):
-        # Assuming you have access to the value and done flag
         value = self.ppo_agent.critic(
             torch.tensor(self.state, dtype=torch.float32).to(device).unsqueeze(0)
         ).item()
+        
         self.ppo_agent.store_transition(
-            self.state, self.action, 0, value, self.reward, self.done
+            self.state, self.action, float(self.log_prob), value, self.reward, self.done
         )
 
     ##################################################################################################
-    #                                       RUN RESET
+    #                                           RUN RESET
     ##################################################################################################
 
     def reset_run(self):
@@ -186,10 +189,13 @@ class PPOModelNode(Node):
         '''
         self.state = None
         self.action = None
-        self.reward = 0
+        self.reward = 0.0
         self.done = False
-        self.current_ep_reward = 0
-        self.current_step_in_episode = 0
+        self.current_ep_reward = 0.0
+        self.current_step_in_episode = 0.0
+        self.collision = False
+        self.lap_completed = False
+        self.track_progress=0.0
         self.termination_reason = "unknown"
         self.get_logger().info(
             f"Episode {self.episode_counter} finished. Resetting."
@@ -217,38 +223,55 @@ class PPOModelNode(Node):
                     
                 # Later, if we detect crashes or other done causes and want to respawn, update:
                 # self.termination_reason = "timeout"
-                # self.termination_reason = "collision"
                 # self.termination_reason = "goal_reached"
                 
                 self.store_transition()
                 self.timestep_counter += 1
                 self.current_ep_reward += self.reward
                 
-                if self.timestep_counter % BATCH_SIZE == 0:
-                    actor_loss, critic_loss, entropy = self.ppo_agent.learn()
-                    self.log_step_metrics(actor_loss, critic_loss, entropy)
-
+                # Log reward at every step (add this line)
+                self.summary_writer.add_scalar("Rewards/step_reward", self.reward, self.timestep_counter)
+                self.summary_writer.add_scalar("Rewards/cumulative_reward", self.current_ep_reward, self.timestep_counter)
+                
+                if self.timestep_counter % LEARN_EVERY_N_STEPS == 0:
+                    try:
+                        # Add CUDA memory debug information
+                        if torch.cuda.is_available():
+                            self.get_logger().info(f"CUDA Memory: Allocated: {torch.cuda.memory_allocated()/1024**2:.2f}MB, Reserved: {torch.cuda.memory_reserved()/1024**2:.2f}MB")
+                            # Force garbage collection
+                            torch.cuda.empty_cache()
+                        actor_loss, critic_loss, entropy = self.ppo_agent.learn()
+                        self.get_logger().info(f"entropy: {entropy}")
+                        self.log_step_metrics(actor_loss, critic_loss, entropy)
+                    except RuntimeError as e:
+                        # Handle CUDA errors more gracefully
+                        self.get_logger().error(f"CUDA Error during learning: {e}")
+                        # Try to recover - empty cache and continue
+                        if torch.cuda.is_available():
+                            torch.cuda.empty_cache()
+                        
                 if self.done:
                     self.t2 = datetime.now()
                     self.get_logger().info(f"Episode duration: {self.t2 - self.t1}")
 
                     # Save state, log data
                     self.save_training_state(self.run_dir)
-                    self.save_episode_trajectory()
+                    # self.save_episode_trajectory()
                     self.log_episode_metrics()
-
                     self.get_logger().info(f"Checkpoint saved at {self.run_dir}")
                     self.reset_run()
                     self.episode_counter += 1
+                    self.ppo_agent.decay_action_std(self.episode_counter)
                     return 1
 
             self.get_logger().info(f"Episode: {self.episode_counter}, Timestep: {self.timestep_counter}, Reward: {self.current_ep_reward}")
 
         else:
             # End of training
+            self.ppo_agent.decay_action_std(self.episode_counter)
             self.log_episode_metrics()
             self.save_training_state(self.run_dir)
-            self.save_episode_trajectory()
+            # self.save_episode_trajectory()
             self.reset_run()
             self.episode_counter += 1
 
@@ -277,13 +300,18 @@ class PPOModelNode(Node):
                 self.store_transition()
                 self.timestep_counter += 1
                 self.current_ep_reward += self.reward
+                
+                # Log reward at every step (add this line)
+                self.summary_writer.add_scalar("Rewards/step_reward", self.reward, self.timestep_counter)
+                self.summary_writer.add_scalar("Rewards/cumulative_reward", self.current_ep_reward, self.timestep_counter)
+            
 
                 if self.done:
                     self.t2 = datetime.now()
                     self.get_logger().info(f"Episode duration: {self.t2 - self.t1}")
 
                     self.save_training_state(self.run_dir)
-                    self.save_episode_trajectory()
+                    # self.save_episode_trajectory()
                     self.log_episode_metrics()
                     self.get_logger().info(f"Checkpoint saved at {self.run_dir}")
 
@@ -296,7 +324,7 @@ class PPOModelNode(Node):
         else:
             self.log_episode_metrics()
             self.save_training_state(self.run_dir)
-            self.save_episode_trajectory()
+            # self.save_episode_trajectory()
             self.reset_run()
             self.episode_counter += 1
 
@@ -384,8 +412,6 @@ class PPOModelNode(Node):
         self.summary_writer.add_scalar("Loss/critic", critic_loss, self.timestep_counter)
         self.summary_writer.add_scalar("Entropy", entropy, self.timestep_counter)
         self.summary_writer.add_scalar("Exploration/action_std", self.ppo_agent.action_std, self.timestep_counter)
-        self.summary_writer.add_scalar("Rewards/step_reward", self.reward, self.timestep_counter)
-        self.summary_writer.add_scalar("Rewards/cumulative_reward", self.current_ep_reward, self.timestep_counter)
         
     def log_episode_metrics(self):
         log_file = os.path.join(self.log_dir, "training_log.csv" if TRAIN else "testing_log.csv")
@@ -410,28 +436,28 @@ class PPOModelNode(Node):
         self.summary_writer.add_scalar(f"{prefix}/Episode Length", self.current_step_in_episode, self.episode_counter)
         self.summary_writer.add_scalar(f"{prefix}/Action Std", self.ppo_agent.action_std, self.episode_counter)
         
-    def save_episode_trajectory(self):
-        # IT THINK IT IS RUDUNDENT. PLEASE TELL ME WHAT YOU THINK.
-        os.makedirs(self.trajectory_dir, exist_ok=True)
-        episode_file = os.path.join(self.trajectory_dir, f"episode_{self.episode_counter:04d}.csv")
-        fieldnames = ["step", "timestep", "state", "action", "reward", "done"]
-        try:
-            with open(episode_file, "w", newline="") as f:
-                writer = csv.DictWriter(f, fieldnames=fieldnames)
-                writer.writeheader()
-                for i in range(len(self.ppo_agent.states)):
-                    if i % 512 == 0:  # Save every 512 steps
-                        writer.writerow({
-                            "step": i,
-                            "timestep": self.timestep_counter - len(self.ppo_agent.states) + i + 1,
-                            "state": np.array2string(self.ppo_agent.states[i], separator=","),
-                            "action": np.array2string(self.ppo_agent.actions[i], separator=","),
-                            "reward": self.ppo_agent.rewards[i],
-                            "done": self.ppo_agent.dones[i]
-                        })
-            self.get_logger().info(f"📊 Episode trajectory saved to {episode_file}")
-        except Exception as e:
-            self.get_logger().error(f"❌ Could not save episode CSV: {e}")
+    # def save_episode_trajectory(self):
+    #     # IT THINK IT IS RUDUNDENT. PLEASE TELL ME WHAT YOU THINK.
+    #     os.makedirs(self.trajectory_dir, exist_ok=True)
+    #     episode_file = os.path.join(self.trajectory_dir, f"episode_{self.episode_counter:04d}.csv")
+    #     fieldnames = ["step", "timestep", "state", "action", "reward", "done"]
+    #     try:
+    #         with open(episode_file, "w", newline="") as f:
+    #             writer = csv.DictWriter(f, fieldnames=fieldnames)
+    #             writer.writeheader()
+    #             for i in range(len(self.ppo_agent.states)):
+    #                 if i % 512 == 0:  # Save every 512 steps
+    #                     writer.writerow({
+    #                         "step": i,
+    #                         "timestep": self.timestep_counter - len(self.ppo_agent.states) + i + 1,
+    #                         "state": np.array2string(self.ppo_agent.states[i], separator=","),
+    #                         "action": np.array2string(self.ppo_agent.actions[i], separator=","),
+    #                         "reward": self.ppo_agent.rewards[i],
+    #                         "done": self.ppo_agent.dones[i]
+    #                     })
+    #         self.get_logger().info(f"📊 Episode trajectory saved to {episode_file}")
+    #     except Exception as e:
+    #         self.get_logger().error(f"❌ Could not save episode CSV: {e}")
 
     ##################################################################################################
     #                                           UTILITIES
@@ -493,7 +519,6 @@ class PPOModelNode(Node):
             self.get_logger().info(f"Start position recorded: {self.start_point}")
             self.lap_start_time = self.get_clock().now()
             self.get_logger().info(f"Lap timer started at: {self.lap_start_time}")
-            time.sleep(1)  # Wait for a second before starting
             return
         
         # Calculate progress around the track
@@ -645,17 +670,20 @@ class PPOModelNode(Node):
         self.log_dir = os.path.join(self.run_dir, "logs")
         os.makedirs(self.log_dir, exist_ok=True)
     
-        self.trajectory_dir = os.path.join(self.log_dir, "trajectories")
-        os.makedirs(self.trajectory_dir, exist_ok=True)
+        # self.trajectory_dir = os.path.join(self.log_dir, "trajectories")
+        # os.makedirs(self.trajectory_dir, exist_ok=True)
     
         self.tensorboard_dir = os.path.join(self.run_dir, "tensorboard")
         os.makedirs(self.tensorboard_dir, exist_ok=True)
         self.summary_writer = SummaryWriter(log_dir=self.tensorboard_dir)
+        self.ppo_agent.summary_writer = self.summary_writer
     
         # Log hyperparameters
         hparams = {
-            "learning_rate": LEARNING_RATE,
-            "batch_size": BATCH_SIZE,
+            "actor learning_rate": ACTOR_LEARNING_RATE,
+            "critic learning_rate": CRITIC_LEARNING_RATE,
+            "learn_every_N_steps": LEARN_EVERY_N_STEPS,
+            "minibatch_size": MINIBATCH_SIZE,
             "gamma": GAMMA,
             "lambda_gae": LAMBDA_GAE,
             "entropy_coef": ENTROPY_COEF,
@@ -680,7 +708,7 @@ def main(args=None):
         rclpy.spin(node)
     except KeyboardInterrupt:
         node.save_training_state(node.run_dir)
-        node.save_episode_trajectory()
+        # node.save_episode_trajectory()
     finally:
         node.destroy_node()
         node.shutdown_writer()

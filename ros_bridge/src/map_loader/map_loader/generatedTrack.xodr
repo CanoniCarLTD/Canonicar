@@ -499,6 +499,9 @@
             <geometry s="539.17509" x="-2.71949" y="0.01982" hdg="-0.01046" length="3.31012">
                 <line />
             </geometry>
+            <geometry s="542.48521" x="0.59056" y="-0.00213" hdg="0.00245" length="3.31055">
+                <line />
+            </geometry>
         </planView>
         <lanes>
             <laneSection s="0.0">
