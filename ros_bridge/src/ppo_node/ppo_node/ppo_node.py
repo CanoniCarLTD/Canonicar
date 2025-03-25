@@ -15,7 +15,6 @@ from torch.utils.tensorboard import SummaryWriter
 import math
 import psutil
 
-
 from .ML import ppo_agent
 from .ML import parameters
 from .ML.parameters import *
@@ -98,26 +97,59 @@ class PPOModelNode(Node):
 
         self.stagnation_counter = 0
         
+        
         # Initialize PPO Agent (loads from checkpoint if available)
         self.ppo_agent = ppo_agent.PPOAgent(summary_writer=self.summary_writer)
-        self.get_logger().info(f"Model version: {VERSION}")
-        self.get_logger().info(f"Checkpoint directory: {PPO_CHECKPOINT_DIR}")
+
+        # TO BE DEPRECATED - OLD CODE v2.1.2 and earlier
         
-        if MODEL_LOAD and CHECKPOINT_FILE:
-            self.run_dir = CHECKPOINT_FILE
-            if os.path.exists(self.run_dir):
-                self.get_logger().info(f"📂 Resuming from checkpoint: {self.run_dir}")
-                self.load_training_state(self.run_dir)
-                self.log_dir = os.path.join(self.run_dir, "logs")
-                # self.trajectory_dir = os.path.join(self.log_dir, "trajectories")
-                self.tensorboard_dir = os.path.join(self.run_dir, "tensorboard")
-                self.summary_writer = SummaryWriter(log_dir=self.tensorboard_dir)
-                self.ppo_agent.summary_writer = self.summary_writer
+        # if MODEL_LOAD and CHECKPOINT_FILE:
+        #     self.run_dir = CHECKPOINT_FILE
+        #     if os.path.exists(self.run_dir):
+        #         self.get_logger().info(f"📂 Loading from checkpoint: {self.run_dir}")
+        #         self.load_training_state(self.run_dir)
+        #         self.log_dir = os.path.join(self.run_dir, "logs")
+        #         self.tensorboard_dir = os.path.join(self.run_dir, "tensorboard")
+        #         self.summary_writer = SummaryWriter(log_dir=self.tensorboard_dir)
+        #         self.ppo_agent.summary_writer = self.summary_writer
+        #     else:
+        #         raise FileNotFoundError(f"❌ Checkpoint file not found: {self.run_dir}")
+        # else:
+        #     self.create_new_run_dir()
+        #     self.get_logger().info(f"🆕 Starting a new training run in: {self.run_dir}")
+        
+        # NEW CODE - v2.1.3
+        if MODEL_LOAD:
+            if CHECKPOINT_FILE and LOAD_STATE_DICT_FROM_RUN:
+                raise ValueError("MODEL_LOAD is True but both CHECKPOINT_FILE and LOAD_STATE_DICT_FROM_RUN are set. Please choose one. \nTo continue a run, set CHECKPOINT_FILE to the wanted run directory and set LOAD_STATE_DICT_FROM_RUN to None. \nTo load state dict from another run, set CHECKPOINT_FILE to None, set LOAD_STATE_DICT_FROM_RUN to the wanted run directory, and don't froget to set the wanted version in VERSION.\n See more info in the README.")
+            if CHECKPOINT_FILE:
+                # Resume entire run from same version
+                self.run_dir = CHECKPOINT_FILE
+                if os.path.exists(self.run_dir):
+                    self.get_logger().info(f"📂 Resuming full run from file: {self.run_dir}")
+                    self.load_training_state(self.run_dir)
+                    self.log_dir = os.path.join(self.run_dir, "logs")
+                    self.tensorboard_dir = os.path.join(self.run_dir, "tensorboard")
+                    self.summary_writer = SummaryWriter(log_dir=self.tensorboard_dir)
+                    self.ppo_agent.summary_writer = self.summary_writer
+                else:
+                    raise FileNotFoundError(f"❌ Checkpoint file not found: {self.run_dir}")
+
+            elif LOAD_STATE_DICT_FROM_RUN:
+                # Load weights from another run into a new one
+                self.create_new_run_dir(load_from_run=LOAD_STATE_DICT_FROM_RUN)
+                # add /state_dict to the path
+                state_dict_dir_path = os.path.join(LOAD_STATE_DICT_FROM_RUN, "state_dict")
+                self.ppo_agent.load_model_and_optimizers(state_dict_dir_path)  # Load weights
+                self.get_logger().info(f"🆕 Started new run ({VERSION}), loaded weights from: {LOAD_STATE_DICT_FROM_RUN}")
+
             else:
-                raise FileNotFoundError(f"❌ Checkpoint file not found: {self.run_dir}")
+                raise ValueError("MODEL_LOAD is True but neither CHECKPOINT_FILE nor LOAD_STATE_DICT_FROM_RUN was set.")
+
         else:
             self.create_new_run_dir()
-            self.get_logger().info(f"🆕 Starting a new training run in: {self.run_dir}")
+            self.get_logger().info(f"🆕 Started new training run in: {self.run_dir}")
+        
         
         self.get_logger().info(f"Initial action std: {self.ppo_agent.actor.log_std.exp().detach().cpu().numpy()}") # To check that log_std.exp() is around ACTION_STD_INIT:
 
@@ -467,7 +499,7 @@ class PPOModelNode(Node):
             meta_path = os.path.join(state_dict_dir, "meta.json")
             with open(meta_path, "w") as f:
                 json.dump(meta, f)
-            self.get_logger().info(f"✅ Metadata saved: {meta}")
+            self.get_logger().info(f"Metadata saved: {meta}")
         except Exception as e:
             self.get_logger().error(f"❌ Metadata not saved: {e}")
 
@@ -486,7 +518,7 @@ class PPOModelNode(Node):
                     log_std_tensor = torch.tensor(log_std_list, dtype=torch.float32, device=device)
                 with torch.no_grad():
                     self.ppo_agent.actor.log_std.copy_(log_std_tensor)
-                self.get_logger().info(f"✅ Metadata loaded: {meta}")
+                self.get_logger().info(f"Metadata loaded: {meta}")
             else:
                 self.get_logger().warn(f"No meta.json found in {state_dict_dir}. No metadata loaded.")
         except Exception as e:
@@ -511,14 +543,6 @@ class PPOModelNode(Node):
             if write_header:
                 writer.writeheader()
             writer.writerow(row)
-
-        # old log settings - will be deprecated in the next push    
-        
-        # self.summary_writer.add_scalar("Loss/actor", actor_loss, self.timestep_counter)
-        # self.summary_writer.add_scalar("Loss/critic", critic_loss, self.timestep_counter)
-        # self.summary_writer.add_scalar("Entropy", entropy, self.timestep_counter)
-                
-        # new log settings
         
         self.summary_writer.add_scalar("Loss/actor", actor_loss, self.timestep_counter)
         self.summary_writer.add_scalar("Loss/critic", critic_loss, self.timestep_counter)
@@ -546,9 +570,6 @@ class PPOModelNode(Node):
         self.summary_writer.add_scalar("Rewards/reward per episode", self.current_ep_reward, self.episode_counter)
         self.summary_writer.add_scalar("episode length", self.current_step_in_episode, self.episode_counter)
         
-    import psutil
-    import torch
-
     def log_system_metrics(self):
         # CPU and RAM
         cpu_percent = psutil.cpu_percent()
@@ -567,29 +588,6 @@ class PPOModelNode(Node):
             self.summary_writer.add_scalar("System/GPU_Memory_Allocated (MB)", gpu_mem_allocated, self.timestep_counter)
             self.summary_writer.add_scalar("System/GPU_Memory_Reserved (MB)", gpu_mem_reserved, self.timestep_counter)
 
-        
-    # def save_episode_trajectory(self):
-    #     # IT THINK IT IS RUDUNDENT. PLEASE TELL ME WHAT YOU THINK.
-    #     os.makedirs(self.trajectory_dir, exist_ok=True)
-    #     episode_file = os.path.join(self.trajectory_dir, f"episode_{self.episode_counter:04d}.csv")
-    #     fieldnames = ["step", "timestep", "state", "action", "reward", "done"]
-    #     try:
-    #         with open(episode_file, "w", newline="") as f:
-    #             writer = csv.DictWriter(f, fieldnames=fieldnames)
-    #             writer.writeheader()
-    #             for i in range(len(self.ppo_agent.states)):
-    #                 if i % 512 == 0:  # Save every 512 steps
-    #                     writer.writerow({
-    #                         "step": i,
-    #                         "timestep": self.timestep_counter - len(self.ppo_agent.states) + i + 1,
-    #                         "state": np.array2string(self.ppo_agent.states[i], separator=","),
-    #                         "action": np.array2string(self.ppo_agent.actions[i], separator=","),
-    #                         "reward": self.ppo_agent.rewards[i],
-    #                         "done": self.ppo_agent.dones[i]
-    #                     })
-    #         self.get_logger().info(f"📊 Episode trajectory saved to {episode_file}")
-    #     except Exception as e:
-    #         self.get_logger().error(f"❌ Could not save episode CSV: {e}")
 
     ##################################################################################################
     #                                           UTILITIES
@@ -773,7 +771,6 @@ class PPOModelNode(Node):
         
         return self.calculate_distance(p, projection)
     
-
     def project_point_to_segment(self, p, v, w):
         """Project point p onto line segment vw and return the projection point"""
         # Length squared of segment
@@ -840,8 +837,6 @@ class PPOModelNode(Node):
         except Exception as e:
             self.get_logger().error(f'Service call failed: {e}')
 
-    
-
     def calculate_distance(self, point1, point2):
         if point1 is None or point2 is None:
             return float("inf")
@@ -904,57 +899,85 @@ class PPOModelNode(Node):
             print("⚠️ CUDA is not available. Running on CPU.")
 
         print("✅ Global seed and determinism setup complete.")
-             
-    def create_new_run_dir(self, base_dir=None):
+    
+    # TO BE DEPRECATED - OLD CODE v2.1.2 and earlier
+    
+    # def create_new_run_dir(self, base_dir=None):
+    #     version_dir = os.path.join(PPO_CHECKPOINT_DIR, VERSION)
+    #     os.makedirs(version_dir, exist_ok=True)
+    
+    #     if base_dir:
+    #         # Extract the serial number from the base_dir and increment it
+    #         base_serial = int(base_dir.split('_')[-1])
+    #         serial = base_serial + 1
+    #     else:
+    #         existing = [d for d in os.listdir(version_dir) if d.startswith("run_")]
+    #         serial = len(existing) + 1
+    
+    #     timestamp = datetime.now().strftime("%Y%m%d")
+    #     self.run_name = f"run_{timestamp}_{serial:04d}"
+    #     self.run_dir = os.path.join(version_dir, self.run_name)
+    #     os.makedirs(self.run_dir, exist_ok=True)
+    
+    #     # Subfolders
+    #     self.state_dict_dir = os.path.join(self.run_dir, "state_dict")
+    #     os.makedirs(self.state_dict_dir, exist_ok=True)
+    
+    #     self.log_dir = os.path.join(self.run_dir, "logs")
+    #     os.makedirs(self.log_dir, exist_ok=True)
+    
+    
+    #     self.tensorboard_dir = os.path.join(self.run_dir, "tensorboard")
+    #     os.makedirs(self.tensorboard_dir, exist_ok=True)
+    #     self.summary_writer = SummaryWriter(log_dir=self.tensorboard_dir)
+    #     self.ppo_agent.summary_writer = self.summary_writer
+        
+    #     # Log hyperparameters
+    #     hparams = {
+    #         "actor learning_rate": ACTOR_LEARNING_RATE,
+    #         "critic learning_rate": CRITIC_LEARNING_RATE,
+    #         "learn_every_N_steps": LEARN_EVERY_N_STEPS,
+    #         "minibatch_size": MINIBATCH_SIZE,
+    #         "gamma": GAMMA,
+    #         "lambda_gae": LAMBDA_GAE,
+    #         "entropy_coef": ENTROPY_COEF,
+    #         "policy_clip": POLICY_CLIP,
+    #         "input_dim": PPO_INPUT_DIM,
+    #         "episode_length": EPISODE_LENGTH,
+    #         "total_timesteps": TOTAL_TIMESTEPS,
+    #     }
+    #     self.summary_writer.add_text(
+    #         "hyperparameters",
+    #         "|param|value|\n|-|-|\n%s" % "\n".join([f"|{k}|{v}|" for k, v in hparams.items()])
+    #     )
+    
+    # NEW CODE - v2.1.3
+    def create_new_run_dir(self, load_from_run=None):
+        
         version_dir = os.path.join(PPO_CHECKPOINT_DIR, VERSION)
         os.makedirs(version_dir, exist_ok=True)
-    
-        if base_dir:
-            # Extract the serial number from the base_dir and increment it
-            base_serial = int(base_dir.split('_')[-1])
-            serial = base_serial + 1
-        else:
-            existing = [d for d in os.listdir(version_dir) if d.startswith("run_")]
-            serial = len(existing) + 1
-    
+
+        existing = [d for d in os.listdir(version_dir) if d.startswith("run_")]
+        serial = len(existing) + 1
+
         timestamp = datetime.now().strftime("%Y%m%d")
         self.run_name = f"run_{timestamp}_{serial:04d}"
         self.run_dir = os.path.join(version_dir, self.run_name)
-        os.makedirs(self.run_dir, exist_ok=True)
-    
-        # Subfolders
+
+        # Create subfolders
+        for sub in ["state_dict", "logs", "tensorboard"]:
+            os.makedirs(os.path.join(self.run_dir, sub), exist_ok=True)
+
         self.state_dict_dir = os.path.join(self.run_dir, "state_dict")
-        os.makedirs(self.state_dict_dir, exist_ok=True)
-    
         self.log_dir = os.path.join(self.run_dir, "logs")
-        os.makedirs(self.log_dir, exist_ok=True)
-    
-        # self.trajectory_dir = os.path.join(self.log_dir, "trajectories")
-        # os.makedirs(self.trajectory_dir, exist_ok=True)
-    
         self.tensorboard_dir = os.path.join(self.run_dir, "tensorboard")
-        os.makedirs(self.tensorboard_dir, exist_ok=True)
+
         self.summary_writer = SummaryWriter(log_dir=self.tensorboard_dir)
         self.ppo_agent.summary_writer = self.summary_writer
-    
-        # Log hyperparameters
-        hparams = {
-            "actor learning_rate": ACTOR_LEARNING_RATE,
-            "critic learning_rate": CRITIC_LEARNING_RATE,
-            "learn_every_N_steps": LEARN_EVERY_N_STEPS,
-            "minibatch_size": MINIBATCH_SIZE,
-            "gamma": GAMMA,
-            "lambda_gae": LAMBDA_GAE,
-            "entropy_coef": ENTROPY_COEF,
-            "policy_clip": POLICY_CLIP,
-            "input_dim": PPO_INPUT_DIM,
-            "episode_length": EPISODE_LENGTH,
-            "total_timesteps": TOTAL_TIMESTEPS,
-        }
-        self.summary_writer.add_text(
-            "hyperparameters",
-            "|param|value|\n|-|-|\n%s" % "\n".join([f"|{k}|{v}|" for k, v in hparams.items()])
-        )
+
+        if load_from_run:
+            self.get_logger().info(f"Loading weights from: {load_from_run}")
+            self.ppo_agent.load_model_and_optimizers(os.path.join(load_from_run, "state_dict"))
         
     def shutdown_writer(self):
         self.summary_writer.close()
