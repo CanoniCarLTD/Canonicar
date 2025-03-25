@@ -1,2 +1,0 @@
-episode,timestep,episode_reward,episode_length,action_std,termination_reason
-0,55,-10.399999999999997,55,0.2,collision

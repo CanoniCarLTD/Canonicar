@@ -57,3 +57,7 @@ Switched from manually decaying action_std to a learnable log_std, fixed loading
 
 Added logging of Learned_Action_Std and mean_log_std, commented out KL early stop.
 Also changed save and load metadata to handle log_std
+
+### v2.1.2
+
+Modified deterministic settings to include all algorithms and random callings

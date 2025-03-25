@@ -49,7 +49,8 @@ class PPOModelNode(Node):
         )
         
         self.summary_writer = None
-        
+        if DETERMINISTIC_CUDNN:
+            self.set_global_seed_and_determinism(SEED, DETERMINISTIC_CUDNN)
         self.state = None
         self.action = None
         self.reward = 0.0
@@ -119,12 +120,6 @@ class PPOModelNode(Node):
         # Request track waypoints
         self.request_track_waypoints()
 
-        if DETERMINISTIC_CUDNN:
-            self.deterministic_cuda()
-            # Seeding to reproduce the results
-            random.seed(SEED)
-            np.random.seed(SEED)
-            torch.manual_seed(SEED)
 
         self.get_logger().info(
             "PPOModelNode initialized,subscribed to data topic and PPO model loaded."
@@ -626,27 +621,39 @@ class PPOModelNode(Node):
         
         return response
 
-    def deterministic_cuda(self):
+    def set_global_seed_and_determinism(self, seed=42, deterministic_cudnn=True):
         """
-        Set CuDNN to deterministic mode for reproducibility.
+        Sets global seeds for full reproducibility and configures CuDNN for deterministic behavior.
+        Call this at the start of training before any randomness or model initialization.
         """
+        print(f"🔒 [SEEDING] Setting global seed to {seed}")
+
+        random.seed(seed)
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+        os.environ["PYTHONHASHSEED"] = str(seed)
+
         if torch.cuda.is_available():
-            print ("✅ CUDA is available.")
-            # Ensure CuDNN is enabled and set deterministic mode based on the user's preference
-            if torch.backends.cudnn.enabled:
-                print("✅ CuDNN is enabled. Setting CuDNN to deterministic mode.")
-                torch.backends.cudnn.deterministic = True
-                torch.backends.cudnn.benchmark = (
-                    False  # Disable auto-tuner for deterministic behavior
-                )
+            torch.cuda.manual_seed(seed)
+            torch.cuda.manual_seed_all(seed)
+            print("✅ CUDA is available.")
+
+            if hasattr(torch.backends, "cudnn") and torch.backends.cudnn.enabled:
+                if deterministic_cudnn:
+                    torch.backends.cudnn.deterministic = True
+                    torch.backends.cudnn.benchmark = False
+                    print("✅ CuDNN deterministic mode enabled.")
+                else:
+                    torch.backends.cudnn.deterministic = False
+                    torch.backends.cudnn.benchmark = True
+                    print("⚠️ CuDNN benchmarking mode enabled (faster but nondeterministic).")
             else:
-                torch.backends.cudnn.deterministic = False
-                torch.backends.cudnn.benchmark = (
-                    True  # Enable auto-tuner for faster performance
-                )
+                print("⚠️ CuDNN is not enabled or available.")
         else:
-            print("CUDA is not available.")
-                 
+            print("⚠️ CUDA is not available. Running on CPU.")
+
+        print("✅ Global seed and determinism setup complete.")
+             
     def create_new_run_dir(self, base_dir=None):
         version_dir = os.path.join(PPO_CHECKPOINT_DIR, VERSION)
         os.makedirs(version_dir, exist_ok=True)
