@@ -36,3 +36,24 @@ In our `parameters.py`, we define two key values:
 ```bash
 tensorboard --logdir=/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models --bind_all
 ```
+
+# Versions
+
+## v1.0.0
+
+### v1.1.0
+
+### v1.1.1
+
+## v2.0.0
+
+Fixing bugs, returned brake as an action we send, full review of PPO math implementation, removed logs to terminal.
+
+### v2.1.0
+
+Switched from manually decaying action_std to a learnable log_std, fixed loading metadata
+
+### v2.1.1
+
+Added logging of Learned_Action_Std and mean_log_std, commented out KL early stop.
+Also changed save and load metadata to handle log_std

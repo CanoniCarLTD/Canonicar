@@ -97,8 +97,8 @@ class PPOModelNode(Node):
         else:
             self.create_new_run_dir()
             self.get_logger().info(f"🆕 Starting a new training run in: {self.run_dir}")
-            
-
+        
+        self.get_logger().info(f"Initial action std: {self.ppo_agent.actor.log_std.exp().detach().cpu().numpy()}") # To check that log_std.exp() is around ACTION_STD_INIT:
 
         self.collision_sub = self.create_subscription(
             String,
@@ -263,14 +263,14 @@ class PPOModelNode(Node):
                     self.get_logger().info(f"Checkpoint saved at {self.run_dir}")
                     self.reset_run()
                     self.episode_counter += 1
-                    self.ppo_agent.decay_action_std(self.episode_counter)
+                    # self.ppo_agent.decay_action_std(self.episode_counter) # Trying a learnable log_std instead
                     return 1
 
             self.get_logger().info(f"Episode: {self.episode_counter}, Timestep: {self.timestep_counter}, Reward: {self.current_ep_reward}")
 
         else:
             # End of training
-            self.ppo_agent.decay_action_std(self.episode_counter)
+            # self.ppo_agent.decay_action_std(self.episode_counter) # Trying a learnable log_std instead
             self.log_episode_metrics()
             self.save_training_state(self.run_dir)
             # self.save_episode_trajectory()
@@ -353,10 +353,11 @@ class PPOModelNode(Node):
         self.load_training_metadata(state_dict_dir)
 
     def save_training_metadata(self, state_dict_dir):
+        log_std = self.ppo_agent.actor.log_std.detach().cpu().tolist()  # convert tensor to list
         meta = {
             "episode_counter": self.episode_counter,
             "timestep_counter": self.timestep_counter,
-            "action_std": self.ppo_agent.action_std,
+            "log_std": log_std,
             "current_ep_reward": self.current_ep_reward,
             "current_step_in_episode": self.current_step_in_episode,
         }
@@ -376,10 +377,13 @@ class PPOModelNode(Node):
                     meta = json.load(f)
                 self.episode_counter = meta.get("episode_counter", 0)
                 self.timestep_counter = meta.get("timestep_counter", 0)
-                action_std = meta.get("action_std", ACTION_STD_INIT)
-                self.ppo_agent.actor.set_action_std(action_std)
                 self.current_ep_reward = meta.get("current_ep_reward", 0)
                 self.current_step_in_episode = meta.get("current_step_in_episode", 0)
+                log_std_list = meta.get("log_std")
+                if log_std_list is not None:
+                    log_std_tensor = torch.tensor(log_std_list, dtype=torch.float32, device=device)
+                with torch.no_grad():
+                    self.ppo_agent.actor.log_std.copy_(log_std_tensor)
                 self.get_logger().info(f"✅ Metadata loaded: {meta}")
             else:
                 self.get_logger().warn(f"No meta.json found in {state_dict_dir}. No metadata loaded.")
