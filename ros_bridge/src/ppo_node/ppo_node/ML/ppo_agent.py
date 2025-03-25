@@ -162,8 +162,8 @@ class CriticNetwork(nn.Module):
 ##################################################################################################
 
 class PPOAgent:
-    def __init__(self, input_dim=203, action_dim=3):
-        
+    def __init__(self, input_dim=203, action_dim=3, summary_writer=None):
+        self.summary_writer = summary_writer
         print("\nInitializing PPO Agent...\n")
         print("device: ", device)
         self.input_dim = input_dim if PPO_INPUT_DIM is None else PPO_INPUT_DIM
@@ -304,7 +304,7 @@ class PPOAgent:
                 MIN_ACTION_STD, self.action_std - ACTION_STD_DECAY_RATE
             )
             self.actor.set_action_std(self.action_std)
-            if ppo_node.summary_writer is not None:
+            if self.summary_writer is not None:
                 self.summary_writer.add_scalar("Exploration/ActionStd", self.action_std, episode_num)
 
     def normalize_advantages(self, advantages):
@@ -455,8 +455,9 @@ class PPOAgent:
                 old_log_probs = batch_old_probs
                 new_log_probs = new_probs
                 kl_div = (old_log_probs - new_log_probs).mean()
+                print(f"KL Divergence: {kl_div.item():.4f}")
                 # Log to tensorboard
-                if ppo_node.summary_writer is not None:
+                if self.summary_writer is not None:
                     self.summary_writer.add_scalar("PPO/KL_Divergence", kl_div.item(), self.learn_step_counter)
                 # Optional: stop update early if KL is too high
                 if kl_div.item() > MAX_KL:
