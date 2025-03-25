@@ -50,6 +50,20 @@ class PPOModelNode(Node):
             'vehicle_ready',
             self.handle_vehicle_ready
         )
+
+        self.collision_sub = self.create_subscription(
+            String,
+            "/collision_detected",
+            self.collision_callback,
+            10
+        )
+
+        self.location_sub = self.create_subscription(
+            Float32MultiArray,
+            "/carla/vehicle/location",
+            self.location_callback,
+            10
+        )
         
         self.summary_writer = None
         if DETERMINISTIC_CUDNN:
@@ -80,6 +94,9 @@ class PPOModelNode(Node):
         self.lap_start_time = None
         self.lap_end_time = None
         self.lap_time = None
+        self.needs_progress_reset = False
+
+        self.stagnation_counter = 0
         
         # Initialize PPO Agent (loads from checkpoint if available)
         self.ppo_agent = ppo_agent.PPOAgent(summary_writer=self.summary_writer)
@@ -104,12 +121,7 @@ class PPOModelNode(Node):
         
         self.get_logger().info(f"Initial action std: {self.ppo_agent.actor.log_std.exp().detach().cpu().numpy()}") # To check that log_std.exp() is around ACTION_STD_INIT:
 
-        self.collision_sub = self.create_subscription(
-            String,
-            "/collision_detected",
-            self.collision_callback,
-            10
-        )
+        
 
         # Create client for the waypoints service
         self.waypoints_client = self.create_client(
@@ -150,22 +162,71 @@ class PPOModelNode(Node):
     ##################################################################################################
 
     def calculate_reward(self):
-        collision_penalty = -5.0       
-        time_penalty = -0.1            
-        progress_reward_factor = 300.0  
-        finish_bonus = 50.0            
+        """
+        Improved reward function based on track progress delta:
+        - Scaled positive reward for forward progress
+        - Increasing stagnation penalty
+        - Penalty for going backwards
+        - Collision penalty
+        - Lap completion bonus
+        """
+        # Core reward parameters
+        progress_multiplier = 3000.0     # More balanced multiplier for progress
+        base_time_penalty = -0.05      # Base penalty when not moving
+        stagnation_factor = 0.02       # Increases penalty over time
+        backwards_penalty = -1.0       # Penalty for going backwards
+        collision_penalty = -5.0      # Stronger collision penalty
+        lap_completion_bonus = 50.0    # Lap completion bonus
         
+        # Initialize stagnation counter if not exists
+        if not hasattr(self, 'stagnation_counter'):
+            self.stagnation_counter = 0
+        
+        # Handle collision case first
         if self.collision:
+            self.get_logger().info(f"Applied collision penalty: {collision_penalty}")
             self.reward = collision_penalty
-            self.done = True # CHECK IF WE WANT TO DO THIS
-        else:
-            progress_reward = progress_reward_factor * self.track_progress
-
-            if self.track_progress >= 1.0:
-                progress_reward += finish_bonus
-
-            self.reward = progress_reward + time_penalty
+            self.done = True
+            self.stagnation_counter = 0  # Reset counter
+            return
         
+        # Calculate progress delta
+        progress_delta = self.track_progress - self.prev_progress_distance
+        
+        # Handle wrap-around at 1.0 (lap completion)
+        if progress_delta < -0.5:
+            progress_delta = (1.0 - self.prev_progress_distance) + self.track_progress
+            self.get_logger().info(f"Lap progress wrap-around detected: {progress_delta:.4f}")
+        
+        # Case 1: Moving backwards
+        if progress_delta < -0.001:
+            self.reward = backwards_penalty
+            self.stagnation_counter = 0  # Reset counter
+            self.get_logger().info(f"Moving backwards: {progress_delta:.6f}, reward = {backwards_penalty}")
+            return
+        
+        # Case 2: Moving forward significantly
+        elif progress_delta > 0.00001:
+            # Reward directly proportional to progress made
+            self.reward = progress_multiplier * progress_delta
+            self.stagnation_counter = 0  # Reset counter
+            self.get_logger().info(f"Moving forward: {progress_delta:.6f}, reward = {self.reward:.4f}")
+        
+        # Case 3: Not moving/minimal movement
+        else:
+            # Apply increasing stagnation penalty
+            self.stagnation_counter += 1
+            stagnation_penalty = base_time_penalty * (1 + self.stagnation_counter * stagnation_factor)
+            self.reward = stagnation_penalty
+            self.get_logger().info(f"Not moving: {progress_delta:.6f}, stagnation: {self.stagnation_counter}, reward = {stagnation_penalty:.4f}")
+        
+        # Add lap completion bonus if detected
+        if self.lap_completed:
+            self.reward += lap_completion_bonus
+            self.lap_completed = False  # Reset flag
+            self.stagnation_counter = 0  # Reset counter
+            self.get_logger().info(f"Lap completion bonus applied: +{lap_completion_bonus}")
+            
     ##################################################################################################
     #                                       STORE TRANSITION
     ##################################################################################################
@@ -264,7 +325,7 @@ class PPOModelNode(Node):
                     self.episode_counter += 1
                     return 1
 
-            self.get_logger().info(f"Episode: {self.episode_counter}, Timestep: {self.timestep_counter}, Reward: {self.current_ep_reward}")
+            # self.get_logger().info(f"Episode: {self.episode_counter}, Timestep: {self.timestep_counter}, Reward: {self.current_ep_reward}")
 
         else:
             # End of training
@@ -556,7 +617,210 @@ class PPOModelNode(Node):
         
         # Add a callback for when the service call completes
         future.add_done_callback(self.process_waypoints_response)
+
+    def location_callback(self, msg):
+        """Process vehicle location updates and calculate track progress"""
+        if len(self.track_waypoints) == 0:
+            self.get_logger().warn("Track waypoints not available yet. Cannot calculate progress.")
+            return
+        
+        # Store previous location for direct movement calculation
+        previous_location = self.vehicle_location
+        
+        # Extract vehicle location
+        self.vehicle_location = (msg.data[0], msg.data[1])
+        
+        # First call - just store the location
+        if previous_location is None:
+            self.get_logger().info(f"Initial vehicle position: ({self.vehicle_location[0]:.2f}, {self.vehicle_location[1]:.2f})")
+            self.update_track_progress()
+            return
+            
+        # Calculate direct movement vector for debugging
+        movement_x = self.vehicle_location[0] - previous_location[0]
+        movement_y = self.vehicle_location[1] - previous_location[1]
+        distance_moved = math.sqrt(movement_x**2 + movement_y**2)
+        
+        # Log movement for debugging
+        if distance_moved > 0.01:  # Only log significant movements
+            self.get_logger().debug(f"Vehicle moved: {distance_moved:.3f}m")
+        
+
+        self.prev_progress_distance = self.track_progress
+
+        # Calculate progress along the track
+        self.update_track_progress()
+        
+        # Check for lap completion
+        if self.track_progress < 0.1 and self.prev_progress_distance > 0.9:
+            self.check_lap_completion()
     
+    def update_track_progress(self):
+        """Calculate vehicle's progress percentage along the track with high sensitivity"""
+        if not self.vehicle_location or len(self.track_waypoints) < 2:
+            return
+        
+        # STEP 1: Find position relative to track
+        # Find the two closest waypoints to determine which segment we're on
+        distances = []
+        for i, waypoint in enumerate(self.track_waypoints):
+            dist = self.calculate_distance(self.vehicle_location, waypoint)
+            distances.append((dist, i))
+        
+        # Sort by distance
+        distances.sort()
+        closest_dist, closest_idx = distances[0]
+        second_dist, second_idx = distances[1]
+        
+        # STEP 2: Determine our position between waypoints and track direction
+        track_len = len(self.track_waypoints)
+        
+        # Let's identify the segment we're on (connecting the waypoints)
+        # First check if these points are adjacent (handling wraparound)
+        are_adjacent = (abs(closest_idx - second_idx) == 1) or (abs(closest_idx - second_idx) == track_len - 1)
+        
+        if not are_adjacent:
+            # The closest points aren't adjacent - find best segment by checking all point pairs
+            min_segment_dist = float('inf')
+            segment_start_idx = 0
+            
+            for i in range(track_len):
+                next_i = (i + 1) % track_len
+                p1 = self.track_waypoints[i]
+                p2 = self.track_waypoints[next_i]
+                
+                # Calculate distance from point to line segment
+                segment_dist = self.point_to_segment_distance(self.vehicle_location, p1, p2)
+                
+                if segment_dist < min_segment_dist:
+                    min_segment_dist = segment_dist
+                    segment_start_idx = i
+            
+            # Now we have the closest segment
+            closest_idx = segment_start_idx
+            second_idx = (segment_start_idx + 1) % track_len
+        
+        # STEP 3: Calculate precise progress along track
+        # If this is the first update, initialize the start point
+        if self.start_point is None or self.needs_progress_reset:
+            self.start_point = closest_idx
+            self.prev_progress_distance = 0.0
+            self.track_progress = 0.0
+            self.needs_progress_reset = False
+            self.get_logger().info(f"Progress tracking initialized at waypoint {closest_idx}/{track_len}")
+            return
+        
+        # We need to know direction of track
+        wp_current = self.track_waypoints[closest_idx]
+        wp_next = self.track_waypoints[(closest_idx + 1) % track_len]
+        
+        # Project vehicle position onto the track segment to get precise location
+        projection = self.project_point_to_segment(self.vehicle_location, wp_current, wp_next)
+        segment_progress = self.calculate_distance(wp_current, projection) / self.calculate_distance(wp_current, wp_next)
+        
+        # Calculate overall progress (waypoint index + segment progress)
+        if closest_idx >= self.start_point:
+            base_progress = (closest_idx - self.start_point) / track_len
+        else:
+            # We've wrapped around the track
+            base_progress = (track_len - self.start_point + closest_idx) / track_len
+        
+        # Add fractional progress within current segment
+        segment_fraction = 1.0 / track_len
+        raw_progress = base_progress + (segment_progress * segment_fraction)
+        
+        # Normalize to [0, 1] range
+        raw_progress = raw_progress % 1.0
+        
+        # Check if this is a reasonable change from previous progress
+        if self.prev_progress_distance is not None:
+            progress_diff = raw_progress - self.prev_progress_distance
+            
+            # Handle wrap-around at 1.0
+            if progress_diff < -0.5:  # We've wrapped from 0.99 to 0.01
+                progress_diff = (1.0 - self.prev_progress_distance) + raw_progress
+            elif progress_diff > 0.5:  # Unlikely large jump
+                progress_diff = -((1.0 - raw_progress) + self.prev_progress_distance)
+            
+            # Debug log for significant progress changes
+            if abs(progress_diff) > 0.01:
+                self.get_logger().info(f"Progress change: {progress_diff:.4f} (from {self.prev_progress_distance:.4f} to {raw_progress:.4f})")
+        
+        # Update progress
+        self.track_progress = raw_progress
+
+        self.get_logger().info(f"Track progress: {self.track_progress:.8f}")
+        
+        # Log progress occasionally
+        if int(self.track_progress * 100) % 10 == 0 and int(self.prev_progress_distance * 100) % 10 != 0:
+            self.get_logger().info(f"Track progress: {self.track_progress:.4f}")
+
+    def point_to_segment_distance(self, p, v, w):
+        """Calculate the distance from point p to line segment vw"""
+        # Length squared of segment
+        l2 = (v[0] - w[0])**2 + (v[1] - w[1])**2
+        if l2 == 0:  # v == w case
+            return self.calculate_distance(p, v)
+        
+        # Consider the line extending the segment, parameterized as v + t (w - v)
+        # We find projection of point p onto the line.
+        # It falls where t = [(p-v) . (w-v)] / |w-v|^2
+        # We clamp t from [0,1] to handle points outside the segment
+        t = max(0, min(1, ((p[0] - v[0]) * (w[0] - v[0]) + (p[1] - v[1]) * (w[1] - v[1])) / l2))
+        
+        # Projection falls on the segment
+        projection = (v[0] + t * (w[0] - v[0]), v[1] + t * (w[1] - v[1]))
+        
+        return self.calculate_distance(p, projection)
+    
+
+    def project_point_to_segment(self, p, v, w):
+        """Project point p onto line segment vw and return the projection point"""
+        # Length squared of segment
+        l2 = (v[0] - w[0])**2 + (v[1] - w[1])**2
+        if l2 == 0:  # v == w case
+            return v
+        
+        # Consider the line extending the segment, parameterized as v + t (w - v)
+        # We find projection of point p onto the line.
+        # It falls where t = [(p-v) . (w-v)] / |w-v|^2
+        # We clamp t from [0,1] to handle points outside the segment
+        t = max(0, min(1, ((p[0] - v[0]) * (w[0] - v[0]) + (p[1] - v[1]) * (w[1] - v[1])) / l2))
+        
+        # Projection falls on the segment
+        return (v[0] + t * (w[0] - v[0]), v[1] + t * (w[1] - v[1]))
+
+    def check_lap_completion(self):
+        """Check if a lap was completed and handle the event"""
+        if self.lap_completed:
+            return
+        
+        # We've crossed back near the starting point after making progress
+        if self.track_progress < 0.1 and self.prev_progress_distance > 0.9:
+            self.lap_completed = True
+            self.lap_count += 1
+            
+            # Calculate lap time if we're tracking it
+            if self.lap_start_time:
+                self.lap_end_time = datetime.now()
+                self.lap_time = (self.lap_end_time - self.lap_start_time).total_seconds()
+                self.get_logger().info(f"🏁 Lap {self.lap_count} completed in {self.lap_time:.2f} seconds!")
+                
+                # Add lap time to tensorboard
+                if self.summary_writer:
+                    self.summary_writer.add_scalar("Laps/time", self.lap_time, self.lap_count)
+            
+            # Reset for next lap
+            self.lap_start_time = datetime.now()
+            self.track_progress = 0.0
+            self.prev_progress_distance = 0.0
+            
+            # Log the lap completion
+            self.get_logger().info(f"🏁 Lap {self.lap_count} completed!")
+            
+            # Apply lap completion bonus in the next reward calculation
+            self.termination_reason = "lap_completed"
+
     def process_waypoints_response(self, future):
         """Process the waypoints received from the service"""
         try:
@@ -576,104 +840,7 @@ class PPOModelNode(Node):
         except Exception as e:
             self.get_logger().error(f'Service call failed: {e}')
 
-    def location_callback(self, msg):
-        """Process vehicle location data"""
-        self.vehicle_location = msg.data
-        
-        if not self.track_waypoints:
-            self.get_logger().warn("No track waypoints available yet")
-            return
-            
-        if self.start_point is None:
-            self.start_point = self.vehicle_location
-            self.get_logger().info(f"Start position recorded: {self.start_point}")
-            self.lap_start_time = self.get_clock().now()
-            self.get_logger().info(f"Lap timer started at: {self.lap_start_time}")
-            return
-        
-        # Calculate progress around the track
-        self.update_track_progress()
-        
-        # Check if we've completed a lap (close to start point and made progress around track)
-        distance_to_start = self.calculate_distance(self.start_point, self.vehicle_location)
-        if distance_to_start < 5.0 and self.track_progress > 0.9:
-            if not self.lap_completed:
-                self.lap_completed = True
-                self.lap_count += 1
-                self.lap_end_time = self.get_clock().now()
-                self.lap_time = self.lap_end_time - self.lap_start_time
-                self.lap_start_time = self.get_clock().now()
-                self.get_logger().info(f"Lap {self.lap_count} completed!")
-                self.get_logger().info(f"Lap time: {self.lap_time} seconds")
-                # Reset progress for next lap
-                self.track_progress = 0.0
-                self.prev_progress_distance = 0.0
-        else:
-            self.lap_completed = False
-
-    def update_track_progress(self):
-        """Update the track progress based on current position"""
-        if not self.track_waypoints or self.vehicle_location is None:
-            return
-            
-        # Find the closest waypoint
-        min_dist = float('inf')
-        closest_idx = 0
-        
-        for i, (wx, wy) in enumerate(self.track_waypoints):
-            dist = ((self.vehicle_location[0] - wx)**2 + 
-                    (self.vehicle_location[1] - wy)**2)**0.5
-            if dist < min_dist:
-                min_dist = dist
-                closest_idx = i
-        
-        # Calculate distance traveled along track since start
-        if closest_idx > self.closest_waypoint_idx:
-            # Moving forward along the track
-            segments_traveled = closest_idx - self.closest_waypoint_idx
-            # Calculate distance between these waypoints
-            distance = 0.0
-            for i in range(self.closest_waypoint_idx, closest_idx):
-                next_i = i + 1
-                x1, y1 = self.track_waypoints[i]
-                x2, y2 = self.track_waypoints[next_i]
-                segment_length = ((x2-x1)**2 + (y2-y1)**2)**0.5
-                distance += segment_length
-                
-            self.prev_progress_distance += distance
-            
-        elif closest_idx < self.closest_waypoint_idx:
-            # Crossed the finish line or moving backwards
-            if self.closest_waypoint_idx > len(self.track_waypoints) * 0.8 and closest_idx < len(self.track_waypoints) * 0.2:
-                # Likely crossed the finish line - add remaining distance
-                distance = 0.0
-                for i in range(self.closest_waypoint_idx, len(self.track_waypoints)):
-                    next_i = (i + 1) % len(self.track_waypoints)
-                    x1, y1 = self.track_waypoints[i]
-                    x2, y2 = self.track_waypoints[next_i]
-                    segment_length = ((x2-x1)**2 + (y2-y1)**2)**0.5
-                    distance += segment_length
-                
-                # Plus distance from start to current waypoint
-                for i in range(0, closest_idx):
-                    next_i = i + 1
-                    x1, y1 = self.track_waypoints[i]
-                    x2, y2 = self.track_waypoints[next_i]
-                    segment_length = ((x2-x1)**2 + (y2-y1)**2)**0.5
-                    distance += segment_length
-                    
-                self.prev_progress_distance += distance
-            # Otherwise, we're moving backwards or jumped positions
-        
-        # Update closest waypoint index
-        self.closest_waypoint_idx = closest_idx
-        
-        # Calculate progress as a ratio of distance traveled to total track length
-        self.track_progress = min(1.0, self.prev_progress_distance / self.track_length)
-        
-        # Every few seconds, log the progress
-        if self.track_progress > 0 and int(self.get_clock().now().nanoseconds / 1e9) % 5 == 0:
-            self.get_logger().info(f"Track progress: {self.track_progress:.2f} ({self.prev_progress_distance:.1f}m / {self.track_length:.1f}m)")
+    
 
     def calculate_distance(self, point1, point2):
         if point1 is None or point2 is None:
@@ -688,8 +855,21 @@ class PPOModelNode(Node):
         self.track_progress = 0.0
         self.prev_progress_distance = 0.0
         self.closest_waypoint_idx = 0
+        self.start_point = None 
         self.lap_completed = False
+        self.lap_count = 0
+        self.lap_start_time = None
+        self.lap_end_time = None
+        self.lap_time = None
+
+        self.vehicle_location = None
+
+        self.needs_progress_reset = True
         
+        self.get_logger().info("Track progress variables fully reset for new vehicle")
+
+        response.success = True
+        response.message = "Vehicle control ready"
         return response
 
     def set_global_seed_and_determinism(self, seed=42, deterministic_cudnn=True):
