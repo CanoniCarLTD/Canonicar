@@ -165,7 +165,6 @@ class CriticNetwork(nn.Module):
 
 class PPOAgent:
     def __init__(self, input_dim=203, action_dim=3, summary_writer=None):
-        self.summary_writer = summary_writer
         print("\nInitializing PPO Agent...\n")
         print("device: ", device)
         self.input_dim = input_dim if PPO_INPUT_DIM is None else PPO_INPUT_DIM
@@ -173,8 +172,9 @@ class PPOAgent:
         self.action_dim = action_dim
         print(f"Action output dimension: {self.action_dim}")
         self.action_std = ACTION_STD_INIT
-        print(f"Action std init: {self.action_std}")
-
+        
+        self.summary_writer = summary_writer
+        
         # Initialize actor and critic networks
         self.actor = ActorNetwork(self.input_dim, action_dim, self.action_std).to(
             device
@@ -263,7 +263,7 @@ class PPOAgent:
                 os.path.join(directory, "critic_optim.pth"),
             )
 
-            print(f"✅ Model + optimizer saved to {directory}")
+            print(f"Model + optimizer saved to {directory}")
         except Exception as e:
             print(f"❌ Error saving model + optimizer: {e}")
 
@@ -284,7 +284,7 @@ class PPOAgent:
                 torch.load(os.path.join(directory, "critic_optim.pth"))
             )
 
-            print("✅ Model and optimizer states loaded successfully.")
+            print("Model and optimizer states loaded successfully.")
         except Exception as e:
             print(f"❌ Error loading model and optimizer: {e}")
 
@@ -470,7 +470,7 @@ class PPOAgent:
                 old_log_probs = batch_old_probs
                 new_log_probs = new_probs
                 kl_div = (old_log_probs - new_log_probs).mean()
-                print("KL Divergence: {kl_div.item():.4f}")
+                print(f"KL Divergence: {kl_div.item():.4f}")
                 # Log to tensorboard
                 if self.summary_writer is not None:
                     self.summary_writer.add_scalar("Exploration/KL divergence", kl_div.item(), self.learn_step_counter)

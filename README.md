@@ -104,6 +104,45 @@ tensorboard --logdir=/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models 
   ```
   - if you are making changes at the nodes, and the containers are up and running, you have to do `colcon build` inside the container itself before launching the nodes.
 
+## Checkpoint & Model Loading Guide
+
+To control how PPO resumes training or starts fresh:
+
+First of all, make sure the checkpoint dir is set:
+
+```python
+PPO_CHECKPOINT_DIR = "/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models"
+```
+
+### 1. Start Training from Scratch
+
+```python
+MODEL_LOAD = False
+CHECKPOINT_FILE = None
+LOAD_STATE_DICT_FROM_RUN = None
+VERSION = "vX.Y.Z" # Simply choose the version this run belongs to
+```
+
+### 2. Resume Training from an Exact Run (same version)
+
+```python
+MODEL_LOAD = True
+CHECKPOINT_FILE = "/path/to/exact/run_folder" # (e.g. "/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models/v1.1.1/run_20250325_0001")
+VERSION = "same as the run's version" # (e.g. "v1.1.1")
+LOAD_STATE_DICT_FROM_RUN = None
+```
+
+### 3. Load Model Weights from Another Run/Version
+- start a fresh run with a previous run model state dict
+For example if we did trained for a long time and we want to do changes to the code and level up the version - we can load the state dict into a new model.
+
+```python
+MODEL_LOAD = True
+CHECKPOINT_FILE = None
+LOAD_STATE_DICT_FROM_RUN = "/path/to/older/run_folder" # (e.g. load from "/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models/v1.1.1/run_20250325_0001")
+VERSION = "new_version_for_this_run" # (e.g. "v2.0.0")
+```
+
 ## Watch nvidia-smi live for GPU machines
 
 ```bash
