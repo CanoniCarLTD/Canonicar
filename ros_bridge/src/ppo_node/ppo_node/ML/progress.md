@@ -60,4 +60,4 @@ Also changed save and load metadata to handle log_std
 
 ### v2.1.2
 
-Modified deterministic settings to include all algorithms and random callings
+Modified deterministic settings to include all algorithms and random callings, Modified logging setting

@@ -33,7 +33,8 @@ RUN source /opt/ros/foxy/setup.bash
 
 # Add the fix for typing-extensions without changing previous layers
 RUN python3 -m pip install --upgrade typing-extensions>=4.8.0
-
+RUN pip install psutil
+RUN pip install nvidia-ml-py3
 
 # Set default entrypoint to bash (useful for debugging)
 CMD ["/bin/bash"]
