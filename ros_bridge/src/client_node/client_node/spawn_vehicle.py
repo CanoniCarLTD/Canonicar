@@ -20,7 +20,6 @@ from sensors_data import (
     carla_image_to_ros_image,
     carla_lidar_to_ros_pointcloud2,
     carla_imu_to_ros_imu,
-    carla_gnss_to_ros_navsatfix,
 )
 
 
@@ -429,8 +428,6 @@ class SpawnVehicleNode(Node):
             return (f"/carla/{sensor_id}/points", PointCloud2)
         elif sensor_type.startswith("sensor.other.imu"):
             return (f"/carla/{sensor_id}/imu", Imu)
-        elif sensor_type.startswith("sensor.other.gnss"):
-            return (f"/carla/{sensor_id}/gnss", NavSatFix)
         else:
             return (None, None)
 
@@ -457,8 +454,6 @@ class SpawnVehicleNode(Node):
             msg = carla_lidar_to_ros_pointcloud2(data, header)
         elif sensor_type.startswith("sensor.other.imu"):
             msg = carla_imu_to_ros_imu(data, header)
-        elif sensor_type.startswith("sensor.other.gnss"):
-            msg = carla_gnss_to_ros_navsatfix(data, header)
         else:
             msg = None
 
