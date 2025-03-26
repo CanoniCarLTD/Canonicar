@@ -37,7 +37,7 @@ class SpawnVehicleNode(Node):
         self.vehicle_type = self.get_parameter("vehicle_type").value
 
         self.get_logger().info(
-            f"Connecting to CARLA server at {self.host}:{self.port}"
+            f"Connecting to CARLA server at host x:{self.port}"
         )
 
         try:
@@ -50,7 +50,7 @@ class SpawnVehicleNode(Node):
             self.world.apply_settings(settings)
             self.spawned_sensors = []
         except Exception as e:
-            self.get_logger().error(f"Error connecting to CARLA server: {e}")
+            self.get_logger().error(f"Error connecting to CARLA server")
             return
 
         self.sensors_publishers = {}

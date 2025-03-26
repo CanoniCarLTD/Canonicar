@@ -20,11 +20,11 @@ class VehicleControlNode(Node):
             self.client.set_timeout(10.0)
             self.world = self.client.get_world()
         except Exception as e:
-            self.get_logger().error(f"Error connecting to CARLA server: {e}")
+            self.get_logger().error(f"Error connecting to CARLA server")
             return
         
         self.get_logger().info(
-            f"Using launch parameters - host: {self.host}, port: {self.port}"
+            f"Using launch parameters - host: x, port: {self.port}"
         )
 
         
@@ -64,7 +64,7 @@ class VehicleControlNode(Node):
                 response.success = False
                 response.message = f"Vehicle with ID {request.vehicle_id} not found"
         except Exception as e:
-            self.get_logger().error(f'Error finding vehicle: {str(e)}')
+            self.get_logger().error(f'Error finding vehicle')
             response.success = False
             response.message = f"Error: {str(e)}"
             
