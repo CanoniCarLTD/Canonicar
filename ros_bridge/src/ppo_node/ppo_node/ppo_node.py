@@ -21,6 +21,7 @@ from datetime import datetime
 from .ML import ppo_agent
 from .ML import parameters
 from .ML.parameters import *
+
 # from .db.mongo_connection import init_db, close_db
 from .db import mongo_connection
 
@@ -30,16 +31,16 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 class PPOModelNode(Node):
     def __init__(self):
         super().__init__("ppo_model_node")
-        
+
         self.get_logger().info(f"Device is:{device} ")
-        
+
         self.train = TRAIN
         self.prefix = "Train" if TRAIN else "Test"
 
         self.db = mongo_connection.init_db()
         self.get_logger().info(f"mongo DB is: {self.db}")
         if self.db is None:
-            self.get_logger().error('Failed to connect to MongoDB1')        
+            self.get_logger().error("Failed to connect to MongoDB1")
         train = TRAIN
         self.current_step_in_episode = 0
 
@@ -55,64 +56,30 @@ class PPOModelNode(Node):
         )
 
         self.vehicle_ready_server = self.create_service(
-            VehicleReady,
-            'vehicle_ready',
-            self.handle_vehicle_ready
-        )
-        
-        self.episode_metrics_pub = self.create_publisher(
-            String,
-            '/training/episode_metrics',
-            10
-        )
-        
-        self.performance_metrics_pub = self.create_publisher(
-            String,
-            '/training/performance_metrics',
-            10
-        )
-        
-        self.error_logs_pub = self.create_publisher(
-            String,
-            '/training/error_logs',
-            10
+            VehicleReady, "vehicle_ready", self.handle_vehicle_ready
         )
 
+        self.episode_metrics_pub = self.create_publisher(
+            String, "/training/episode_metrics", 10
+        )
+
+        self.performance_metrics_pub = self.create_publisher(
+            String, "/training/performance_metrics", 10
+        )
+
+        self.error_logs_pub = self.create_publisher(String, "/training/error_logs", 10)
+
         self.collision_sub = self.create_subscription(
-            String,
-            "/collision_detected",
-            self.collision_callback,
-            10
+            String, "/collision_detected", self.collision_callback, 10
         )
 
         self.location_sub = self.create_subscription(
-            Float32MultiArray,
-            "/carla/vehicle/location",
-            self.location_callback,
-            10
+            Float32MultiArray, "/carla/vehicle/location", self.location_callback, 10
         )
-        
+
         self.summary_writer = None
         if DETERMINISTIC_CUDNN:
             self.set_global_seed_and_determinism(SEED, DETERMINISTIC_CUDNN)
-        
-        self.episode_metrics_pub = self.create_publisher(
-            String,
-            '/training/episode_metrics',
-            10
-        )
-        
-        self.performance_metrics_pub = self.create_publisher(
-            String,
-            '/training/performance_metrics',
-            10
-        )
-        
-        self.error_logs_pub = self.create_publisher(
-            String,
-            '/training/error_logs',
-            10
-        )
 
         # Initialize PPO Agent (loads from checkpoint if available)
         self.ppo_agent = ppo_agent.PPOAgent()
@@ -135,7 +102,7 @@ class PPOModelNode(Node):
 
         # Track waypoints related variables
         self.track_waypoints = []  # List of (x, y) tuples
-        self.track_length = 0.0    # Total track length in meters
+        self.track_length = 0.0  # Total track length in meters
         self.closest_waypoint_idx = 0  # Index of closest waypoint
         self.start_point = None
         self.prev_progress_distance = 0.0
@@ -146,78 +113,83 @@ class PPOModelNode(Node):
         self.lap_end_time = None
         self.lap_time = None
 
-        
         self.episode_start_time = datetime.now()
         self.current_step_in_episode = 0
         self.last_actor_loss = None
         self.last_critic_loss = None
         self.last_entropy = None
 
-
         self.collision_sub = self.create_subscription(
-            String,
-            "/collision_detected",
-            self.collision_callback,
-            10
+            String, "/collision_detected", self.collision_callback, 10
         )
 
         # Create client for the waypoints service
         self.waypoints_client = self.create_client(
-            GetTrackWaypoints, 'get_track_waypoints'
+            GetTrackWaypoints, "get_track_waypoints"
         )
-        
+
         # Check if the service is available
         while not self.waypoints_client.wait_for_service(timeout_sec=1.0):
-            self.get_logger().info('Waiting for track waypoints service...')
+            self.get_logger().info("Waiting for track waypoints service...")
         self.needs_progress_reset = False
 
         self.stagnation_counter = 0
-                        
+
         self.ppo_agent = ppo_agent.PPOAgent(summary_writer=self.summary_writer)
 
         if MODEL_LOAD:
             if CHECKPOINT_FILE and LOAD_STATE_DICT_FROM_RUN:
-                raise ValueError("MODEL_LOAD is True but both CHECKPOINT_FILE and LOAD_STATE_DICT_FROM_RUN are set. Please choose one. \nTo continue a run, set CHECKPOINT_FILE to the wanted run directory and set LOAD_STATE_DICT_FROM_RUN to None. \nTo load state dict from another run, set CHECKPOINT_FILE to None, set LOAD_STATE_DICT_FROM_RUN to the wanted run directory, and don't froget to set the wanted version in VERSION.\n See more info in the README.")
+                raise ValueError(
+                    "MODEL_LOAD is True but both CHECKPOINT_FILE and LOAD_STATE_DICT_FROM_RUN are set. Please choose one. \nTo continue a run, set CHECKPOINT_FILE to the wanted run directory and set LOAD_STATE_DICT_FROM_RUN to None. \nTo load state dict from another run, set CHECKPOINT_FILE to None, set LOAD_STATE_DICT_FROM_RUN to the wanted run directory, and don't froget to set the wanted version in VERSION.\n See more info in the README."
+                )
             if CHECKPOINT_FILE:
                 # Resume entire run from same version
                 self.run_dir = CHECKPOINT_FILE
                 if os.path.exists(self.run_dir):
-                    self.get_logger().info(f"📂 Resuming full run from file: {self.run_dir}")
+                    self.get_logger().info(
+                        f"📂 Resuming full run from file: {self.run_dir}"
+                    )
                     self.load_training_state(self.run_dir)
                     self.log_dir = os.path.join(self.run_dir, "logs")
                     self.tensorboard_dir = os.path.join(self.run_dir, "tensorboard")
                     self.summary_writer = SummaryWriter(log_dir=self.tensorboard_dir)
                     self.ppo_agent.summary_writer = self.summary_writer
                 else:
-                    raise FileNotFoundError(f"❌ Checkpoint file not found: {self.run_dir}")
+                    raise FileNotFoundError(
+                        f"❌ Checkpoint file not found: {self.run_dir}"
+                    )
 
             elif LOAD_STATE_DICT_FROM_RUN:
                 # Load weights from another run into a new one
                 self.create_new_run_dir(load_from_run=LOAD_STATE_DICT_FROM_RUN)
-                state_dict_dir_path = os.path.join(LOAD_STATE_DICT_FROM_RUN, "state_dict") # add /state_dict to the path
+                state_dict_dir_path = os.path.join(
+                    LOAD_STATE_DICT_FROM_RUN, "state_dict"
+                )  # add /state_dict to the path
                 self.ppo_agent.load_model_and_optimizers(state_dict_dir_path)
-                self.get_logger().info(f"🆕 Started new run ({VERSION}), loaded weights from: {LOAD_STATE_DICT_FROM_RUN}")
+                self.get_logger().info(
+                    f"🆕 Started new run ({VERSION}), loaded weights from: {LOAD_STATE_DICT_FROM_RUN}"
+                )
 
             else:
-                raise ValueError("MODEL_LOAD is True but neither CHECKPOINT_FILE nor LOAD_STATE_DICT_FROM_RUN was set.")
+                raise ValueError(
+                    "MODEL_LOAD is True but neither CHECKPOINT_FILE nor LOAD_STATE_DICT_FROM_RUN was set."
+                )
 
         else:
             self.create_new_run_dir()
             self.get_logger().info(f"🆕 Started new training run in: {self.run_dir}")
-                    
 
         # Create client for the waypoints service
         self.waypoints_client = self.create_client(
-            GetTrackWaypoints, 'get_track_waypoints'
+            GetTrackWaypoints, "get_track_waypoints"
         )
-        
+
         # Check if the service is available
         while not self.waypoints_client.wait_for_service(timeout_sec=1.0):
-            self.get_logger().info('Waiting for track waypoints service...')
-        
+            self.get_logger().info("Waiting for track waypoints service...")
+
         # Request track waypoints
         self.request_track_waypoints()
-
 
         self.get_logger().info(
             "PPOModelNode initialized,subscribed to data topic and PPO model loaded."
@@ -228,7 +200,7 @@ class PPOModelNode(Node):
     ##################################################################################################
 
     def get_action(self, data):
-        self.state = data # might be redundant but just to make sure
+        self.state = data  # might be redundant but just to make sure
         self.action, self.log_prob = self.ppo_agent.select_action(data)
 
     ##################################################################################################
@@ -254,17 +226,17 @@ class PPOModelNode(Node):
         - Lap completion bonus
         """
         # Core reward parameters
-        progress_multiplier = 3000.0     # More balanced multiplier for progress
-        base_time_penalty = -0.05      # Base penalty when not moving
-        stagnation_factor = 0.02       # Increases penalty over time
-        backwards_penalty = -5.0       # Penalty for going backwards
-        collision_penalty = -10.0      # Stronger collision penalty
-        lap_completion_bonus = 50.0    # Lap completion bonus
-        
+        progress_multiplier = 3000.0  # More balanced multiplier for progress
+        base_time_penalty = -0.05  # Base penalty when not moving
+        stagnation_factor = 0.02  # Increases penalty over time
+        backwards_penalty = -5.0  # Penalty for going backwards
+        collision_penalty = -10.0  # Stronger collision penalty
+        lap_completion_bonus = 50.0  # Lap completion bonus
+
         # Initialize stagnation counter if not exists
-        if not hasattr(self, 'stagnation_counter'):
+        if not hasattr(self, "stagnation_counter"):
             self.stagnation_counter = 0
-        
+
         # Handle collision case first
         if self.collision:
             self.get_logger().info(f"Applied collision penalty: {collision_penalty}")
@@ -272,53 +244,65 @@ class PPOModelNode(Node):
             self.done = True
             self.stagnation_counter = 0  # Reset counter
             return
-        
+
         # Calculate progress delta
         progress_delta = self.track_progress - self.prev_progress_distance
-        
+
         # Handle wrap-around at 1.0 (lap completion)
         if progress_delta < -0.5:
             progress_delta = (1.0 - self.prev_progress_distance) + self.track_progress
-            self.get_logger().info(f"Lap progress wrap-around detected: {progress_delta:.4f}")
-        
+            self.get_logger().info(
+                f"Lap progress wrap-around detected: {progress_delta:.4f}"
+            )
+
         # Case 1: Moving backwards
         if progress_delta < -0.001:
             self.reward = backwards_penalty
             self.stagnation_counter = 0  # Reset counter
-            self.get_logger().info(f"Moving backwards: {progress_delta:.6f}, reward = {backwards_penalty}")
+            self.get_logger().info(
+                f"Moving backwards: {progress_delta:.6f}, reward = {backwards_penalty}"
+            )
             return
-        
+
         # Case 2: Moving forward significantly
         elif progress_delta > 0.00001:
             # Reward directly proportional to progress made
             self.reward = progress_multiplier * progress_delta
             self.stagnation_counter = 0  # Reset counter
-            self.get_logger().info(f"Moving forward: {progress_delta:.6f}, reward = {self.reward:.4f}")
-        
+            self.get_logger().info(
+                f"Moving forward: {progress_delta:.6f}, reward = {self.reward:.4f}"
+            )
+
         # Case 3: Not moving/minimal movement
         else:
             # Apply increasing stagnation penalty
             self.stagnation_counter += 1
-            stagnation_penalty = base_time_penalty * (1 + self.stagnation_counter * stagnation_factor)
+            stagnation_penalty = base_time_penalty * (
+                1 + self.stagnation_counter * stagnation_factor
+            )
             self.reward = stagnation_penalty
-            self.get_logger().info(f"Not moving: {progress_delta:.6f}, stagnation: {self.stagnation_counter}, reward = {stagnation_penalty:.4f}")
-        
+            self.get_logger().info(
+                f"Not moving: {progress_delta:.6f}, stagnation: {self.stagnation_counter}, reward = {stagnation_penalty:.4f}"
+            )
+
         # Add lap completion bonus if detected
         if self.lap_completed:
             self.reward += lap_completion_bonus
             self.lap_completed = False  # Reset flag
             self.stagnation_counter = 0  # Reset counter
-            self.get_logger().info(f"Lap completion bonus applied: +{lap_completion_bonus}")
-            
+            self.get_logger().info(
+                f"Lap completion bonus applied: +{lap_completion_bonus}"
+            )
+
     ##################################################################################################
     #                                       STORE TRANSITION
     ##################################################################################################
-    
+
     def store_transition(self):
         value = self.ppo_agent.critic(
             torch.tensor(self.state, dtype=torch.float32).to(device).unsqueeze(0)
         ).item()
-        
+
         self.ppo_agent.store_transition(
             self.state, self.action, float(self.log_prob), value, self.reward, self.done
         )
@@ -328,8 +312,7 @@ class PPOModelNode(Node):
     ##################################################################################################
 
     def reset_run(self):
-        ''' Reset the state, action, reward, done, current_ep_reward, and current_step_in_episode variables after an episode ends.
-        '''
+        """Reset the state, action, reward, done, current_ep_reward, and current_step_in_episode variables after an episode ends."""
         self.state = None
         self.action = None
         self.reward = 0.0
@@ -338,11 +321,9 @@ class PPOModelNode(Node):
         self.current_step_in_episode = 0.0
         self.collision = False
         self.lap_completed = False
-        self.track_progress=0.0
+        self.track_progress = 0.0
         self.termination_reason = "unknown"
-        self.get_logger().info(
-            f"Episode {self.episode_counter} finished. Resetting."
-        )
+        self.get_logger().info(f"Episode {self.episode_counter} finished. Resetting.")
 
     ##################################################################################################
     #                                       TRAINING
@@ -358,28 +339,32 @@ class PPOModelNode(Node):
                 self.get_action(self.state)
                 self.publish_action()
                 self.calculate_reward()
-                
+
                 # Mark episode as done if episode_length reached
                 if self.current_step_in_episode >= self.episode_length:
                     self.done = True
                     self.termination_reason = "episode_length"
-                    
+
                 # Later, if we detect crashes or other done causes and want to respawn, update:
                 # self.termination_reason = "timeout"
                 # self.termination_reason = "goal_reached"
-                
+
                 self.store_transition()
                 self.timestep_counter += 1
                 self.current_ep_reward += self.reward
-                
+
                 # Log reward at every step (add this line)
-                self.summary_writer.add_scalar("Rewards/step reward", self.reward, self.timestep_counter)
-                
+                self.summary_writer.add_scalar(
+                    "Rewards/step reward", self.reward, self.timestep_counter
+                )
+
                 if self.timestep_counter % LEARN_EVERY_N_STEPS == 0:
                     try:
                         # Add CUDA memory debug information
                         if torch.cuda.is_available():
-                            self.get_logger().info(f"CUDA Memory: Allocated: {torch.cuda.memory_allocated()/1024**2:.2f}MB, Reserved: {torch.cuda.memory_reserved()/1024**2:.2f}MB")
+                            self.get_logger().info(
+                                f"CUDA Memory: Allocated: {torch.cuda.memory_allocated()/1024**2:.2f}MB, Reserved: {torch.cuda.memory_reserved()/1024**2:.2f}MB"
+                            )
                             # Force garbage collection
                             torch.cuda.empty_cache()
                         actor_loss, critic_loss, entropy = self.ppo_agent.learn()
@@ -407,7 +392,9 @@ class PPOModelNode(Node):
                     self.episode_counter += 1
                     return 1
 
-            self.get_logger().info(f"Episode: {self.episode_counter}, Timestep: {self.timestep_counter}, Reward: {self.current_ep_reward}")
+            self.get_logger().info(
+                f"Episode: {self.episode_counter}, Timestep: {self.timestep_counter}, Reward: {self.current_ep_reward}"
+            )
 
         else:
             # End of training
@@ -434,21 +421,26 @@ class PPOModelNode(Node):
                 # Mark episode as done if episode_length reached
                 if self.current_step_in_episode >= self.episode_length:
                     self.done = True
-                    
+
                     self.termination_reason = "episode_length"
-                    
+
                 # Later, if we detect crashes or other done causes and want to respawn, update:
                 # self.termination_reason = "timeout"
                 # self.termination_reason = "goal_reached"
-                
+
                 self.store_transition()
                 self.timestep_counter += 1
                 self.current_ep_reward += self.reward
-                
+
                 # Log reward at every step
-                self.summary_writer.add_scalar("Rewards/step reward", self.reward, self.timestep_counter)
-                self.summary_writer.add_scalar("Rewards/cumulative reward", self.current_ep_reward, self.episode_counter)
-            
+                self.summary_writer.add_scalar(
+                    "Rewards/step reward", self.reward, self.timestep_counter
+                )
+                self.summary_writer.add_scalar(
+                    "Rewards/cumulative reward",
+                    self.current_ep_reward,
+                    self.episode_counter,
+                )
 
                 if self.done:
                     self.t2 = datetime.now()
@@ -461,7 +453,7 @@ class PPOModelNode(Node):
                     self.reset_run()
                     self.episode_counter += 1
                 return 1
-            
+
         else:
             self.log_episode_metrics()
             self.save_training_state(self.run_dir)
@@ -490,14 +482,16 @@ class PPOModelNode(Node):
         self.load_training_metadata(state_dict_dir)
 
     def save_training_metadata(self, state_dict_dir):
-        log_std = self.ppo_agent.actor.log_std.detach().cpu().tolist()  # convert tensor to list
+        log_std = (
+            self.ppo_agent.actor.log_std.detach().cpu().tolist()
+        )  # convert tensor to list
         meta = {
             "episode_counter": self.episode_counter,
             "timestep_counter": self.timestep_counter,
             "log_std": log_std,
             "current_ep_reward": self.current_ep_reward,
             "current_step_in_episode": self.current_step_in_episode,
-        }        
+        }
         # self.save_to_mongodb(meta)
         try:
             meta_path = os.path.join(state_dict_dir, "meta.json")
@@ -506,7 +500,7 @@ class PPOModelNode(Node):
             self.get_logger().info(f"Metadata saved: {meta}")
         except Exception as e:
             self.get_logger().error(f"❌ Metadata not saved: {e}")
-        
+
     def load_training_metadata(self, state_dict_dir):
         try:
             meta_path = os.path.join(state_dict_dir, "meta.json")
@@ -519,12 +513,16 @@ class PPOModelNode(Node):
                 self.current_step_in_episode = meta.get("current_step_in_episode", 0)
                 log_std_list = meta.get("log_std")
                 if log_std_list is not None:
-                    log_std_tensor = torch.tensor(log_std_list, dtype=torch.float32, device=device)
+                    log_std_tensor = torch.tensor(
+                        log_std_list, dtype=torch.float32, device=device
+                    )
                 with torch.no_grad():
                     self.ppo_agent.actor.log_std.copy_(log_std_tensor)
                 self.get_logger().info(f"Metadata loaded: {meta}")
             else:
-                self.get_logger().warn(f"No meta.json found in {state_dict_dir}. No metadata loaded.")
+                self.get_logger().warn(
+                    f"No meta.json found in {state_dict_dir}. No metadata loaded."
+                )
         except Exception as e:
             self.get_logger().error(f"❌ Metadata not loaded: {e}")
 
@@ -539,7 +537,7 @@ class PPOModelNode(Node):
             "entropy": entropy,
             "action_std": self.ppo_agent.action_std,
             "step_reward": self.reward,  # Add step reward to log
-            "cumulative_reward": self.current_ep_reward
+            "cumulative_reward": self.current_ep_reward,
         }
         write_header = not os.path.exists(log_file)
         with open(log_file, "a", newline="") as f:
@@ -547,14 +545,22 @@ class PPOModelNode(Node):
             if write_header:
                 writer.writeheader()
             writer.writerow(row)
-        
+
         self.summary_writer.add_scalar("Loss/actor", actor_loss, self.timestep_counter)
-        self.summary_writer.add_scalar("Loss/critic", critic_loss, self.timestep_counter)
+        self.summary_writer.add_scalar(
+            "Loss/critic", critic_loss, self.timestep_counter
+        )
         self.summary_writer.add_scalar("Entropy", entropy, self.timestep_counter)
-        self.summary_writer.add_scalar("Exploration/action_std", self.ppo_agent.action_std, self.timestep_counter)
-        self.summary_writer.add_scalar("Rewards/step_reward", self.reward, self.timestep_counter)
-        self.summary_writer.add_scalar("Rewards/cumulative_reward", self.current_ep_reward, self.timestep_counter)
-        
+        self.summary_writer.add_scalar(
+            "Exploration/action_std", self.ppo_agent.action_std, self.timestep_counter
+        )
+        self.summary_writer.add_scalar(
+            "Rewards/step_reward", self.reward, self.timestep_counter
+        )
+        self.summary_writer.add_scalar(
+            "Rewards/cumulative_reward", self.current_ep_reward, self.timestep_counter
+        )
+
         try:
             # Create metrics message
             metrics = {
@@ -565,54 +571,55 @@ class PPOModelNode(Node):
                 "critic_loss": float(critic_loss) if critic_loss is not None else None,
                 "entropy": float(entropy) if entropy is not None else None,
                 "action_std": float(self.ppo_agent.action_std),
-                "step_reward": float(self.current_ep_reward / max(1, self.current_step_in_episode)),
-                "cumulative_reward": float(self.current_ep_reward)
+                "step_reward": float(
+                    self.current_ep_reward / max(1, self.current_step_in_episode)
+                ),
+                "cumulative_reward": float(self.current_ep_reward),
             }
-            
+
             # Save metrics to MongoDB using the existing connection
             try:
                 self.save_to_mongodb(schema=metrics)
             except Exception as e:
                 self.get_logger().error(f"❌ Step metrics not saved to MongoDB: {e}")
-        
+
         except Exception as e:
             self.get_logger().error(f"Failed to log step metrics: {e}")
             self.log_error("log_step_metrics", str(e))
 
     def save_to_mongodb(self, schema):
-        if self.db is not None:            
-            collection = self.db['episodes']
+        if self.db is not None:
+            collection = self.db["episodes"]
             collection.insert_one(schema)
             self.get_logger().info(f"✅ Step metrics saved to MongoDB: {schema}")
         else:
             self.get_logger().error("❌ MongoDB connection is not initialized.")
-    
+
     def log_error(self, component, message):
         """Log error to MongoDB through DB service"""
         try:
-            error_data = {
-                "component": f"ppo_node.{component}",
-                "message": message
-            }
-            
+            error_data = {"component": f"ppo_node.{component}", "message": message}
+
             msg = String()
             msg.data = json.dumps(error_data)
             self.error_logs_pub.publish(msg)
         except Exception as e:
             self.get_logger().error(f"Failed to publish error log: {e}")
-           
+
     def log_episode_metrics(self):
-        log_file = os.path.join(self.log_dir, "training_log.csv" if TRAIN else "testing_log.csv")
+        log_file = os.path.join(
+            self.log_dir, "training_log.csv" if TRAIN else "testing_log.csv"
+        )
         row = {
             "episode": self.episode_counter,
             "timestep": self.timestep_counter,
             "episode_reward": self.current_ep_reward,
             "episode_length": self.current_step_in_episode,
-            "termination_reason": self.termination_reason
+            "termination_reason": self.termination_reason,
         }
-        
+
         # self.save_to_mongodb(schema=row)
-        
+
         write_header = not os.path.exists(log_file)
         with open(log_file, "a", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=row.keys())
@@ -621,67 +628,55 @@ class PPOModelNode(Node):
             writer.writerow(row)
 
         prefix = "Train" if TRAIN else "Test"
-        self.summary_writer.add_scalar(f"{prefix}/Episode Duration (s)", (self.t2 - self.t1).total_seconds(), self.episode_counter)
-        self.summary_writer.add_scalar(f"{prefix}/Episode Reward", self.current_ep_reward, self.episode_counter)
-        self.summary_writer.add_scalar(f"{prefix}/Episode Length", self.current_step_in_episode, self.episode_counter)
-        self.summary_writer.add_scalar(f"{prefix}/Action Std", self.ppo_agent.action_std, self.episode_counter)
-        
+        self.summary_writer.add_scalar(
+            f"{prefix}/Episode Duration (s)",
+            (self.t2 - self.t1).total_seconds(),
+            self.episode_counter,
+        )
+        self.summary_writer.add_scalar(
+            f"{prefix}/Episode Reward", self.current_ep_reward, self.episode_counter
+        )
+        self.summary_writer.add_scalar(
+            f"{prefix}/Episode Length",
+            self.current_step_in_episode,
+            self.episode_counter,
+        )
+        self.summary_writer.add_scalar(
+            f"{prefix}/Action Std", self.ppo_agent.action_std, self.episode_counter
+        )
+
     def log_and_publish_episode_metrics(self):
         metrics = {
-        "episode": self.episode_counter,
-        "episode_reward": self.current_ep_reward,
-        "actor_loss": float(self.last_actor_loss) if self.last_actor_loss else None,
-        "critic_loss": float(self.last_critic_loss) if self.last_critic_loss else None,
-        "entropy": float(self.last_entropy) if self.last_entropy else None,
-        "duration": (self.t2 - self.t1).total_seconds(),
-        "episode_length": self.current_step_in_episode,
-        "train": TRAIN
-    }
-    
+            "episode": self.episode_counter,
+            "episode_reward": self.current_ep_reward,
+            "actor_loss": float(self.last_actor_loss) if self.last_actor_loss else None,
+            "critic_loss": (
+                float(self.last_critic_loss) if self.last_critic_loss else None
+            ),
+            "entropy": float(self.last_entropy) if self.last_entropy else None,
+            "duration": (self.t2 - self.t1).total_seconds(),
+            "episode_length": self.current_step_in_episode,
+            "train": TRAIN,
+        }
+
         msg = String()
         msg.data = json.dumps(metrics)
         self.episode_metrics_pub.publish(msg)
-    
-    def log_and_publish_performance_metrics(self):    
+
+    def log_and_publish_performance_metrics(self):
         # Publish performance metrics
         performance = {
             "episode_id": f"ep_{self.episode_counter}",
-            "lap_times": [], # Add actual lap times if available
+            "lap_times": [],  # Add actual lap times if available
             "track_progress": self.track_progress,
             "collisions": 1 if self.collision else 0,
-            "lap_progress": self.track_progress
+            "lap_progress": self.track_progress,
         }
-        
+
         msg = String()
         msg.data = json.dumps(performance)
         self.performance_metrics_pub.publish(msg)
-        
-    def save_episode_trajectory(self):
-        # IT THINK IT IS RUDUNDENT. PLEASE TELL ME WHAT YOU THINK.
-        os.makedirs(self.trajectory_dir, exist_ok=True)
-        episode_file = os.path.join(self.trajectory_dir, f"episode_{self.episode_counter:04d}.csv")
-        fieldnames = ["step", "timestep", "state", "action", "reward", "done"]
-        try:
-            with open(episode_file, "w", newline="") as f:
-                writer = csv.DictWriter(f, fieldnames=fieldnames)
-                writer.writeheader()
-                for i in range(len(self.ppo_agent.states)):
-                    if i % 512 == 0:  # Save every 512 steps
-                        writer.writerow({
-                            "step": i,
-                            "timestep": self.timestep_counter - len(self.ppo_agent.states) + i + 1,
-                            "state": np.array2string(self.ppo_agent.states[i], separator=","),
-                            "action": np.array2string(self.ppo_agent.actions[i], separator=","),
-                            "reward": self.ppo_agent.rewards[i],
-                            "done": self.ppo_agent.dones[i]
-                        })
-            self.get_logger().info(f"📊 Episode trajectory saved to {episode_file}")
-        except Exception as e:
-            self.get_logger().error(f"❌ Could not save episode CSV: {e}")
-        self.summary_writer.add_scalar("episode duration (s)", (self.t2 - self.t1).total_seconds(), self.episode_counter)
-        self.summary_writer.add_scalar("Rewards/reward per episode", self.current_ep_reward, self.episode_counter)
-        self.summary_writer.add_scalar("episode length", self.current_step_in_episode, self.episode_counter)
-        
+
     def log_system_metrics(self):
         # CPU and RAM
         cpu_percent = psutil.cpu_percent()
@@ -689,75 +684,48 @@ class PPOModelNode(Node):
         process = psutil.Process()
         process_mem_mb = process.memory_info().rss / 1024**2  # in MB
 
-        self.summary_writer.add_scalar("System/CPU_Usage (%)", cpu_percent, self.timestep_counter)
-        self.summary_writer.add_scalar("System/RAM_Usage (%)", ram_percent, self.timestep_counter)
-        self.summary_writer.add_scalar("System/Process_RAM (MB)", process_mem_mb, self.timestep_counter)
+        self.summary_writer.add_scalar(
+            "System/CPU_Usage (%)", cpu_percent, self.timestep_counter
+        )
+        self.summary_writer.add_scalar(
+            "System/RAM_Usage (%)", ram_percent, self.timestep_counter
+        )
+        self.summary_writer.add_scalar(
+            "System/Process_RAM (MB)", process_mem_mb, self.timestep_counter
+        )
 
         # GPU (if available)
         if torch.cuda.is_available():
             gpu_mem_allocated = torch.cuda.memory_allocated() / 1024**2
             gpu_mem_reserved = torch.cuda.memory_reserved() / 1024**2
-            self.summary_writer.add_scalar("System/GPU_Memory_Allocated (MB)", gpu_mem_allocated, self.timestep_counter)
-            self.summary_writer.add_scalar("System/GPU_Memory_Reserved (MB)", gpu_mem_reserved, self.timestep_counter)
+            self.summary_writer.add_scalar(
+                "System/GPU_Memory_Allocated (MB)",
+                gpu_mem_allocated,
+                self.timestep_counter,
+            )
+            self.summary_writer.add_scalar(
+                "System/GPU_Memory_Reserved (MB)",
+                gpu_mem_reserved,
+                self.timestep_counter,
+            )
 
         prefix = "Train" if TRAIN else "Test"
-        self.summary_writer.add_scalar(f"{prefix}/Episode Duration (s)", (self.t2 - self.t1).total_seconds(), self.episode_counter)
-        self.summary_writer.add_scalar(f"{prefix}/Episode Reward", self.current_ep_reward, self.episode_counter)
-        self.summary_writer.add_scalar(f"{prefix}/Episode Length", self.current_step_in_episode, self.episode_counter)
-        self.summary_writer.add_scalar(f"{prefix}/Action Std", self.ppo_agent.action_std, self.episode_counter)
-        
-    def log_and_publish_episode_metrics(self):
-        metrics = {
-        "episode": self.episode_counter,
-        "episode_reward": self.current_ep_reward,
-        "actor_loss": float(self.last_actor_loss) if self.last_actor_loss else None,
-        "critic_loss": float(self.last_critic_loss) if self.last_critic_loss else None,
-        "entropy": float(self.last_entropy) if self.last_entropy else None,
-        "duration": (self.t2 - self.t1).total_seconds(),
-        "episode_length": self.current_step_in_episode,
-        "train": TRAIN
-    }
-    
-        msg = String()
-        msg.data = json.dumps(metrics)
-        self.episode_metrics_pub.publish(msg)
-    
-    def log_and_publish_performance_metrics(self):    
-        # Publish performance metrics
-        performance = {
-            "episode_id": f"ep_{self.episode_counter}",
-            "lap_times": [], # Add actual lap times if available
-            "track_progress": self.track_progress,
-            "collisions": 1 if self.collision else 0,
-            "lap_progress": self.track_progress
-        }
-        
-        msg = String()
-        msg.data = json.dumps(performance)
-        self.performance_metrics_pub.publish(msg)
-        
-    def save_episode_trajectory(self):
-        # IT THINK IT IS RUDUNDENT. PLEASE TELL ME WHAT YOU THINK.
-        os.makedirs(self.trajectory_dir, exist_ok=True)
-        episode_file = os.path.join(self.trajectory_dir, f"episode_{self.episode_counter:04d}.csv")
-        fieldnames = ["step", "timestep", "state", "action", "reward", "done"]
-        try:
-            with open(episode_file, "w", newline="") as f:
-                writer = csv.DictWriter(f, fieldnames=fieldnames)
-                writer.writeheader()
-                for i in range(len(self.ppo_agent.states)):
-                    if i % 512 == 0:  # Save every 512 steps
-                        writer.writerow({
-                            "step": i,
-                            "timestep": self.timestep_counter - len(self.ppo_agent.states) + i + 1,
-                            "state": np.array2string(self.ppo_agent.states[i], separator=","),
-                            "action": np.array2string(self.ppo_agent.actions[i], separator=","),
-                            "reward": self.ppo_agent.rewards[i],
-                            "done": self.ppo_agent.dones[i]
-                        })
-            self.get_logger().info(f"📊 Episode trajectory saved to {episode_file}")
-        except Exception as e:
-            self.get_logger().error(f"❌ Could not save episode CSV: {e}")
+        self.summary_writer.add_scalar(
+            f"{prefix}/Episode Duration (s)",
+            (self.t2 - self.t1).total_seconds(),
+            self.episode_counter,
+        )
+        self.summary_writer.add_scalar(
+            f"{prefix}/Episode Reward", self.current_ep_reward, self.episode_counter
+        )
+        self.summary_writer.add_scalar(
+            f"{prefix}/Episode Length",
+            self.current_step_in_episode,
+            self.episode_counter,
+        )
+        self.summary_writer.add_scalar(
+            f"{prefix}/Action Std", self.ppo_agent.action_std, self.episode_counter
+        )
 
     ##################################################################################################
     #                                           UTILITIES
@@ -769,105 +737,112 @@ class PPOModelNode(Node):
             self.collision = True
             self.get_logger().warn(f"Collision detected: {msg.data}")
             self.termination_reason = "collision"
-            
+
             # Update reward immediately
             self.calculate_reward()
-            
+
             # Log the collision penalty
             self.get_logger().info(f"Applied collision penalty: {self.reward}")
 
     def request_track_waypoints(self):
         """Request track waypoints from the map loader service"""
         self.get_logger().info("Requesting track waypoints...")
-        
+
         request = GetTrackWaypoints.Request()
         future = self.waypoints_client.call_async(request)
-        
+
         # Add a callback for when the service call completes
         future.add_done_callback(self.process_waypoints_response)
 
     def location_callback(self, msg):
         """Process vehicle location updates and calculate track progress"""
         if len(self.track_waypoints) == 0:
-            self.get_logger().warn("Track waypoints not available yet. Cannot calculate progress.")
+            self.get_logger().warn(
+                "Track waypoints not available yet. Cannot calculate progress."
+            )
             return
-        
+
         # Store previous location for direct movement calculation
         previous_location = self.vehicle_location
-        
+
         # Extract vehicle location
         self.vehicle_location = (msg.data[0], msg.data[1])
-        
+
         # First call - just store the location
         if previous_location is None:
-            self.get_logger().info(f"Initial vehicle position: ({self.vehicle_location[0]:.2f}, {self.vehicle_location[1]:.2f})")
+            self.get_logger().info(
+                f"Initial vehicle position: ({self.vehicle_location[0]:.2f}, {self.vehicle_location[1]:.2f})"
+            )
             self.update_track_progress()
             return
-            
+
         # Calculate direct movement vector for debugging
         movement_x = self.vehicle_location[0] - previous_location[0]
         movement_y = self.vehicle_location[1] - previous_location[1]
         distance_moved = math.sqrt(movement_x**2 + movement_y**2)
-        
+
         # Log movement for debugging
         if distance_moved > 0.01:  # Only log significant movements
             self.get_logger().debug(f"Vehicle moved: {distance_moved:.3f}m")
-        
 
         self.prev_progress_distance = self.track_progress
 
         # Calculate progress along the track
         self.update_track_progress()
-        
+
         # Check for lap completion
         if self.track_progress < 0.1 and self.prev_progress_distance > 0.9:
             self.check_lap_completion()
-    
+
     def update_track_progress(self):
         """Calculate vehicle's progress percentage along the track with high sensitivity"""
         if not self.vehicle_location or len(self.track_waypoints) < 2:
             return
-        
+
         # STEP 1: Find position relative to track
         # Find the two closest waypoints to determine which segment we're on
         distances = []
         for i, waypoint in enumerate(self.track_waypoints):
             dist = self.calculate_distance(self.vehicle_location, waypoint)
             distances.append((dist, i))
-        
+
         # Sort by distance
         distances.sort()
         closest_dist, closest_idx = distances[0]
         second_dist, second_idx = distances[1]
-        
+
         # STEP 2: Determine our position between waypoints and track direction
         track_len = len(self.track_waypoints)
-        
+
         # Let's identify the segment we're on (connecting the waypoints)
         # First check if these points are adjacent (handling wraparound)
-        are_adjacent = (abs(closest_idx - second_idx) == 1) or (abs(closest_idx - second_idx) == track_len - 1)
-        
+        are_adjacent = (abs(closest_idx - second_idx) == 1) or (
+            abs(closest_idx - second_idx) == track_len - 1
+        )
+
         if not are_adjacent:
             # The closest points aren't adjacent - find best segment by checking all point pairs
-            min_segment_dist = float('inf')
+            min_segment_dist = float("inf")
             segment_start_idx = 0
-            
+
             for i in range(track_len):
                 next_i = (i + 1) % track_len
                 p1 = self.track_waypoints[i]
                 p2 = self.track_waypoints[next_i]
-                
+
                 # Calculate distance from point to line segment
-                segment_dist = self.point_to_segment_distance(self.vehicle_location, p1, p2)
-                
+                segment_dist = self.point_to_segment_distance(
+                    self.vehicle_location, p1, p2
+                )
+
                 if segment_dist < min_segment_dist:
                     min_segment_dist = segment_dist
                     segment_start_idx = i
-            
+
             # Now we have the closest segment
             closest_idx = segment_start_idx
             second_idx = (segment_start_idx + 1) % track_len
-        
+
         # STEP 3: Calculate precise progress along track
         # If this is the first update, initialize the start point
         if self.start_point is None or self.needs_progress_reset:
@@ -875,85 +850,106 @@ class PPOModelNode(Node):
             self.prev_progress_distance = 0.0
             self.track_progress = 0.0
             self.needs_progress_reset = False
-            self.get_logger().info(f"Progress tracking initialized at waypoint {closest_idx}/{track_len}")
+            self.get_logger().info(
+                f"Progress tracking initialized at waypoint {closest_idx}/{track_len}"
+            )
             return
-        
+
         # We need to know direction of track
         wp_current = self.track_waypoints[closest_idx]
         wp_next = self.track_waypoints[(closest_idx + 1) % track_len]
-        
+
         # Project vehicle position onto the track segment to get precise location
-        projection = self.project_point_to_segment(self.vehicle_location, wp_current, wp_next)
-        segment_progress = self.calculate_distance(wp_current, projection) / self.calculate_distance(wp_current, wp_next)
-        
+        projection = self.project_point_to_segment(
+            self.vehicle_location, wp_current, wp_next
+        )
+        segment_progress = self.calculate_distance(
+            wp_current, projection
+        ) / self.calculate_distance(wp_current, wp_next)
+
         # Calculate overall progress (waypoint index + segment progress)
         if closest_idx >= self.start_point:
             base_progress = (closest_idx - self.start_point) / track_len
         else:
             # We've wrapped around the track
             base_progress = (track_len - self.start_point + closest_idx) / track_len
-        
+
         # Add fractional progress within current segment
         segment_fraction = 1.0 / track_len
         raw_progress = base_progress + (segment_progress * segment_fraction)
-        
+
         # Normalize to [0, 1] range
         raw_progress = raw_progress % 1.0
-        
+
         # Check if this is a reasonable change from previous progress
         if self.prev_progress_distance is not None:
             progress_diff = raw_progress - self.prev_progress_distance
-            
+
             # Handle wrap-around at 1.0
             if progress_diff < -0.5:  # We've wrapped from 0.99 to 0.01
                 progress_diff = (1.0 - self.prev_progress_distance) + raw_progress
             elif progress_diff > 0.5:  # Unlikely large jump
                 progress_diff = -((1.0 - raw_progress) + self.prev_progress_distance)
-            
+
             # Debug log for significant progress changes
             if abs(progress_diff) > 0.01:
-                self.get_logger().info(f"Progress change: {progress_diff:.4f} (from {self.prev_progress_distance:.4f} to {raw_progress:.4f})")
-        
+                self.get_logger().info(
+                    f"Progress change: {progress_diff:.4f} (from {self.prev_progress_distance:.4f} to {raw_progress:.4f})"
+                )
+
         # Update progress
         self.track_progress = raw_progress
 
         self.get_logger().info(f"Track progress: {self.track_progress:.8f}")
-        
+
         # Log progress occasionally
-        if int(self.track_progress * 100) % 10 == 0 and int(self.prev_progress_distance * 100) % 10 != 0:
+        if (
+            int(self.track_progress * 100) % 10 == 0
+            and int(self.prev_progress_distance * 100) % 10 != 0
+        ):
             self.get_logger().info(f"Track progress: {self.track_progress:.4f}")
 
     def point_to_segment_distance(self, p, v, w):
         """Calculate the distance from point p to line segment vw"""
         # Length squared of segment
-        l2 = (v[0] - w[0])**2 + (v[1] - w[1])**2
+        l2 = (v[0] - w[0]) ** 2 + (v[1] - w[1]) ** 2
         if l2 == 0:  # v == w case
             return self.calculate_distance(p, v)
-        
+
         # Consider the line extending the segment, parameterized as v + t (w - v)
         # We find projection of point p onto the line.
         # It falls where t = [(p-v) . (w-v)] / |w-v|^2
         # We clamp t from [0,1] to handle points outside the segment
-        t = max(0, min(1, ((p[0] - v[0]) * (w[0] - v[0]) + (p[1] - v[1]) * (w[1] - v[1])) / l2))
-        
+        t = max(
+            0,
+            min(
+                1, ((p[0] - v[0]) * (w[0] - v[0]) + (p[1] - v[1]) * (w[1] - v[1])) / l2
+            ),
+        )
+
         # Projection falls on the segment
         projection = (v[0] + t * (w[0] - v[0]), v[1] + t * (w[1] - v[1]))
-        
+
         return self.calculate_distance(p, projection)
-    
+
     def project_point_to_segment(self, p, v, w):
         """Project point p onto line segment vw and return the projection point"""
         # Length squared of segment
-        l2 = (v[0] - w[0])**2 + (v[1] - w[1])**2
+        l2 = (v[0] - w[0]) ** 2 + (v[1] - w[1]) ** 2
         if l2 == 0:  # v == w case
             return v
-        
+
         # Consider the line extending the segment, parameterized as v + t (w - v)
         # We find projection of point p onto the line.
         # It falls where t = [(p-v) . (w-v)] / |w-v|^2
         # We clamp t from [0,1] to handle points outside the segment
-        t = max(0, min(1, ((p[0] - v[0]) * (w[0] - v[0]) + (p[1] - v[1]) * (w[1] - v[1])) / l2))
-        
+        t = max(
+            0,
+            min(
+                1, ((p[0] - v[0]) * (w[0] - v[0]) + (p[1] - v[1]) * (w[1] - v[1])) / l2
+            ),
+        )
+
         # Projection falls on the segment
         return (v[0] + t * (w[0] - v[0]), v[1] + t * (w[1] - v[1]))
 
@@ -961,30 +957,36 @@ class PPOModelNode(Node):
         """Check if a lap was completed and handle the event"""
         if self.lap_completed:
             return
-        
+
         # We've crossed back near the starting point after making progress
         if self.track_progress < 0.1 and self.prev_progress_distance > 0.9:
             self.lap_completed = True
             self.lap_count += 1
-            
+
             # Calculate lap time if we're tracking it
             if self.lap_start_time:
                 self.lap_end_time = datetime.now()
-                self.lap_time = (self.lap_end_time - self.lap_start_time).total_seconds()
-                self.get_logger().info(f"🏁 Lap {self.lap_count} completed in {self.lap_time:.2f} seconds!")
-                
+                self.lap_time = (
+                    self.lap_end_time - self.lap_start_time
+                ).total_seconds()
+                self.get_logger().info(
+                    f"🏁 Lap {self.lap_count} completed in {self.lap_time:.2f} seconds!"
+                )
+
                 # Add lap time to tensorboard
                 if self.summary_writer:
-                    self.summary_writer.add_scalar("Laps/time", self.lap_time, self.lap_count)
-            
+                    self.summary_writer.add_scalar(
+                        "Laps/time", self.lap_time, self.lap_count
+                    )
+
             # Reset for next lap
             self.lap_start_time = datetime.now()
             self.track_progress = 0.0
             self.prev_progress_distance = 0.0
-            
+
             # Log the lap completion
             self.get_logger().info(f"🏁 Lap {self.lap_count} completed!")
-            
+
             # Apply lap completion bonus in the next reward calculation
             self.termination_reason = "lap_completed"
 
@@ -992,35 +994,37 @@ class PPOModelNode(Node):
         """Process the waypoints received from the service"""
         try:
             response = future.result()
-            
+
             # Extract waypoints from the response
             waypoints_x = response.waypoints_x
             waypoints_y = response.waypoints_y
             self.track_length = response.track_length
-            
+
             # Combine into list of (x, y) tuples
             self.track_waypoints = list(zip(waypoints_x, waypoints_y))
-            
+
             self.get_logger().info(f"Received {len(self.track_waypoints)} waypoints")
             self.get_logger().info(f"Track length: {self.track_length:.2f} meters")
-        
+
         except Exception as e:
-            self.get_logger().error(f'Service call failed: {e}')
+            self.get_logger().error(f"Service call failed: {e}")
 
     def calculate_distance(self, point1, point2):
         if point1 is None or point2 is None:
             return float("inf")
         return math.sqrt(sum((p1 - p2) ** 2 for p1, p2 in zip(point1, point2)))
-        
+
     def handle_vehicle_ready(self, request, response):
         """Service handler when spawn_vehicle_node notifies that a vehicle is ready"""
-        self.get_logger().info(f'Received vehicle_ready notification: {request.vehicle_id}')
+        self.get_logger().info(
+            f"Received vehicle_ready notification: {request.vehicle_id}"
+        )
         self.collision = False
         # Reset track progress variables for new vehicle
         self.track_progress = 0.0
         self.prev_progress_distance = 0.0
         self.closest_waypoint_idx = 0
-        self.start_point = None 
+        self.start_point = None
         self.lap_completed = False
         self.lap_count = 0
         self.lap_start_time = None
@@ -1030,7 +1034,7 @@ class PPOModelNode(Node):
         self.vehicle_location = None
 
         self.needs_progress_reset = True
-        
+
         self.get_logger().info("Track progress variables fully reset for new vehicle")
 
         response.success = True
@@ -1062,16 +1066,18 @@ class PPOModelNode(Node):
                 else:
                     torch.backends.cudnn.deterministic = False
                     torch.backends.cudnn.benchmark = True
-                    print("⚠️ CuDNN benchmarking mode enabled (faster but nondeterministic).")
+                    print(
+                        "⚠️ CuDNN benchmarking mode enabled (faster but nondeterministic)."
+                    )
             else:
                 print("⚠️ CuDNN is not enabled or available.")
         else:
             print("⚠️ CUDA is not available. Running on CPU.")
 
         print("✅ Global seed and determinism setup complete.")
-    
+
     def create_new_run_dir(self, load_from_run=None):
-        
+
         version_dir = os.path.join(PPO_CHECKPOINT_DIR, VERSION)
         os.makedirs(version_dir, exist_ok=True)
 
@@ -1095,17 +1101,20 @@ class PPOModelNode(Node):
 
         if load_from_run:
             self.get_logger().info(f"Loading weights from: {load_from_run}")
-            self.ppo_agent.load_model_and_optimizers(os.path.join(load_from_run, "state_dict"))
-        
+            self.ppo_agent.load_model_and_optimizers(
+                os.path.join(load_from_run, "state_dict")
+            )
+
     def shutdown_writer(self):
         self.summary_writer.close()
         self.get_logger().info("SummaryWriter closed.")
-    
+
     def destroy_node(self):
-        if hasattr(self, 'db'):
+        if hasattr(self, "db"):
             mongo_connection.close_db()
         super().destroy_node()
-    
+
+
 def main(args=None):
     rclpy.init(args=args)
     node = PPOModelNode()
@@ -1117,7 +1126,6 @@ def main(args=None):
         node.destroy_node()
         node.shutdown_writer()
         rclpy.shutdown()
-    
 
 
 if __name__ == "__main__":
