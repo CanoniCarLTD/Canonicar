@@ -48,7 +48,7 @@ class LoadMapNode(Node):
         )
         
         self.track_waypoints = []  # Will store (x, y) waypoints
-        self.track_length = 0.0    # Total track length
+        self.track_length = 0.0    # Total track length 
 
         self.available_maps = []
         self.current_map_index = 0
