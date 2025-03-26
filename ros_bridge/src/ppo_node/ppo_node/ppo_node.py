@@ -263,8 +263,8 @@ class PPOModelNode(Node):
         progress_multiplier = 3000.0     # More balanced multiplier for progress
         base_time_penalty = -0.05      # Base penalty when not moving
         stagnation_factor = 0.02       # Increases penalty over time
-        backwards_penalty = -1.0       # Penalty for going backwards
-        collision_penalty = -5.0      # Stronger collision penalty
+        backwards_penalty = -5.0       # Penalty for going backwards
+        collision_penalty = -10.0      # Stronger collision penalty
         lap_completion_bonus = 50.0    # Lap completion bonus
         
         # Initialize stagnation counter if not exists
@@ -469,56 +469,6 @@ class PPOModelNode(Node):
             self.save_training_state(self.run_dir)
             self.reset_run()
             self.episode_counter += 1
-            
-    def testing(self, msg):
-        if self.timestep_counter < TEST_TIMESTEPS:
-            self.state = np.array(msg.data, dtype=np.float32)
-            self.t1 = datetime.now()
-
-            if self.current_step_in_episode < self.episode_length:
-                self.current_step_in_episode += 1
-                self.get_action(self.state)
-                self.publish_action()
-                self.calculate_reward()
-                if self.current_step_in_episode % 128 == 0:
-                    self.log_system_metrics()
-                # Episode termination logic
-                if self.current_step_in_episode >= self.episode_length:
-                    self.done = True
-                    self.termination_reason = "episode_length"
-                    # optionally: self.termination_reason = "timeout" / "goal_reached" / etc.
-
-                self.store_transition()
-                self.timestep_counter += 1
-                self.current_ep_reward += self.reward
-
-                # Logging per step
-                self.summary_writer.add_scalar("Rewards/step reward", self.reward, self.timestep_counter)
-                self.summary_writer.add_scalar("Rewards/episode reward so far", self.current_ep_reward, self.timestep_counter)
-
-                if self.done:
-                    self.t2 = datetime.now()
-                    self.get_logger().info(f"Episode duration: {self.t2 - self.t1}")
-
-                    self.log_system_metrics()
-                    self.save_training_state(self.run_dir)
-                    self.log_episode_metrics()
-                    self.get_logger().info(f"Checkpoint saved at {self.run_dir}")
-
-                    self.reset_run()
-                    self.episode_counter += 1
-                return 1
-
-            # Per-step console info
-            print(f"Episode: {self.episode_counter}, Timestep: {self.timestep_counter}, Reward: {self.current_ep_reward}")
-
-        else:
-            self.log_episode_metrics()
-            self.save_training_state(self.run_dir)
-            self.reset_run()
-            self.episode_counter += 1
-
-
 
     ##################################################################################################
     #                                   CHECKPOINTING AND LOGGING
