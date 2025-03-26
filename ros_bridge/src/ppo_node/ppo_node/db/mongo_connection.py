@@ -4,16 +4,15 @@ from pymongo import MongoClient
 import os
 from dotenv import load_dotenv
 
-
-
 def init_db():
     load_dotenv(dotenv_path="/ros_bridge/src/.env")
-    print
     try:
         conn_str = os.getenv("MONGO_CONNECTION_STRING")
         print(f"print the conn str: {conn_str}")
         client = MongoClient(conn_str)
-        db = client(os.getenv("MONGO_DB"))
+        db_name = os.getenv("MONGO_DB")
+        print(f"db name: {conn_str}")        
+        db = client[db_name]
         print("✅ Successfully connected to MongoDB Atlas")
         return db
     except Exception as e:
