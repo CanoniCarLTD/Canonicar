@@ -18,7 +18,7 @@ COPY setup_ros.sh /ros_bridge/
 # Initialize ROS workspace
 
 # Upgrade pip and install Python dependencies
-# WORKDIR /ros_bridge
+# WORKDIR /ros_bridgels
 # Source ROS 2 setup and build the workspace
 RUN python3 -m pip install --upgrade pip && python3 -m pip install numpy pygame python-dotenv torch torchvision
 
@@ -33,7 +33,7 @@ RUN source /opt/ros/foxy/setup.bash
 
 # Add the fix for typing-extensions without changing previous layers
 RUN python3 -m pip install --upgrade typing-extensions>=4.8.0
-RUN pip3 install psutil pymongo python-dotenv mongoengine
+RUN pip install psutil pymongo python-dotenv mongoengine
 
 RUN pip install nvidia-ml-py3
 
