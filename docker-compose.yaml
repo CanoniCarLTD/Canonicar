@@ -74,25 +74,19 @@ services:
       tail -f /dev/null"
     volumes:
       - ./ros_bridge/src:/ros_bridge/src
-      # - ./db:/ros_bridge/src/db
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
       - MONGO_CONNECTION_STRING=${MONGO_CONNECTION_STRING}
       - MONGO_DB=${MONGO_DB}
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: all
-    #           capabilities: [gpu]
-    # environment:
-    #   - NVIDIA_VISIBLE_DEVICES=all
-    #   - NVIDIA_DRIVER_CAPABILITIES=all
-    # restart: always
-    # depends_on:
-    #   bridge:
-    #     condition: service_started
-
+      
   # foxglove to visualize live data
   foxglove_bridge:
     build:
