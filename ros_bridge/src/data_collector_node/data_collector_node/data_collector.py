@@ -27,7 +27,7 @@ class DataCollector(Node):
             )
             self.prev_time = None  # Store timestamp
         except Exception as e:
-            self.get_logger().error(f"Error connecting to CARLA server: {e}")
+            self.get_logger().error(f"Error connecting to CARLA server")
             return
 
         self.data_buffer = []  # List of dictionaries to store synchronized data

@@ -323,7 +323,6 @@ class PPOModelNode(Node):
                 
                 # Log reward at every step (add this line)
                 self.summary_writer.add_scalar("Rewards/step reward", self.reward, self.timestep_counter)
-                self.summary_writer.add_scalar("Rewards/episode reward", self.current_ep_reward, self.episode_counter)
                 
                 if self.timestep_counter % LEARN_EVERY_N_STEPS == 0:
                     try:

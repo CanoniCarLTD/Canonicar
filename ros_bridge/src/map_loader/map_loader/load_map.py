@@ -57,7 +57,7 @@ class LoadMapNode(Node):
             )
             self.setup_map()
         except Exception as e:
-            self.get_logger().error(f"Failed to initialize CARLA client: {e}")
+            self.get_logger().error(f"Failed to initialize CARLA client")
             self.destroy_node()
 
     def setup_map(self):
@@ -100,7 +100,7 @@ class LoadMapNode(Node):
             self.get_logger().info(f"Track length: {self.track_length:.2f} meters")
 
         except Exception as e:
-            self.get_logger().error(f"Error during map setup: {e}")
+            self.get_logger().error(f"Error during map setup")
             self.destroy_node()
 
     def extract_track_waypoints(self):
