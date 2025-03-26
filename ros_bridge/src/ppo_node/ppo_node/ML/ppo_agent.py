@@ -164,7 +164,7 @@ class CriticNetwork(nn.Module):
 ##################################################################################################
 
 class PPOAgent:
-    def __init__(self, input_dim=203, action_dim=3, summary_writer=None):
+    def __init__(self, input_dim=198, action_dim=3, summary_writer=None):
         print("\nInitializing PPO Agent...\n")
         print("device: ", device)
         self.input_dim = input_dim if PPO_INPUT_DIM is None else PPO_INPUT_DIM

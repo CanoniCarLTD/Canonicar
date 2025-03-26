@@ -9,13 +9,13 @@ MODEL_LOAD = True
 PPO_CHECKPOINT_DIR = "/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models"
 
 # Set to None unless you're continuing an exact run (same version/run folder)
-CHECKPOINT_FILE = "/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models/v2.1.3/run_20250326_0001"
+CHECKPOINT_FILE = None # "/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models/v3.0.0/run_20250326_0001"
 
-VERSION = "v2.1.3"
+VERSION = "v3.0.0"
 
 # Point this to a full run directory from any version (must contain actor.pth etc.)
 # Example: "/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models/v2.1.3/run_20250325_0001"
-LOAD_STATE_DICT_FROM_RUN = None # "/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models/v2.1.2/run_20250325_0029"
+LOAD_STATE_DICT_FROM_RUN = "/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models/v3.0.0/run_20250326_0001"
 
 TRAIN = True  # Set to False to disable training and only run inference
 DETERMINISTIC_CUDNN = True
@@ -29,7 +29,7 @@ EPISODES = 100000
 SAVE_EVERY_N_TIMESTEPS = LEARN_EVERY_N_STEPS * 10
 
 # PPO-specific hyperparameters
-PPO_INPUT_DIM = 203
+PPO_INPUT_DIM = 198 # Removed gnss v3.0.0
 EPISODE_LENGTH = 640  # Maximum timesteps per episode
 TOTAL_TIMESTEPS = 2e8  # Total number of timesteps for training
 

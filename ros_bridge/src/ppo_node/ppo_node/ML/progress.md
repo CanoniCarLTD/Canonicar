@@ -77,3 +77,7 @@ a706b6a722cc69fab66c03bd77d9ed59128959332f5fb6477aa8c8751d5f2a4b  path.../preTra
 root@----:/ros_bridge# sha256sum "path.../preTrained_PPO_models/v2.1.4/run_20250325_0001/state_dict/actor.pth"
 a706b6a722cc69fab66c03bd77d9ed59128959332f5fb6477aa8c8751d5f2a4b  path.../preTrained_PPO_models/v2.1.4/run_20250325_0001/state_dict/actor.pth
 ```
+
+### v3.0.0
+
+Removed GNSS sensor - Begin new training from scratch

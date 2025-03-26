@@ -22,9 +22,6 @@ class DataCollector(Node):
     def __init__(self):
         super().__init__("data_collector")
         try:
-            self.prev_gnss = (
-                None  # Store previous GNSS position for velocity calculation
-            )
             self.prev_time = None  # Store timestamp
         except Exception as e:
             self.get_logger().error(f"Error connecting to CARLA server")
@@ -62,12 +59,10 @@ class DataCollector(Node):
         self.lidar_sub = Subscriber(self, PointCloud2, "/carla/lidar/points")
         self.get_logger().info("Waiting for IMU data...")
         self.imu_sub = Subscriber(self, Imu, "/carla/imu/imu")
-        self.get_logger().info("Waiting for GNSS data...")
-        self.gnss_sub = Subscriber(self, NavSatFix, "/carla/gnss/gnss")
 
-        # self.lidar_sub, self.imu_sub, self.gnss_sub
+        # self.lidar_sub, self.imu_sub
         self.ats = ApproximateTimeSynchronizer(
-            [self.image_sub, self.lidar_sub, self.imu_sub, self.gnss_sub ],
+            [self.image_sub, self.lidar_sub, self.imu_sub],
             queue_size=100,
             slop=0.1,  # Adjusted for better synchronization
         )
@@ -76,18 +71,18 @@ class DataCollector(Node):
         self.ats.registerCallback(self.sync_callback)
         self.get_logger().info("Subscribers set up successfully.")
 
-    #   lidar_msg, imu_msg, gnss_msg
-    def sync_callback(self, image_msg, lidar_msg, imu_msg,  gnss_msg):
-        processed_data = self.process_data(image_msg, lidar_msg, imu_msg, gnss_msg)
+    #   lidar_msg, imu_msg
+    def sync_callback(self, image_msg, lidar_msg, imu_msg):
+        processed_data = self.process_data(image_msg, lidar_msg, imu_msg)
         self.data_buffer.append(processed_data)
 
-    def process_data(self,image_msg, lidar_msg, imu_msg, gnss_msg):
+    def process_data(self,image_msg, lidar_msg, imu_msg):
 
         vision_features = self.process_vision_data(image_msg, lidar_msg)
         return self.aggregate_state_vector(
             vision_features,
             self.process_imu(imu_msg),
-            self.process_gnss(gnss_msg),
+            #self.process_gnss(gnss_msg), # Will be removed in the future in v3.0.0
         )
 
     def process_vision_data(self, image_msg, lidar_msg):
@@ -121,52 +116,54 @@ class DataCollector(Node):
         ]
         return imu_data
 
+    # Will be removed in the future in v3.0.0
+    
     # use geopy.distance for safer calculations.
-    def process_gnss(self, gnss_msg):
-        """Process GNSS data and compute velocity and heading."""
-        latitude, longitude, altitude = (
-            gnss_msg.latitude,
-            gnss_msg.longitude,
-            gnss_msg.altitude,
-        )
+#     def process_gnss(self, gnss_msg):
+#         """Process GNSS data and compute velocity and heading."""
+#         latitude, longitude, altitude = (
+#             gnss_msg.latitude,
+#             gnss_msg.longitude,
+#             gnss_msg.altitude,
+#         )
 
-        # Compute velocity using previous GNSS readings
-        velocity = 0.0
-        heading = 0.0
+#         # Compute velocity using previous GNSS readings
+#         velocity = 0.0
+#         heading = 0.0
 
-        if self.prev_gnss is not None and self.prev_time is not None:
-            delta_time = (
-                self.get_clock().now() - self.prev_time
-            ).nanoseconds / 1e9  # Convert to seconds
-            delta_lat = latitude - self.prev_gnss[0]
-            delta_lon = longitude - self.prev_gnss[1]
+#         if self.prev_gnss is not None and self.prev_time is not None:
+#             delta_time = (
+#                 self.get_clock().now() - self.prev_time
+#             ).nanoseconds / 1e9  # Convert to seconds
+#             delta_lat = latitude - self.prev_gnss[0]
+#             delta_lon = longitude - self.prev_gnss[1]
 
-            # Approximate distance (assuming small delta lat/lon)
-            delta_x = delta_lon * 111320  # Convert lon to meters
-            delta_y = delta_lat * 110540  # Convert lat to meters
-            distance = math.sqrt(delta_x**2 + delta_y**2)
-#           if delta_time > 0:
-            velocity = distance / delta_time  # Speed in meters per second
+#             # Approximate distance (assuming small delta lat/lon)
+#             delta_x = delta_lon * 111320  # Convert lon to meters
+#             delta_y = delta_lat * 110540  # Convert lat to meters
+#             distance = math.sqrt(delta_x**2 + delta_y**2)
+# #           if delta_time > 0:
+#             velocity = distance / delta_time  # Speed in meters per second
 
-            # Compute heading (angle of movement)
-            heading = (
-                math.degrees(math.atan2(delta_y, delta_x)) if distance > 0 else 0.0
-            )
+#             # Compute heading (angle of movement)
+#             heading = (
+#                 math.degrees(math.atan2(delta_y, delta_x)) if distance > 0 else 0.0
+#             )
 
-        # Update previous GNSS data
-        self.prev_gnss = (latitude, longitude)
-        self.prev_time = self.get_clock().now()
+#         # Update previous GNSS data
+#         self.prev_gnss = (latitude, longitude)
+#         self.prev_time = self.get_clock().now()
 
-        return np.array([latitude, longitude, altitude, velocity, heading])
+#         return np.array([latitude, longitude, altitude, velocity, heading])
 
-    # vision_features, imu_features, gnss_features
-    def aggregate_state_vector(self, vision_features, imu_features, gnss_features):
+    # vision_features, imu_features
+    def aggregate_state_vector(self, vision_features, imu_features):
 
         """Aggregate features into a single state vector.""" 
 
         # Assuming vision_features is 192 dimensions from the SensorFusionModel
         # Total vector size: 192 (vision) + 6 (IMU) + 5 (GNSS) = 203
-        state_vector = np.zeros(203, dtype=np.float32)
+        state_vector = np.zeros(198, dtype=np.float32)
         
         # Fill with vision features (fused RGB + LiDAR)
         state_vector[:192] = vision_features
@@ -174,8 +171,10 @@ class DataCollector(Node):
         # Add IMU data
         state_vector[192:198] = imu_features
 
+        # Will be removed in the future in v3.0.0
+        
         # Add GNSS data
-        state_vector[198:203] = gnss_features[:5]  # Includes velocity and heading
+        # state_vector[198:203] = gnss_features[:5]  # Includes velocity and heading
 
         response = Float32MultiArray()
         response.data = state_vector.tolist()
