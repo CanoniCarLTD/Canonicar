@@ -1,0 +1,4 @@
+string map_file_path  # Path to the XODR file to load (empty for automatic selection)
+---
+bool success         # Whether the map was successfully loaded
+string message       # Additional information about the outcome

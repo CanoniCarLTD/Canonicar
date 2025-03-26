@@ -42,7 +42,7 @@ def generate_launch_description():
     track_xodr_file = os.path.join(
         get_package_share_directory('map_loader'),
         'map_loader',
-        'generatedTrack.xodr'
+        'generatedTrack2.xodr'
     )
 
     run_load_map_node = Node(

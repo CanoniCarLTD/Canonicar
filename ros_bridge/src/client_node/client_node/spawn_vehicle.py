@@ -9,7 +9,7 @@ from ament_index_python.packages import get_package_share_directory
 import time
 from std_msgs.msg import String
 from rclpy.qos import QoSProfile, ReliabilityPolicy
-from  ros_interfaces.srv import VehicleReady, RespawnVehicle
+from  ros_interfaces.srv import VehicleReady, RespawnVehicle, SwapMap
 
 # For ROS2 messages
 from sensor_msgs.msg import Image, PointCloud2, Imu, NavSatFix
@@ -23,6 +23,8 @@ from sensors_data import (
     carla_gnss_to_ros_navsatfix,
 )
 
+
+MAX_COLLISIONS = 50
 
 class SpawnVehicleNode(Node):
     def __init__(self):
@@ -96,13 +98,53 @@ class SpawnVehicleNode(Node):
             self.lap_callback,
             10,
         )
-        
+
+        self.map_swap_client = self.create_client(
+            SwapMap, 'map_swap'
+        )
+
+        self.collision_counter = 0         
         
         self.data_collector_ready = True
         self.map_loaded = False
 
         self.current_vehicle_index = 0
         self.spawn_objects_from_config()
+
+
+    def map_swap(self):
+        """Request a map swap when collision counter reaches threshold"""
+        if not self.map_swap_client.service_is_ready():
+            self.get_logger().warn("Map swap service not available")
+            return
+        
+        # Create and send the request
+        request = SwapMap.Request()
+        request.map_file_path = ""  # Empty to cycle through available maps
+        
+        # Send async request
+        future = self.map_swap_client.call_async(request)
+        
+        # Add a callback to process the response
+        future.add_done_callback(self.process_map_swap_response)
+        
+        # Reset collision counter
+        self.collision_counter = 0
+
+
+    def process_map_swap_response(self, future):
+        """Process the response from the map swap service"""
+        try:
+            response = future.result()
+            if response.success:
+                self.get_logger().info(f"Map swap successful: {response.message}")
+                # Wait for the map to load and then respawn the vehicle
+                self.create_timer(2.0, lambda: self.trigger_respawn("Map changed"), one_shot=True)
+            else:
+                self.get_logger().warn(f"Map swap failed: {response.message}")
+                self.collision_counter = 0
+        except Exception as e:
+            self.get_logger().error(f"Service call failed: {e}")
 
 
     def lap_callback(self, msg):
@@ -185,8 +227,6 @@ class SpawnVehicleNode(Node):
             location = self.vehicle.get_location()
             self.get_logger().info(f"Spawned vehicle at {location}")
 
-            self.notify_vehicle_ready()
-
             collision_bp = blueprint_library.find("sensor.other.collision")
             if collision_bp:
                 collision_sensor = self.world.spawn_actor(
@@ -202,6 +242,7 @@ class SpawnVehicleNode(Node):
             if sensors:
                 self.spawn_sensors(sensors)
                 
+            self.notify_vehicle_ready()
             '''
                 AUTOPILOT
             '''
@@ -263,9 +304,17 @@ class SpawnVehicleNode(Node):
             f"({collision_location.x:.1f}, {collision_location.y:.1f}, {collision_location.z:.1f})"
         )
 
+        self.collision_counter += 1
+        self.get_logger().info(f"Collision count: {self.collision_counter}/5")
+
         collision_msg = String()
         collision_msg.data = f"collision_with_{collision_type}"
         self.collision_publisher.publish(collision_msg)
+
+        # Check if we need to swap the map
+        if self.collision_counter >= MAX_COLLISIONS:
+            self.get_logger().info(f"Collision threshold reached ({self.collision_counter}). Swapping map...")
+            self.map_swap()
 
         # Trigger vehicle respawn on collision
         if not self.respawn_in_progress:

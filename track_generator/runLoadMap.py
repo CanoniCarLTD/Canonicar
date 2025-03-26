@@ -243,7 +243,7 @@ def trackgen():
 
 try:
     trackgen()
-    client = carla.Client(ETAI, CARLA_SERVER_PORT)
+    client = carla.Client(KFIR, CARLA_SERVER_PORT)
     client.set_timeout(10.0)
     print("Connected to carla: ", client.get_server_version())
     print(f"Loading track: {TRACK_LINE}")
@@ -315,20 +315,20 @@ try:
     # Perform ticks and check bounds
     while True:
         world.tick()  # Step simulation
-        for vehicle in vehicles:
-            location = vehicle.get_location()
-            # draw_vehicle_bounding_box(world, vehicle, life_time=0.05)
-            if is_out_of_bounds(location, bounds):
-                print(f"Vehicle {vehicle.id} is out of bounds at {location}.")
-                # vehicle.set_autopilot(False)  # Disable autopilot for safety
-                # vehicles.remove(vehicle)  # Remove the vehicle from the list
-                # vehicle.destroy()  # Destroy the out-of-bounds vehicle
-        sleep(0.05)  # Adjust tick frequency as needed
+        # for vehicle in vehicles:
+        #     location = vehicle.get_location()
+        #     # draw_vehicle_bounding_box(world, vehicle, life_time=0.05)
+        #     if is_out_of_bounds(location, bounds):
+        #         print(f"Vehicle {vehicle.id} is out of bounds at {location}.")
+        #         # vehicle.set_autopilot(False)  # Disable autopilot for safety
+        #         # vehicles.remove(vehicle)  # Remove the vehicle from the list
+        #         # vehicle.destroy()  # Destroy the out-of-bounds vehicle
+        # sleep(0.05)  # Adjust tick frequency as needed
 
 except Exception as e:
-    for vehicle in vehicles:
-        if vehicle is not None:
-            vehicle.destroy()
+    # for vehicle in vehicles:
+    #     if vehicle is not None:
+    #         vehicle.destroy()
     print("error: ", e)
 
 finally:

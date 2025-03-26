@@ -8,7 +8,9 @@ import open3d as o3d
 import os
 import xml.etree.ElementTree as ET
 from std_msgs.msg import String
-from ros_interfaces.srv import GetTrackWaypoints
+from ros_interfaces.srv import GetTrackWaypoints, SwapMap
+import random
+import glob
 
 
 class LoadMapNode(Node):
@@ -47,6 +49,21 @@ class LoadMapNode(Node):
         
         self.track_waypoints = []  # Will store (x, y) waypoints
         self.track_length = 0.0    # Total track length
+
+        self.available_maps = []
+        self.current_map_index = 0
+        map_directory = os.path.dirname(self.TRACK_XODR)
+        self.available_maps = glob.glob(f"{map_directory}/*.xodr")
+        self.get_logger().info(f"Found {len(self.available_maps)} available maps: {[os.path.basename(m) for m in self.available_maps]}")
+
+        self.map_swap_service = self.create_service(
+            SwapMap, 'map_swap', self.handle_map_swap
+        )
+
+        if self.TRACK_XODR in self.available_maps:
+            self.current_map_index = self.available_maps.index(self.TRACK_XODR)
+        else:
+            self.current_map_index = 0
 
         # Initialize CARLA client and setup map
         try:
@@ -102,6 +119,43 @@ class LoadMapNode(Node):
         except Exception as e:
             self.get_logger().error(f"Error during map setup")
             self.destroy_node()
+
+    def handle_map_swap(self, request, response):
+        """Service handler for map swap requests"""
+        self.get_logger().info("Received request to swap map")
+        
+        try:
+            # If a specific map is requested, use it
+            if request.map_file_path:
+                new_map_path = request.map_file_path
+                self.get_logger().info(f"Loading specific map: {new_map_path}")
+            # Otherwise, cycle through available maps
+            else:
+                if len(self.available_maps) <= 1:
+                    response.success = False
+                    response.message = "No alternative maps available"
+                    return response
+                
+                # Select next map in the list
+                self.current_map_index = (self.current_map_index + 1) % len(self.available_maps)
+                new_map_path = self.available_maps[self.current_map_index]
+                self.get_logger().info(f"Cycling to next map: {new_map_path}")
+            
+            # Update the XODR path
+            self.TRACK_XODR = new_map_path
+            
+            # Reload the map
+            self.setup_map()
+            
+            response.success = True
+            response.message = f"Successfully loaded map: {os.path.basename(new_map_path)}"
+            return response
+            
+        except Exception as e:
+            self.get_logger().error(f"Error swapping map: {str(e)}")
+            response.success = False
+            response.message = f"Failed to swap map: {str(e)}"
+            return response
 
     def extract_track_waypoints(self):
         """Extract waypoints and calculate track length"""
