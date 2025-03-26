@@ -23,6 +23,7 @@ from .ML import parameters
 from .ML.parameters import *
 # from .db.mongo_connection import init_db, close_db
 from .db import mongo_connection
+
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
@@ -174,8 +175,6 @@ class PPOModelNode(Node):
                         
         self.ppo_agent = ppo_agent.PPOAgent(summary_writer=self.summary_writer)
 
-        
-        # NEW CODE - v2.1.3
         if MODEL_LOAD:
             if CHECKPOINT_FILE and LOAD_STATE_DICT_FROM_RUN:
                 raise ValueError("MODEL_LOAD is True but both CHECKPOINT_FILE and LOAD_STATE_DICT_FROM_RUN are set. Please choose one. \nTo continue a run, set CHECKPOINT_FILE to the wanted run directory and set LOAD_STATE_DICT_FROM_RUN to None. \nTo load state dict from another run, set CHECKPOINT_FILE to None, set LOAD_STATE_DICT_FROM_RUN to the wanted run directory, and don't froget to set the wanted version in VERSION.\n See more info in the README.")
@@ -195,9 +194,8 @@ class PPOModelNode(Node):
             elif LOAD_STATE_DICT_FROM_RUN:
                 # Load weights from another run into a new one
                 self.create_new_run_dir(load_from_run=LOAD_STATE_DICT_FROM_RUN)
-                # add /state_dict to the path
-                state_dict_dir_path = os.path.join(LOAD_STATE_DICT_FROM_RUN, "state_dict")
-                self.ppo_agent.load_model_and_optimizers(state_dict_dir_path)  # Load weights
+                state_dict_dir_path = os.path.join(LOAD_STATE_DICT_FROM_RUN, "state_dict") # add /state_dict to the path
+                self.ppo_agent.load_model_and_optimizers(state_dict_dir_path)
                 self.get_logger().info(f"🆕 Started new run ({VERSION}), loaded weights from: {LOAD_STATE_DICT_FROM_RUN}")
 
             else:
@@ -206,11 +204,7 @@ class PPOModelNode(Node):
         else:
             self.create_new_run_dir()
             self.get_logger().info(f"🆕 Started new training run in: {self.run_dir}")
-        
-        
-        self.get_logger().info(f"Initial action std: {self.ppo_agent.actor.log_std.exp().detach().cpu().numpy()}") # To check that log_std.exp() is around ACTION_STD_INIT:
-
-        
+                    
 
         # Create client for the waypoints service
         self.waypoints_client = self.create_client(
@@ -351,7 +345,7 @@ class PPOModelNode(Node):
         )
 
     ##################################################################################################
-    #                                       TRAINING AND TESTING
+    #                                       TRAINING
     ##################################################################################################
 
     def training(self, msg):
@@ -393,7 +387,7 @@ class PPOModelNode(Node):
                         self.log_step_metrics(actor_loss, critic_loss, entropy)
                         self.log_system_metrics()
                     except RuntimeError as e:
-                        # Handle CUDA errors more gracefully
+                        # Handle CUDA errors
                         self.get_logger().error(f"CUDA Error during learning: {e}")
                         # Try to recover - empty cache and continue
                         if torch.cuda.is_available():
@@ -421,6 +415,10 @@ class PPOModelNode(Node):
             self.save_training_state(self.run_dir)
             self.reset_run()
             self.episode_counter += 1
+
+    ##################################################################################################
+    #                                       TESTING
+    ##################################################################################################
 
     def testing(self, msg):
         if self.timestep_counter < TEST_TIMESTEPS:
@@ -474,7 +472,6 @@ class PPOModelNode(Node):
     #                                   CHECKPOINTING AND LOGGING
     ##################################################################################################
 
-    
     def save_training_state(self, run_dir):
         """
         Saves the model state dicts, optimizers, and metadata.
@@ -510,7 +507,6 @@ class PPOModelNode(Node):
         except Exception as e:
             self.get_logger().error(f"❌ Metadata not saved: {e}")
         
-
     def load_training_metadata(self, state_dict_dir):
         try:
             meta_path = os.path.join(state_dict_dir, "meta.json")
@@ -604,8 +600,7 @@ class PPOModelNode(Node):
             self.error_logs_pub.publish(msg)
         except Exception as e:
             self.get_logger().error(f"Failed to publish error log: {e}")
-        
-    
+           
     def log_episode_metrics(self):
         log_file = os.path.join(self.log_dir, "training_log.csv" if TRAIN else "testing_log.csv")
         row = {
@@ -631,7 +626,6 @@ class PPOModelNode(Node):
         self.summary_writer.add_scalar(f"{prefix}/Episode Length", self.current_step_in_episode, self.episode_counter)
         self.summary_writer.add_scalar(f"{prefix}/Action Std", self.ppo_agent.action_std, self.episode_counter)
         
-        # Publish episode metrics
     def log_and_publish_episode_metrics(self):
         metrics = {
         "episode": self.episode_counter,
@@ -647,7 +641,6 @@ class PPOModelNode(Node):
         msg = String()
         msg.data = json.dumps(metrics)
         self.episode_metrics_pub.publish(msg)
-    
     
     def log_and_publish_performance_metrics(self):    
         # Publish performance metrics
@@ -713,7 +706,6 @@ class PPOModelNode(Node):
         self.summary_writer.add_scalar(f"{prefix}/Episode Length", self.current_step_in_episode, self.episode_counter)
         self.summary_writer.add_scalar(f"{prefix}/Action Std", self.ppo_agent.action_std, self.episode_counter)
         
-        # Publish episode metrics
     def log_and_publish_episode_metrics(self):
         metrics = {
         "episode": self.episode_counter,
@@ -729,7 +721,6 @@ class PPOModelNode(Node):
         msg = String()
         msg.data = json.dumps(metrics)
         self.episode_metrics_pub.publish(msg)
-    
     
     def log_and_publish_performance_metrics(self):    
         # Publish performance metrics
@@ -1079,8 +1070,6 @@ class PPOModelNode(Node):
 
         print("✅ Global seed and determinism setup complete.")
     
-    
-    # NEW CODE - v2.1.3
     def create_new_run_dir(self, load_from_run=None):
         
         version_dir = os.path.join(PPO_CHECKPOINT_DIR, VERSION)
@@ -1112,7 +1101,6 @@ class PPOModelNode(Node):
         self.summary_writer.close()
         self.get_logger().info("SummaryWriter closed.")
     
-    
     def destroy_node(self):
         if hasattr(self, 'db'):
             mongo_connection.close_db()
@@ -1125,7 +1113,6 @@ def main(args=None):
         rclpy.spin(node)
     except KeyboardInterrupt:
         node.save_training_state(node.run_dir)
-        # node.save_episode_trajectory()
     finally:
         node.destroy_node()
         node.shutdown_writer()
