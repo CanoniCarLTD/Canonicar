@@ -74,6 +74,8 @@ services:
       tail -f /dev/null"
     volumes:
       - ./ros_bridge/src:/ros_bridge/src
+      - ./.env:/ros_bridge/src/.env
+      # - ./db:/ros_bridge/src/db
     # deploy:
     #   resources:
     #     reservations:

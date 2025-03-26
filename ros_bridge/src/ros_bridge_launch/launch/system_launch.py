@@ -129,7 +129,6 @@ def generate_launch_description():
     ld.add_action(vehicle_control_node)
     ld.add_action(delayed_spawn_vehicle)
     ld.add_action(delayed_data_collector)
-    ld.add_action(vehicle_control_node)
     ld.add_action(db_service_node)
     
     return ld

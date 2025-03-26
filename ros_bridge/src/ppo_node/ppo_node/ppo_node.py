@@ -13,7 +13,7 @@ import random
 import csv
 from torch.utils.tensorboard import SummaryWriter
 import math
-import psutilimport 
+import psutil
 import json
 from std_msgs.msg import String
 from datetime import datetime
@@ -21,9 +21,8 @@ from datetime import datetime
 from .ML import ppo_agent
 from .ML import parameters
 from .ML.parameters import *
-from pymongo import MongoClient
-from .db.mongo_connection import init_db, close_db
-
+# from .db.mongo_connection import init_db, close_db
+from .db import mongo_connection
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
@@ -31,14 +30,15 @@ class PPOModelNode(Node):
     def __init__(self):
         super().__init__("ppo_model_node")
         
-        print("Device: ", device)
+        self.get_logger().info(f"Device is:{device} ")
         
         self.train = TRAIN
         self.prefix = "Train" if TRAIN else "Test"
 
-        self.db = init_db()
-        if not self.db:
-            self.get_logger().error('Failed to connect to MongoDB')
+        self.db = mongo_connection.init_db()
+        self.get_logger().info(f"mongo DB is: {self.db}")
+        if self.db is None:
+            self.get_logger().error('Failed to connect to MongoDB1')        
         train = TRAIN
         self.current_step_in_episode = 0
 
@@ -532,7 +532,8 @@ class PPOModelNode(Node):
             "log_std": log_std,
             "current_ep_reward": self.current_ep_reward,
             "current_step_in_episode": self.current_step_in_episode,
-        }
+        }        
+        # self.save_to_mongodb(meta)
         try:
             meta_path = os.path.join(state_dict_dir, "meta.json")
             with open(meta_path, "w") as f:
@@ -541,23 +542,6 @@ class PPOModelNode(Node):
         except Exception as e:
             self.get_logger().error(f"❌ Metadata not saved: {e}")
         
-        # Save metadata to MongoDB
-        self.save_metadata_to_mongo(meta)
-
-    def save_metadata_to_mongo(self, meta):
-
-        try:
-            if init_db():
-                client = MongoClient(os.getenv("MONGO_CONNECTION_STRING", "mongodb://localhost:27017/"))
-                db = client['ppo_training']
-                collection = db['metadata']
-                collection.insert_one(meta)
-                self.get_logger().info(f"✅ Metadata saved to MongoDB: {meta}")
-                close_db()
-            else:
-                self.get_logger().error("❌ Failed to initialize MongoDB connection.")
-        except Exception as e:
-            self.get_logger().error(f"❌ Metadata not saved to MongoDB: {e}")
 
     def load_training_metadata(self, state_dict_dir):
         try:
@@ -623,18 +607,21 @@ class PPOModelNode(Node):
             
             # Save metrics to MongoDB using the existing connection
             try:
-                if self.db:
-                    collection = self.db['step_metrics']
-                    collection.insert_one(metrics)
-                    self.get_logger().info(f"✅ Step metrics saved to MongoDB: {metrics}")
-                else:
-                    self.get_logger().error("❌ MongoDB connection is not initialized.")
+                self.save_to_mongodb(schema=metrics)
             except Exception as e:
                 self.get_logger().error(f"❌ Step metrics not saved to MongoDB: {e}")
         
         except Exception as e:
             self.get_logger().error(f"Failed to log step metrics: {e}")
             self.log_error("log_step_metrics", str(e))
+
+    def save_to_mongodb(self, schema):
+        if self.db is not None:            
+            collection = self.db['episodes']
+            collection.insert_one(schema)
+            self.get_logger().info(f"✅ Step metrics saved to MongoDB: {schema}")
+        else:
+            self.get_logger().error("❌ MongoDB connection is not initialized.")
     
     def log_error(self, component, message):
         """Log error to MongoDB through DB service"""
@@ -660,6 +647,9 @@ class PPOModelNode(Node):
             "episode_length": self.current_step_in_episode,
             "termination_reason": self.termination_reason
         }
+        
+        # self.save_to_mongodb(schema=row)
+        
         write_header = not os.path.exists(log_file)
         with open(log_file, "a", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=row.keys())
@@ -1097,7 +1087,7 @@ class PPOModelNode(Node):
     
     def destroy_node(self):
         if hasattr(self, 'db'):
-            close_db(self.db.client)
+            mongo_connection.close_db()
         super().destroy_node()
     
 def main(args=None):
