@@ -10,7 +10,13 @@ setup(
         ("share/ament_index/resource_index/packages", ["resource/" + package_name]),
         ("share/" + package_name, ["package.xml"]),
     ],
-    install_requires=["setuptools"],
+    install_requires=[
+        'setuptools',
+        'pymongo',
+        'python-dotenv',
+        'torch',
+        'numpy'
+    ],
     zip_safe=True,
     maintainer="Etaizil",
     maintainer_email="etai444@gmail.com",
