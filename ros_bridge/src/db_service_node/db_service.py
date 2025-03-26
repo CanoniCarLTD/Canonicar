@@ -8,19 +8,18 @@ import os
 from db.schemas.episode_schema import Episode
 from db.schemas.performance_schema import Performance
 from db.schemas.error_log_schema import ErrorLog
+from db.mongo_connection import init_db, close_db
 
 class DBServiceNode(Node):
     def __init__(self):
         super().__init__('db_service_node')
         
-        # Connect to MongoDB using environment variables
-        try:
-            mongo_url = os.getenv("MONGO_URL", "mongodb://localhost:27017")
-            connect("canonicar", host=mongo_url)
-            self.get_logger().info('Connected to MongoDB')
-        except Exception as e:
-            self.get_logger().error(f'Failed to connect to MongoDB: {e}')
+        # Connect to MongoDB using the init_db function
+        if not init_db():
+            self.get_logger().error('Failed to connect to MongoDB')
             return
+
+        self.get_logger().info('Connected to MongoDB')
 
         # Create subscribers for PPO metrics
         self.create_subscription(

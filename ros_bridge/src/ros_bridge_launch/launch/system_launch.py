@@ -118,11 +118,7 @@ def generate_launch_description():
         package='db_service_node',
         executable='db_service',
         name='db_service_node',
-        output='screen',
-        parameters=[{
-            'mongo_url': os.getenv('MONGO_URL', 'mongodb://localhost:27017'),
-            'mongo_db': os.getenv('MONGO_DB', 'canonicar')
-        }]
+        output='screen'
     )
 
     ld = LaunchDescription()

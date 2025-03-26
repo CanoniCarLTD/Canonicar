@@ -8,16 +8,21 @@ import numpy as np
 import sys
 import os
 import json
-from datetime import datetime
+from datetime import datetime, time
 import random
 import csv
 from torch.utils.tensorboard import SummaryWriter
 import math
-import psutil
+import psutilimport 
+import json
+from std_msgs.msg import String
+from datetime import datetime
 
 from .ML import ppo_agent
 from .ML import parameters
 from .ML.parameters import *
+from pymongo import MongoClient
+from .db.mongo_connection import init_db, close_db
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -31,6 +36,10 @@ class PPOModelNode(Node):
         self.train = TRAIN
         self.prefix = "Train" if TRAIN else "Test"
 
+        self.db = init_db()
+        if not self.db:
+            self.get_logger().error('Failed to connect to MongoDB')
+        train = TRAIN
         self.current_step_in_episode = 0
 
         self.data_sub = self.create_subscription(
@@ -117,12 +126,34 @@ class PPOModelNode(Node):
         self.lap_start_time = None
         self.lap_end_time = None
         self.lap_time = None
+
+        
+        self.episode_start_time = datetime.now()
+        self.current_step_in_episode = 0
+        self.last_actor_loss = None
+        self.last_critic_loss = None
+        self.last_entropy = None
+
+
+        self.collision_sub = self.create_subscription(
+            String,
+            "/collision_detected",
+            self.collision_callback,
+            10
+        )
+
+        # Create client for the waypoints service
+        self.waypoints_client = self.create_client(
+            GetTrackWaypoints, 'get_track_waypoints'
+        )
+        
+        # Check if the service is available
+        while not self.waypoints_client.wait_for_service(timeout_sec=1.0):
+            self.get_logger().info('Waiting for track waypoints service...')
         self.needs_progress_reset = False
 
         self.stagnation_counter = 0
-        
-        
-        # Initialize PPO Agent (loads from checkpoint if available)
+                        
         self.ppo_agent = ppo_agent.PPOAgent(summary_writer=self.summary_writer)
 
         
@@ -509,6 +540,24 @@ class PPOModelNode(Node):
             self.get_logger().info(f"Metadata saved: {meta}")
         except Exception as e:
             self.get_logger().error(f"❌ Metadata not saved: {e}")
+        
+        # Save metadata to MongoDB
+        self.save_metadata_to_mongo(meta)
+
+    def save_metadata_to_mongo(self, meta):
+
+        try:
+            if init_db():
+                client = MongoClient(os.getenv("MONGO_CONNECTION_STRING", "mongodb://localhost:27017/"))
+                db = client['ppo_training']
+                collection = db['metadata']
+                collection.insert_one(meta)
+                self.get_logger().info(f"✅ Metadata saved to MongoDB: {meta}")
+                close_db()
+            else:
+                self.get_logger().error("❌ Failed to initialize MongoDB connection.")
+        except Exception as e:
+            self.get_logger().error(f"❌ Metadata not saved to MongoDB: {e}")
 
     def load_training_metadata(self, state_dict_dir):
         try:
@@ -553,10 +602,55 @@ class PPOModelNode(Node):
         
         self.summary_writer.add_scalar("Loss/actor", actor_loss, self.timestep_counter)
         self.summary_writer.add_scalar("Loss/critic", critic_loss, self.timestep_counter)
-        self.summary_writer.add_scalar("Exploration/entropy", entropy, self.timestep_counter)
-        self.summary_writer.add_scalar("Rewards/step reward", self.reward, self.timestep_counter)
-        self.summary_writer.add_scalar("Rewards/cumulative reward", self.current_ep_reward, self.timestep_counter)
-
+        self.summary_writer.add_scalar("Entropy", entropy, self.timestep_counter)
+        self.summary_writer.add_scalar("Exploration/action_std", self.ppo_agent.action_std, self.timestep_counter)
+        self.summary_writer.add_scalar("Rewards/step_reward", self.reward, self.timestep_counter)
+        self.summary_writer.add_scalar("Rewards/cumulative_reward", self.current_ep_reward, self.timestep_counter)
+        
+        try:
+            # Create metrics message
+            metrics = {
+                "episode": self.episode_counter,
+                "step": self.timestep_counter,
+                "timestep": self.timestep_counter * 64,  # Assuming batch size is 64
+                "actor_loss": float(actor_loss) if actor_loss is not None else None,
+                "critic_loss": float(critic_loss) if critic_loss is not None else None,
+                "entropy": float(entropy) if entropy is not None else None,
+                "action_std": float(self.ppo_agent.action_std),
+                "step_reward": float(self.current_ep_reward / max(1, self.current_step_in_episode)),
+                "cumulative_reward": float(self.current_ep_reward)
+            }
+            
+            # Save metrics to MongoDB using the existing connection
+            try:
+                if self.db:
+                    collection = self.db['step_metrics']
+                    collection.insert_one(metrics)
+                    self.get_logger().info(f"✅ Step metrics saved to MongoDB: {metrics}")
+                else:
+                    self.get_logger().error("❌ MongoDB connection is not initialized.")
+            except Exception as e:
+                self.get_logger().error(f"❌ Step metrics not saved to MongoDB: {e}")
+        
+        except Exception as e:
+            self.get_logger().error(f"Failed to log step metrics: {e}")
+            self.log_error("log_step_metrics", str(e))
+    
+    def log_error(self, component, message):
+        """Log error to MongoDB through DB service"""
+        try:
+            error_data = {
+                "component": f"ppo_node.{component}",
+                "message": message
+            }
+            
+            msg = String()
+            msg.data = json.dumps(error_data)
+            self.error_logs_pub.publish(msg)
+        except Exception as e:
+            self.get_logger().error(f"Failed to publish error log: {e}")
+        
+    
     def log_episode_metrics(self):
         log_file = os.path.join(self.log_dir, "training_log.csv" if TRAIN else "testing_log.csv")
         row = {
@@ -999,6 +1093,12 @@ class PPOModelNode(Node):
     def shutdown_writer(self):
         self.summary_writer.close()
         self.get_logger().info("SummaryWriter closed.")
+    
+    
+    def destroy_node(self):
+        if hasattr(self, 'db'):
+            close_db(self.db.client)
+        super().destroy_node()
     
 def main(args=None):
     rclpy.init(args=args)
