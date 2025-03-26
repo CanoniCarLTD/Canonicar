@@ -48,7 +48,7 @@ class LoadMapNode(Node):
         )
         
         self.track_waypoints = []  # Will store (x, y) waypoints
-        self.track_length = 0.0    # Total track length
+        self.track_length = 0.0    # Total track length 
 
         self.available_maps = []
         self.current_map_index = 0
@@ -98,6 +98,10 @@ class LoadMapNode(Node):
             self.get_logger().info(f"Using improved OpenDRIVE generation parameters")
             self.client.generate_opendrive_world(opendrive_data, opendrive_params)
             self.world = self.client.get_world()
+            
+            spectator = self.world.get_spectator()
+            spectator.set_transform(carla.Transform(carla.Location(x=-10, y=-3, z=9), carla.Rotation(pitch=-20, yaw=35, roll=0)))
+            
             sleep(2)
             self.map = self.world.get_map()
             self.world.set_weather(carla.WeatherParameters.ClearNoon)
