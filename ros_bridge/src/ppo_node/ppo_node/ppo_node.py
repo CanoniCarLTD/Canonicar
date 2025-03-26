@@ -101,22 +101,6 @@ class PPOModelNode(Node):
         # Initialize PPO Agent (loads from checkpoint if available)
         self.ppo_agent = ppo_agent.PPOAgent(summary_writer=self.summary_writer)
 
-        # TO BE DEPRECATED - OLD CODE v2.1.2 and earlier
-        
-        # if MODEL_LOAD and CHECKPOINT_FILE:
-        #     self.run_dir = CHECKPOINT_FILE
-        #     if os.path.exists(self.run_dir):
-        #         self.get_logger().info(f"📂 Loading from checkpoint: {self.run_dir}")
-        #         self.load_training_state(self.run_dir)
-        #         self.log_dir = os.path.join(self.run_dir, "logs")
-        #         self.tensorboard_dir = os.path.join(self.run_dir, "tensorboard")
-        #         self.summary_writer = SummaryWriter(log_dir=self.tensorboard_dir)
-        #         self.ppo_agent.summary_writer = self.summary_writer
-        #     else:
-        #         raise FileNotFoundError(f"❌ Checkpoint file not found: {self.run_dir}")
-        # else:
-        #     self.create_new_run_dir()
-        #     self.get_logger().info(f"🆕 Starting a new training run in: {self.run_dir}")
         
         # NEW CODE - v2.1.3
         if MODEL_LOAD:
@@ -899,56 +883,6 @@ class PPOModelNode(Node):
 
         print("✅ Global seed and determinism setup complete.")
     
-    # TO BE DEPRECATED - OLD CODE v2.1.2 and earlier
-    
-    # def create_new_run_dir(self, base_dir=None):
-    #     version_dir = os.path.join(PPO_CHECKPOINT_DIR, VERSION)
-    #     os.makedirs(version_dir, exist_ok=True)
-    
-    #     if base_dir:
-    #         # Extract the serial number from the base_dir and increment it
-    #         base_serial = int(base_dir.split('_')[-1])
-    #         serial = base_serial + 1
-    #     else:
-    #         existing = [d for d in os.listdir(version_dir) if d.startswith("run_")]
-    #         serial = len(existing) + 1
-    
-    #     timestamp = datetime.now().strftime("%Y%m%d")
-    #     self.run_name = f"run_{timestamp}_{serial:04d}"
-    #     self.run_dir = os.path.join(version_dir, self.run_name)
-    #     os.makedirs(self.run_dir, exist_ok=True)
-    
-    #     # Subfolders
-    #     self.state_dict_dir = os.path.join(self.run_dir, "state_dict")
-    #     os.makedirs(self.state_dict_dir, exist_ok=True)
-    
-    #     self.log_dir = os.path.join(self.run_dir, "logs")
-    #     os.makedirs(self.log_dir, exist_ok=True)
-    
-    
-    #     self.tensorboard_dir = os.path.join(self.run_dir, "tensorboard")
-    #     os.makedirs(self.tensorboard_dir, exist_ok=True)
-    #     self.summary_writer = SummaryWriter(log_dir=self.tensorboard_dir)
-    #     self.ppo_agent.summary_writer = self.summary_writer
-        
-    #     # Log hyperparameters
-    #     hparams = {
-    #         "actor learning_rate": ACTOR_LEARNING_RATE,
-    #         "critic learning_rate": CRITIC_LEARNING_RATE,
-    #         "learn_every_N_steps": LEARN_EVERY_N_STEPS,
-    #         "minibatch_size": MINIBATCH_SIZE,
-    #         "gamma": GAMMA,
-    #         "lambda_gae": LAMBDA_GAE,
-    #         "entropy_coef": ENTROPY_COEF,
-    #         "policy_clip": POLICY_CLIP,
-    #         "input_dim": PPO_INPUT_DIM,
-    #         "episode_length": EPISODE_LENGTH,
-    #         "total_timesteps": TOTAL_TIMESTEPS,
-    #     }
-    #     self.summary_writer.add_text(
-    #         "hyperparameters",
-    #         "|param|value|\n|-|-|\n%s" % "\n".join([f"|{k}|{v}|" for k, v in hparams.items()])
-    #     )
     
     # NEW CODE - v2.1.3
     def create_new_run_dir(self, load_from_run=None):

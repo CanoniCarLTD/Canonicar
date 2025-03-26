@@ -1,1 +1,1 @@
-{"episode_counter": 36, "timestep_counter": 790, "log_std": [-1.5950355529785156, -1.5950355529785156, -1.5950355529785156], "current_ep_reward": -0.8049999999999999, "current_step_in_episode": 14.0}
+{"episode_counter": 440, "timestep_counter": 14518, "log_std": [-1.3380777835845947, -1.3380781412124634, -1.3380779027938843], "current_ep_reward": 5.747371088603437, "current_step_in_episode": 27.0}
