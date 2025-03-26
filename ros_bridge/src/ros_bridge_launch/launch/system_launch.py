@@ -114,6 +114,13 @@ def generate_launch_description():
         ]
     )
 
+    db_service_node = Node(
+        package='db_service_node',
+        executable='db_service',
+        name='db_service_node',
+        output='screen'
+    )
+
     ld = LaunchDescription()
     ld.add_action(host_arg)
     ld.add_action(port_arg)
@@ -122,5 +129,6 @@ def generate_launch_description():
     ld.add_action(vehicle_control_node)
     ld.add_action(delayed_spawn_vehicle)
     ld.add_action(delayed_data_collector)
+    ld.add_action(db_service_node)
     
     return ld

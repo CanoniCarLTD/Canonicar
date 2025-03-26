@@ -1,26 +1,77 @@
 # database.py
-from mongoengine import connect, disconnect
+from pymongo import MongoClient, ASCENDING
 import os
 from dotenv import load_dotenv
+import logging
 
-load_dotenv()
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
+# Global MongoDB client
+_client = None
+_db = None
+
+def get_client():
+    """Get singleton MongoDB client"""
+    global _client
+    if _client is None:
+        init_db()
+    return _client
+
+def get_db():
+    """Get MongoDB database"""
+    global _db
+    if _db is None:
+        init_db()
+    return _db
 
 def init_db():
+    """Initialize MongoDB connection"""
+    global _client, _db
+    
+    load_dotenv()
     try:
-        # Connect to MongoDB and specify the database name
-        connect("canonicar", host=os.getenv("MONGO_URL"))
+        print("hello from init_db")
+        # Use Atlas connection string from env
+        mongo_url = os.getenv("MONGO_CONNECTION_STRING", "mongodb://localhost:27017")
+        _client = MongoClient(
+            mongo_url,
+            retryWrites=True,
+            w="majority",
+            connectTimeoutMS=5000,
+            serverSelectionTimeoutMS=5000
+        )
+        
+        # Test connection
+        _client.admin.command('ping')
+        
+        # Set database
+        _db = _client["canonicar"]
+        
+        # Initialize collections with indexes
+        _db.episodes.create_index([("episode_id", ASCENDING)], unique=True)
+        _db.training_metrics.create_index([("episode", ASCENDING), ("step", ASCENDING)])
+        _db.checkpoints.create_index([("checkpoint_id", ASCENDING)], unique=True)
+        _db.performance.create_index([("performance_id", ASCENDING)], unique=True)
+        _db.error_logs.create_index([("timestamp", ASCENDING)])
+        
+        logger.info("Successfully connected to MongoDB Atlas")
         return True
     except Exception as e:
-        # If there's an error, print the exception and return None
-        print(f"An error occurred while connecting to MongoDB: {e}")
-        return None
+        logger.error(f"An error occurred while connecting to MongoDB Atlas: {e}")
+        _client = None
+        _db = None
+        return False
 
-
-# Close the connection to MongoDB
 def close_db():
+    """Close MongoDB connection"""
+    global _client, _db
     try:
-        disconnect("canonicar")
-        print("Disconnected from MongoDB")
+        if _client:
+            _client.close()
+            _client = None
+            _db = None
+            logger.info("Disconnected from MongoDB")
     except Exception as e:
-        print(f"An error occurred while disconnecting from MongoDB: {e}")
+        logger.error(f"An error occurred while disconnecting from MongoDB: {e}")
