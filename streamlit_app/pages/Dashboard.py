@@ -5,8 +5,6 @@ import numpy as np
 # Title
 st.title("Dashboard")
 
-st.set_page_config(page_title="Canonicar Dashboard", page_icon="🚗", layout="wide")
-
 # Example 1: Reward Trend Over Episodes
 episodes = np.arange(1, 101)
 rewards = np.sin(episodes / 10) * 10 + episodes  # Simulated reward data
