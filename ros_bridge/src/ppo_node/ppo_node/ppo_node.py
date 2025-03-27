@@ -386,8 +386,8 @@ class PPOModelNode(Node):
     ##################################################################################################
 
     def training(self, msg):
-        if not hasattr(self, 'ready_to_collect') or not self.ready_to_collect:
-            return
+        # if not hasattr(self, 'ready_to_collect') or not self.ready_to_collect:
+        #     return
             
         if self.timestep_counter < self.total_timesteps:
             self.state = np.array(msg.data, dtype=np.float32)
