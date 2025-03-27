@@ -58,3 +58,11 @@ Removed GNSS sensor - Begin new training from scratch
 ### v3.1.0
 
 Modified map swapping, Fixed errors regarding to vehicle respawn and destroy sensors function.
+
+### v3.1.1
+
+Changed Hyperparameters:
+- LEARN_EVERY_N_STEPS = 128 -> 512
+- MINIBATCH_SIZE = 32 -> 64
+- EPISODE_LENGTH = 640 -> 1024
+- EPISODES = 1e5 -> 1e8 (Negligible at the moment)
