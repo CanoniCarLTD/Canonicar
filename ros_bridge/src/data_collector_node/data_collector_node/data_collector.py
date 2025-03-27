@@ -2,6 +2,7 @@ import os
 import rclpy
 import math
 import struct
+import time
 
 from carla import Client
 from rclpy.node import Node
@@ -11,8 +12,6 @@ import numpy as np
 from message_filters import ApproximateTimeSynchronizer, Subscriber
 import torch
 import torch.nn as nn
-from ament_index_python.packages import get_package_share_directory
-import torchvision.transforms as transforms
 from std_msgs.msg import Float32MultiArray, String
 from vision_model import VisionProcessor
 
@@ -21,68 +20,120 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 class DataCollector(Node):
     def __init__(self):
         super().__init__("data_collector")
-        try:
-            self.prev_time = None  # Store timestamp
-        except Exception as e:
-            self.get_logger().error(f"Error connecting to CARLA server")
-            return
-
+        
+        # Flag to track collector readiness
+        self.ready_to_collect = False
+        self.vehicle_id = None
+        self.last_sensor_timestamp = time.time()
+        self.setup_done = False
+        
         self.data_buffer = []  # List of dictionaries to store synchronized data
-        self.setup_subscribers()
-        self.vision_processor = VisionProcessor(device= device)
-        self.get_logger().info("DataCollector Node initialized.")
-
-        self.lap_subscription = self.create_subscription(
+        
+        # Create state subscriber first to handle simulation status
+        self.state_subscription = self.create_subscription(
             String,
-            "/lap_completed",  # Topic name for lap completion
-            self.lap_ending_callback,  # Callback function
-            10,  # QoS
+            '/simulation/state',
+            self.handle_system_state,
+            10
         )
+        
+        # Vehicle ready subscription
+        self.vehicle_ready_subscription = self.create_subscription(
+            String,
+            '/vehicle_ready',
+            self.handle_vehicle_ready,
+            10
+        )
+        
+        
         self.publish_to_PPO = self.create_publisher(
             Float32MultiArray, "/data_to_ppo", 10
         )
-
-    def lap_ending_callback(self, msg):
-        """Callback function for lap completion."""
-        self.get_logger().info("Lap completed.")
-        request_msg = String()
-        request_msg.data = "DataCollector is ready"
-        self.get_logger().info("Data collector is ready to start the next lap.")
+        
+        # Setup vision processing
+        self.vision_processor = VisionProcessor(device=device)
+        
+        self.image_sub = Subscriber(self, Image, "/carla/rgb_front/image_raw")
+        self.lidar_sub = Subscriber(self, PointCloud2, "/carla/lidar/points")
+        self.imu_sub = Subscriber(self, Imu, "/carla/imu/imu")
+        
+        self.get_logger().info("DataCollector Node initialized. Waiting for vehicle...")
 
     def setup_subscribers(self):
-        qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.BEST_EFFORT)
-        self.get_logger().info("Setting up subscribers...")
+        """Set up subscribers once we verify the camera is publishing""" 
 
-        self.get_logger().info("Waiting for image data...")
-        self.image_sub = Subscriber(self, Image, "/carla/rgb_front/image_raw")
-        self.get_logger().info("Waiting for LiDAR data...")
-        self.lidar_sub = Subscriber(self, PointCloud2, "/carla/lidar/points")
-        self.get_logger().info("Waiting for IMU data...")
-        self.imu_sub = Subscriber(self, Imu, "/carla/imu/imu")
-
-        # self.lidar_sub, self.imu_sub
+        # Create synchronizer with more relaxed settings
         self.ats = ApproximateTimeSynchronizer(
             [self.image_sub, self.lidar_sub, self.imu_sub],
-            queue_size=100,
-            slop=0.1,  # Adjusted for better synchronization
+            queue_size=60,
+            slop=0.2,  # More relaxed time synchronization
         )
-
-        # Print information about the synchronizer
+        
+        # Register the callback immediately
         self.ats.registerCallback(self.sync_callback)
-        self.get_logger().info("Subscribers set up successfully.")
+        self.ready_to_collect = True
+        
+    def handle_system_state(self, msg):
+        """Handle changes in simulation state"""
+        state_msg = msg.data
+        
+        # Parse state
+        if ':' in state_msg:
+            state_name, details = state_msg.split(':', 1)
+        else:
+            state_name = state_msg
+        
+        # Handle different states
+        if state_name in ["RESPAWNING", "MAP_SWAPPING"]:
+            # Vehicle is being destroyed, stop data collection and clear buffers
+            self.ready_to_collect = False
+            self.setup_done = False
+            self.data_buffer.clear()
+            
+        elif state_name == "RUNNING":
+            # Only mark as running when we've actually received sensor data
+            if self.setup_done:
+                self.ready_to_collect = True
+                self.setup_subscribers()
+    
+    def handle_vehicle_ready(self, msg):
+        """Handle notification that a vehicle is ready"""
+        try:
+            self.vehicle_id = int(msg.data)
+            self.last_sensor_timestamp = time.time()
+            self.setup_subscribers()
+        except Exception as e:
+            self.get_logger().error(f"Error handling vehicle ready: {e}")
 
-    #   lidar_msg, imu_msg
+    
     def sync_callback(self, image_msg, lidar_msg, imu_msg):
-        processed_data = self.process_data(image_msg, lidar_msg, imu_msg)
-        self.data_buffer.append(processed_data)
+        """Process synchronized data"""
+        if not self.ready_to_collect:
+            return
+        try:
+            # Update timestamp to know sensors are active
+            self.last_sensor_timestamp = time.time()
+            
+            processed_data = self.process_data(image_msg, lidar_msg, imu_msg)
+            
+            # Publish to PPO node for training/inference
+            response = Float32MultiArray()
+            response.data = processed_data.tolist()
+            
+            if not np.isnan(processed_data).any():
+                self.publish_to_PPO.publish(response)
+            else:
+                self.get_logger().warn("State vector contains NaN values. Skipping...")
+                
+        except Exception as e:
+            self.get_logger().error(f"Error in sync callback: {e}")
 
-    def process_data(self,image_msg, lidar_msg, imu_msg):
-
+    def process_data(self, image_msg, lidar_msg, imu_msg):
+        """Process sensor data into state vector"""
         vision_features = self.process_vision_data(image_msg, lidar_msg)
         return self.aggregate_state_vector(
             vision_features,
-            self.process_imu(imu_msg),
-            #self.process_gnss(gnss_msg), # Will be removed in the future in v3.0.0
+            self.process_imu(imu_msg)
         )
 
     def process_vision_data(self, image_msg, lidar_msg):
@@ -116,84 +167,18 @@ class DataCollector(Node):
         ]
         return imu_data
 
-    # Will be removed in the future in v3.0.0
-    
-    # use geopy.distance for safer calculations.
-#     def process_gnss(self, gnss_msg):
-#         """Process GNSS data and compute velocity and heading."""
-#         latitude, longitude, altitude = (
-#             gnss_msg.latitude,
-#             gnss_msg.longitude,
-#             gnss_msg.altitude,
-#         )
-
-#         # Compute velocity using previous GNSS readings
-#         velocity = 0.0
-#         heading = 0.0
-
-#         if self.prev_gnss is not None and self.prev_time is not None:
-#             delta_time = (
-#                 self.get_clock().now() - self.prev_time
-#             ).nanoseconds / 1e9  # Convert to seconds
-#             delta_lat = latitude - self.prev_gnss[0]
-#             delta_lon = longitude - self.prev_gnss[1]
-
-#             # Approximate distance (assuming small delta lat/lon)
-#             delta_x = delta_lon * 111320  # Convert lon to meters
-#             delta_y = delta_lat * 110540  # Convert lat to meters
-#             distance = math.sqrt(delta_x**2 + delta_y**2)
-# #           if delta_time > 0:
-#             velocity = distance / delta_time  # Speed in meters per second
-
-#             # Compute heading (angle of movement)
-#             heading = (
-#                 math.degrees(math.atan2(delta_y, delta_x)) if distance > 0 else 0.0
-#             )
-
-#         # Update previous GNSS data
-#         self.prev_gnss = (latitude, longitude)
-#         self.prev_time = self.get_clock().now()
-
-#         return np.array([latitude, longitude, altitude, velocity, heading])
-
-    # vision_features, imu_features
     def aggregate_state_vector(self, vision_features, imu_features):
-
         """Aggregate features into a single state vector.""" 
-
-        # Assuming vision_features is 192 dimensions from the SensorFusionModel
-        # Total vector size: 192 (vision) + 6 (IMU) + 5 (GNSS) = 203
+        # Total vector size: 192 (vision) + 6 (IMU) = 198
         state_vector = np.zeros(198, dtype=np.float32)
         
         # Fill with vision features (fused RGB + LiDAR)
         state_vector[:192] = vision_features
 
-        # Add IMU data
+        # # Add IMU data
         state_vector[192:198] = imu_features
-
-        # Will be removed in the future in v3.0.0
-        
-        # Add GNSS data
-        # state_vector[198:203] = gnss_features[:5]  # Includes velocity and heading
-
-        response = Float32MultiArray()
-        response.data = state_vector.tolist()
-        # if theres a nan, throw an error
-        if np.isnan(state_vector).any():
-            self.get_logger().error("State vector contains NaN values.")
-        else:
-            self.publish_to_PPO.publish(response)
         
         return state_vector
-
-    def get_latest_data(self):
-        """Retrieve the most recent synchronized data."""
-        return self.data_buffer[-1] if self.data_buffer else None
-
-    def clear_buffer(self):
-        """Clear the stored data buffer."""
-        self.data_buffer.clear()
-
 
 def main(args=None):
     rclpy.init(args=args)
@@ -205,7 +190,6 @@ def main(args=None):
     finally:
         node.destroy_node()
         rclpy.shutdown()
-
 
 if __name__ == "__main__":
     main()
