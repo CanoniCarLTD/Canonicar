@@ -372,7 +372,6 @@ class PPOModelNode(Node):
         # Don't run the actual code here - just queue it
         self._queue_background_task(self._log_system_metrics_impl)
 
-    
     def log_step_metrics(self, actor_loss, critic_loss, entropy):
         """Queue step metrics logging to run in background"""
         # Don't run the actual code here - just queue it
@@ -845,7 +844,6 @@ class PPOModelNode(Node):
         self.retry_timer.cancel()
         self.request_track_waypoints()
 
-
     def handle_track_waypoints(self, future):
         """Handle waypoints response"""
         try:
@@ -868,7 +866,6 @@ class PPOModelNode(Node):
         except Exception as e:
             self.retry_timer = self.create_timer(2.0, self.retry_request_waypoints)
 
-
     def reset_progress_tracking(self):
         """Reset all progress-related variables"""
         if len(self.track_waypoints) == 0:
@@ -887,7 +884,6 @@ class PPOModelNode(Node):
         
         self.get_logger().info("Track progress variables fully reset for new track")
     
-
     def location_callback(self, msg):
         """Process vehicle location updates and calculate track progress"""
         if len(self.track_waypoints) == 0:
