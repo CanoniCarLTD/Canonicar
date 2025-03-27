@@ -47,8 +47,8 @@ class LoadMapNode(Node):
             GetTrackWaypoints, 'get_track_waypoints', self.handle_waypoints_request
         )
         
-        self.track_waypoints = []  # Will store (x, y) waypoints
-        self.track_length = 0.0    # Total track length 
+        self.track_waypoints = []  
+        self.track_length = 0.0 
 
         self.available_maps = []
         self.current_map_index = 0
@@ -58,6 +58,10 @@ class LoadMapNode(Node):
 
         self.map_swap_service = self.create_service(
             SwapMap, 'map_swap', self.handle_map_swap
+        )
+
+        self.state_publisher = self.create_publisher(
+            String, '/map/state', 10
         )
 
         if self.TRACK_XODR in self.available_maps:
@@ -79,6 +83,7 @@ class LoadMapNode(Node):
 
     def setup_map(self):
         try:
+            self.publish_state("LOADING")
             with open(self.TRACK_XODR, "r") as f:
                 opendrive_data = f.read()
             self.get_logger().info(
@@ -106,9 +111,6 @@ class LoadMapNode(Node):
             self.map = self.world.get_map()
             self.world.set_weather(carla.WeatherParameters.ClearNoon)
 
-            bounds = self.get_map_bounds()
-            self.get_logger().info(f"Map bounds: {bounds}")
-
             request_msg = String()
             request_msg.data = "Map is loaded"
 
@@ -120,43 +122,47 @@ class LoadMapNode(Node):
             self.get_logger().info(f"Extracted {len(self.track_waypoints)} waypoints from track")
             self.get_logger().info(f"Track length: {self.track_length:.2f} meters")
 
+            self.publish_state("READY")
+
         except Exception as e:
+            self.publish_state("ERROR")
             self.get_logger().error(f"Error during map setup")
             self.destroy_node()
 
+
+    def publish_state(self, state):
+        """Publish the current state of the map"""
+        msg = String()
+        msg.data = f"MAP_{state.upper()}"
+        self.state_publisher.publish(msg)
+
     def handle_map_swap(self, request, response):
         """Service handler for map swap requests"""
-        self.get_logger().info("Received request to swap map")
+        self.publish_state("SWAPPING")
         
         try:
-            # If a specific map is requested, use it
-            if request.map_file_path:
+            if request.map_file_path and os.path.exists(request.map_file_path):
                 new_map_path = request.map_file_path
-                self.get_logger().info(f"Loading specific map: {new_map_path}")
-            # Otherwise, cycle through available maps
             else:
-                if len(self.available_maps) <= 1:
-                    response.success = False
-                    response.message = "No alternative maps available"
-                    return response
-                
-                # Select next map in the list
-                self.current_map_index = (self.current_map_index + 1) % len(self.available_maps)
-                new_map_path = self.available_maps[self.current_map_index]
-                self.get_logger().info(f"Cycling to next map: {new_map_path}")
+                current_idx = self.current_map_index
+                next_idx = (current_idx + 1) % len(self.available_maps)
+                new_map_path = self.available_maps[next_idx]
             
-            # Update the XODR path
             self.TRACK_XODR = new_map_path
+            self.current_map_index = self.available_maps.index(new_map_path)
             
-            # Reload the map
             self.setup_map()
+            
+            self.extract_track_waypoints()
+            
+            self.publish_state("READY")
             
             response.success = True
             response.message = f"Successfully loaded map: {os.path.basename(new_map_path)}"
             return response
-            
+                
         except Exception as e:
-            self.get_logger().error(f"Error swapping map: {str(e)}")
+            self.publish_state("ERROR")
             response.success = False
             response.message = f"Failed to swap map: {str(e)}"
             return response
@@ -165,7 +171,6 @@ class LoadMapNode(Node):
         """Extract waypoints and calculate track length"""
         waypoints = self.map.generate_waypoints(2.0)  # Get waypoints every 2 meters
         
-        # Sort waypoints by their s-value (distance along the track)
         waypoints.sort(key=lambda wp: wp.s)
         
         self.track_waypoints = []
@@ -183,20 +188,25 @@ class LoadMapNode(Node):
             self.track_length += segment_length
 
     def handle_waypoints_request(self, request, response):
-        """Service handler for waypoint requests"""
-        self.get_logger().info("Received request for track waypoints")
-        
-        # Fill the response with waypoints data
-        response.waypoints_x = [wp[0] for wp in self.track_waypoints]
-        response.waypoints_y = [wp[1] for wp in self.track_waypoints]
-        response.track_length = float(self.track_length)
-        
-        self.get_logger().info(f"Returning {len(self.track_waypoints)} waypoints")
-        return response
+        """Service handler for track waypoints requests"""
+        try:
+            if not self.track_waypoints:
+                self.extract_track_waypoints()
+                    
+            # Fill response with waypoints
+            response.waypoints_x = [p[0] for p in self.track_waypoints]
+            response.waypoints_y = [p[1] for p in self.track_waypoints]
+            response.track_length = self.track_length
+            
+            return response
+                
+        except Exception as e:
+            self.get_logger().error(f"Error handling waypoints request: {str(e)}")
+            return response
 
     def visualize_track(self):
         """Create detailed track visualization with waypoint information"""
-        waypoints = self.map.generate_waypoints(2.0)  # Get waypoints every 1 meter
+        waypoints = self.map.generate_waypoints(2.0) 
 
         # Draw all waypoints
         for wp in waypoints:
@@ -209,7 +219,7 @@ class LoadMapNode(Node):
             )
 
     def get_map_bounds(self):
-        waypoints = self.map.generate_waypoints(1.0)  # Waypoints every 2 meters
+        waypoints = self.map.generate_waypoints(2.0)  # Waypoints every 2 meters
         min_x, max_x = float("inf"), float("-inf")
         min_y, max_y = float("inf"), float("-inf")
         for waypoint in waypoints:

@@ -114,6 +114,16 @@ def generate_launch_description():
         ]
     )
 
+    sim_state_node = Node(
+        package='sim_state_node',
+        executable='sim_state', 
+        name='simulation_coordinator',
+        output='screen',
+        parameters=[
+            {'max_collisions': 50}
+        ]
+    )
+
     db_service_node = Node(
         package='db_service_node',
         executable='db_service',
@@ -124,10 +134,11 @@ def generate_launch_description():
     ld = LaunchDescription()
     ld.add_action(host_arg)
     ld.add_action(port_arg)
-    ld.add_action(ppo_node)
     ld.add_action(run_load_map_node)
+    ld.add_action(sim_state_node)
     ld.add_action(vehicle_control_node)
     ld.add_action(delayed_spawn_vehicle)
+    ld.add_action(ppo_node)
     ld.add_action(delayed_data_collector)
     ld.add_action(db_service_node)
     

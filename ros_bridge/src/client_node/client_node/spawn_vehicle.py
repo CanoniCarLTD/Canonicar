@@ -6,7 +6,7 @@ import json
 import os
 from std_msgs.msg import Float32MultiArray
 from ament_index_python.packages import get_package_share_directory
-import time
+import time, random
 from std_msgs.msg import String
 from rclpy.qos import QoSProfile, ReliabilityPolicy
 from  ros_interfaces.srv import VehicleReady, RespawnVehicle, SwapMap
@@ -21,9 +21,6 @@ from sensors_data import (
     carla_lidar_to_ros_pointcloud2,
     carla_imu_to_ros_imu,
 )
-
-
-MAX_COLLISIONS = 50
 
 class SpawnVehicleNode(Node):
     def __init__(self):
@@ -71,17 +68,26 @@ class SpawnVehicleNode(Node):
             10
         )
 
+        self.vehicle_ready_pub = self.create_publisher(
+            String, '/vehicle_ready', 10
+        )
+
         self.location_publisher = self.create_publisher(
             Float32MultiArray, "/carla/vehicle/location", 10
-        )  # To data_process node
+        ) 
         self.timer = self.create_timer(0.1, self.publish_vehicle_location)
 
-            # Create vehicle_ready service client
         self.vehicle_ready_client = self.create_client(VehicleReady, 'vehicle_ready')
 
-        # Wait for the service to be available
         while not self.vehicle_ready_client.wait_for_service(timeout_sec=1.0):
             self.get_logger().info('Vehicle ready service not available, waiting...')
+
+        self.state_subscription = self.create_subscription(
+            String,
+            '/simulation/state',
+            self.handle_system_state,
+            10
+        )
  
     
         self.respawn_service = self.create_service(
@@ -97,57 +103,11 @@ class SpawnVehicleNode(Node):
             self.lap_callback,
             10,
         )
-
-        self.map_swap_client = self.create_client(
-            SwapMap, 'map_swap'
-        )
-
-        self.collision_counter = 0         
         
-        self.data_collector_ready = True
-        self.map_loaded = False
-
-        self.current_vehicle_index = 0
         self.spawn_objects_from_config()
 
 
-    def map_swap(self):
-        """Request a map swap when collision counter reaches threshold"""
-        if not self.map_swap_client.service_is_ready():
-            self.get_logger().warn("Map swap service not available")
-            return
-        
-        # Create and send the request
-        request = SwapMap.Request()
-        request.map_file_path = ""  # Empty to cycle through available maps
-        
-        # Send async request
-        future = self.map_swap_client.call_async(request)
-        
-        # Add a callback to process the response
-        future.add_done_callback(self.process_map_swap_response)
-        
-        # Reset collision counter
-        self.collision_counter = 0
-
-
-    def process_map_swap_response(self, future):
-        """Process the response from the map swap service"""
-        try:
-            response = future.result()
-            if response.success:
-                self.get_logger().info(f"Map swap successful: {response.message}")
-                # Wait for the map to load and then respawn the vehicle
-                self.create_timer(2.0, lambda: self.trigger_respawn("Map changed"), one_shot=True)
-            else:
-                self.get_logger().warn(f"Map swap failed: {response.message}")
-                self.collision_counter = 0
-        except Exception as e:
-            self.get_logger().error(f"Service call failed: {e}")
-
-
     def lap_callback(self, msg):
-        self.data_collector_ready = False
         self.get_logger().info(f"Lap completed! Destroy vehicle {self.vehicle_type}")
         self.destroy_actors()
 
@@ -209,7 +169,7 @@ class SpawnVehicleNode(Node):
 
             road_waypoints.sort(key=lambda wp: wp.s)
 
-            spawn_waypoint = road_waypoints[0]
+            spawn_waypoint = road_waypoints[3]
             self.get_logger().info(
                 f"Using waypoint at s={spawn_waypoint.s:.1f} for spawn"
             )
@@ -242,6 +202,8 @@ class SpawnVehicleNode(Node):
                 self.spawn_sensors(sensors)
                 
             self.notify_vehicle_ready()
+            self.world.tick()
+
             '''
                 AUTOPILOT
             '''
@@ -264,37 +226,78 @@ class SpawnVehicleNode(Node):
             msg.data = [location.x, location.y, location.z]
             self.location_publisher.publish(msg)
 
+    def handle_system_state(self, msg):
+        """Handle simulation state updates"""
+        state_msg = msg.data
+        
+        if ':' in state_msg:
+            state_name, details = state_msg.split(':', 1)
+        else:
+            state_name = state_msg
+        
+        if state_name == "VEHICLE_SPAWNING":
+            if (not self.vehicle or not self.vehicle.is_alive) and not self.respawn_in_progress:
+                self.get_logger().info("Vehicle spawn state detected, spawning new vehicle...")
+                self.respawn_in_progress = True
+                try:
+                    self.destroy_actors()
+                    self.spawn_objects_from_config()
+                finally:
+                    self.respawn_in_progress = False
+
+
+    def respawn_vehicle_callback(self, request, response):
+        """Handle respawn vehicle service calls"""
+        self.get_logger().info(f"Respawn vehicle requested: {request.reason}")
+        
+        try:
+            if self.respawn_in_progress:
+                response.success = False
+                response.message = "Respawn already in progress"
+                return response
+            
+            self.respawn_in_progress = True
+            self.destroy_actors()
+            
+            time.sleep(1.0)
+            
+            self.spawn_objects_from_config()
+
+            # Notify that vehicle is ready
+            if self.vehicle and self.vehicle.is_alive:
+                response.success = True
+                response.message = f"Vehicle successfully respawned after: {request.reason}"
+            else:
+                response.success = False
+                response.message = "Respawn failed: no valid vehicle created"
+            
+            self.respawn_in_progress = False
+            return response
+        except Exception as e:
+            self.respawn_in_progress = False
+            response.success = False
+            response.message = f"Respawn failed: {str(e)}"
+            return response
+        
+
     def notify_vehicle_ready(self):
         """Call the vehicle_ready service to notify the control node"""
         if not self.vehicle or not self.vehicle.is_alive:
-            self.get_logger().error("Cannot notify - no valid vehicle")
             return
             
         request = VehicleReady.Request()
         request.vehicle_id = self.vehicle.id
         
         self.get_logger().info(f"Notifying vehicle_control that vehicle {self.vehicle.id} is ready")
-        
-        # Call the service asynchronously
         future = self.vehicle_ready_client.call_async(request)
-        
-        # Add a callback to handle the service response
-        future.add_done_callback(self.vehicle_ready_callback)
 
-    def vehicle_ready_callback(self, future):
-        """Handle the response from the vehicle_ready service"""
-        try:
-            response = future.result()
-            if response.success:
-                self.get_logger().info(f"Vehicle control started successfully: {response.message}")
-            else:
-                self.get_logger().error(f"Failed to start vehicle control: {response.message}")
-        except Exception as e:
-            self.get_logger().error(f"Service call failed: {str(e)}")
+        ready_msg = String()
+        ready_msg.data = str(self.vehicle.id)
+        self.vehicle_ready_pub.publish(ready_msg)
 
 
     def _on_collision(self, event):
-        """Callback for collision sensor to help debug vehicle disappearances"""
+        """Callback for collision sensor"""
         collision_type = event.other_actor.type_id if event.other_actor else "unknown"
         collision_location = event.transform.location
 
@@ -303,71 +306,10 @@ class SpawnVehicleNode(Node):
             f"({collision_location.x:.1f}, {collision_location.y:.1f}, {collision_location.z:.1f})"
         )
 
-        self.collision_counter += 1
-        self.get_logger().info(f"Collision count: {self.collision_counter}/5")
-
         collision_msg = String()
         collision_msg.data = f"collision_with_{collision_type}"
         self.collision_publisher.publish(collision_msg)
 
-        # Check if we need to swap the map
-        if self.collision_counter >= MAX_COLLISIONS:
-            self.get_logger().info(f"Collision threshold reached ({self.collision_counter}). Swapping map...")
-            self.map_swap()
-
-        # Trigger vehicle respawn on collision
-        if not self.respawn_in_progress:
-            self.trigger_respawn(f"Collision with {collision_type}")
-
-    def trigger_respawn(self, reason):
-        """Create a service request to respawn the vehicle"""
-        request = RespawnVehicle.Request()
-        request.reason = reason
-        
-        # Call our own service (this is a bit unusual but works)
-        response = self.respawn_vehicle_callback(request, RespawnVehicle.Response())
-        
-        # Log the result
-        if response.success:
-            self.get_logger().info(f"Vehicle respawn triggered: {response.message}")
-        else:
-            self.get_logger().error(f"Vehicle respawn failed: {response.message}")
-        
-        return response.success
-
-    def respawn_vehicle_callback(self, request, response):
-        """Handle respawn service requests"""
-        if self.respawn_in_progress:
-            response.success = False
-            response.message = "Respawn already in progress"
-            return response
-            
-        self.respawn_in_progress = True
-        
-        try:
-            self.get_logger().info(f"Respawning vehicle. Reason: {request.reason}")
-            
-            # Destroy current vehicle and sensors
-            self.destroy_actors()
-            
-            # Wait a bit to ensure cleanup
-            time.sleep(0.5)
-            
-            # Respawn vehicle
-            self.spawn_objects_from_config()
-            
-            response.success = True
-            response.message = f"Vehicle respawned successfully after {request.reason}"
-        except Exception as e:
-            self.get_logger().error(f"Error during vehicle respawn: {e}")
-            import traceback
-            self.get_logger().error(traceback.format_exc())
-            response.success = False
-            response.message = f"Respawn failed: {str(e)}"
-        finally:
-            self.respawn_in_progress = False
-            
-        return response
 
     def spawn_sensors(self, sensors):
         """
@@ -431,14 +373,11 @@ class SpawnVehicleNode(Node):
                     continue
                 else:
                     self.spawned_sensors.append(sensor_actor)
-
                 self.get_logger().info(
                     f"Spawned sensor '{sensor_id}' ({sensor_type}) at {spawn_transform}"
                 )
 
-                topic_name, msg_type = self.get_ros_topic_and_type(
-                    sensor_type, sensor_id
-                )
+                topic_name, msg_type = self.get_ros_topic_and_type(sensor_type, sensor_id)
                 if topic_name and msg_type:
                     publisher = self.create_publisher(msg_type, topic_name, 10)
                     self.sensors_publishers[sensor_actor.id] = {
@@ -446,6 +385,7 @@ class SpawnVehicleNode(Node):
                         "sensor_type": sensor_type,
                         "publisher": publisher,
                         "msg_type": msg_type,
+                        "topic": topic_name 
                     }
 
                     def debug_listener(data, actor_id=sensor_actor.id):
@@ -462,6 +402,7 @@ class SpawnVehicleNode(Node):
                     self.get_logger().info(
                         f"Detected attached object (pseudo) {ao['type']} with id '{ao['id']}'"
                     )
+                
 
             except Exception as e:
                 self.get_logger().error(f"Error spawning sensor '{sensor_def}': {e}")
@@ -481,47 +422,65 @@ class SpawnVehicleNode(Node):
             return (None, None)
 
     def sensor_data_callback(self, actor_id, data):
-        """
-        Single callback for all sensors. We look up the sensor_type to figure out how to convert.
-        """
-        if actor_id not in self.sensors_publishers:
-            return
+        """Handle sensor data from Carla and publish to ROS"""
+        try:
+            matching_sensor = None
+            for sensor in self.spawned_sensors:
+                if sensor.id == actor_id:
+                    matching_sensor = sensor
+                    break
+                    
+            if not matching_sensor:
+                return
+                
+            # Find the publisher for this sensor
+            if actor_id in self.sensors_publishers:
+                sensor_info = self.sensors_publishers[actor_id]
+                sensor_type = sensor_info["sensor_type"]
+                publisher = sensor_info["publisher"]
+                sensor_id = sensor_info["sensor_id"]
+                
+                # Create a ROS header
+                header = Header()
+                header.stamp = self.get_clock().now().to_msg()
+                header.frame_id = f"{sensor_id}"
+                
+                # Convert the data to ROS format based on sensor type
+                message = None
+                if sensor_type.startswith('sensor.camera'):
+                    message = carla_image_to_ros_image(data, header)
+                elif sensor_type.startswith('sensor.lidar'):
+                    message = carla_lidar_to_ros_pointcloud2(data, header)
+                elif sensor_type.startswith("sensor.other.imu"):
+                    message = carla_imu_to_ros_imu(data, header)
+                else:
+                    message = None
+                    
+                if message:
+                    publisher.publish(message)
 
-        pub_info = self.sensors_publishers[actor_id]
-        sensor_type = pub_info["sensor_type"]
-        publisher = pub_info["publisher"]
-        msg_type = pub_info["msg_type"]
+                    
+        except Exception as e:
+            self.get_logger().error(f"Error in sensor callback: {str(e)}")
+            import traceback
+            self.get_logger().error(traceback.format_exc())  # Print full stack trace for debugging
 
-        header = Header()
-        header.stamp = self.get_clock().now().to_msg()
-        header.frame_id = pub_info["sensor_id"]
-
-        # Convert CARLA data to ROS message using sensors_data module
-        if sensor_type.startswith("sensor.camera"):
-            msg = carla_image_to_ros_image(data, header)
-        elif sensor_type.startswith("sensor.lidar"):
-            msg = carla_lidar_to_ros_pointcloud2(data, header)
-        elif sensor_type.startswith("sensor.other.imu"):
-            msg = carla_imu_to_ros_imu(data, header)
-        else:
-            msg = None
-
-        if msg:
-            publisher.publish(msg)
-
+            
     def destroy_actors(self):
         """
         Clean up all spawned actors (vehicle and sensors) when node shuts down.
         """
         self.get_logger().info("Destroying all spawned actors...")
-
         try:
             # Destroy all sensors first
-            for sensor in self.spawned_sensors:
-                if sensor is not None and sensor.is_alive:
-                    sensor.stop()
-                    sensor.destroy()
-                    self.get_logger().debug(f"Destroyed sensor {sensor.id}")
+            for i, sensor in enumerate(self.spawned_sensors):
+                if sensor is not None:
+                    try:
+                        sensor.stop()
+                        sensor.destroy()
+                    except Exception as e:
+                        self.get_logger().error(f"Failed to destroy sensor: {e}")
+            
             self.spawned_sensors.clear()
 
             # Then destroy the vehicle
@@ -541,7 +500,6 @@ class SpawnVehicleNode(Node):
         except Exception as e:
             self.get_logger().error(f"Error during actor cleanup: {e}")
             import traceback
-
             self.get_logger().error(traceback.format_exc())
 
 

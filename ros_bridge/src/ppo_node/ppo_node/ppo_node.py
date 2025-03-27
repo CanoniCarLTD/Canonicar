@@ -17,6 +17,9 @@ import psutil
 import json
 from std_msgs.msg import String
 from datetime import datetime
+import threading
+from queue import Queue
+import time
 
 from .ML import ppo_agent
 from .ML import parameters
@@ -33,6 +36,15 @@ class PPOModelNode(Node):
         super().__init__("ppo_model_node")
 
         self.get_logger().info(f"Device is:{device} ")
+
+        self.task_queue = Queue()
+        self.worker_thread = threading.Thread(target=self._process_background_tasks, daemon=True)
+        self.worker_thread.start()
+        self.get_logger().info("Background worker thread started")
+        
+        # Add locks for thread safety
+        self.metrics_lock = threading.Lock()
+        self.model_lock = threading.Lock()
 
         self.train = TRAIN
         self.prefix = "Train" if TRAIN else "Test"
@@ -69,9 +81,6 @@ class PPOModelNode(Node):
 
         self.error_logs_pub = self.create_publisher(String, "/training/error_logs", 10)
 
-        self.collision_sub = self.create_subscription(
-            String, "/collision_detected", self.collision_callback, 10
-        )
 
         self.location_sub = self.create_subscription(
             Float32MultiArray, "/carla/vehicle/location", self.location_callback, 10
@@ -90,6 +99,9 @@ class PPOModelNode(Node):
         self.action = None
         self.reward = 0.0
         self.done = False
+
+        self.t2 = None
+        self.t1 = None
 
         self.termination_reason = "unknown"
         self.collision = False
@@ -112,6 +124,9 @@ class PPOModelNode(Node):
         self.lap_start_time = None
         self.lap_end_time = None
         self.lap_time = None
+        self.stagnation_counter = 0
+
+        self.ready_to_collect = False
 
         self.episode_start_time = datetime.now()
         self.current_step_in_episode = 0
@@ -119,21 +134,22 @@ class PPOModelNode(Node):
         self.last_critic_loss = None
         self.last_entropy = None
 
-        self.collision_sub = self.create_subscription(
-            String, "/collision_detected", self.collision_callback, 10
+        self.state_subscription = self.create_subscription(
+            String,
+            '/simulation/state',
+            self.handle_system_state,
+            10
         )
 
         # Create client for the waypoints service
-        self.waypoints_client = self.create_client(
+        self.waypoint_client = self.create_client(
             GetTrackWaypoints, "get_track_waypoints"
         )
 
         # Check if the service is available
-        while not self.waypoints_client.wait_for_service(timeout_sec=1.0):
+        while not self.waypoint_client.wait_for_service(timeout_sec=1.0):
             self.get_logger().info("Waiting for track waypoints service...")
         self.needs_progress_reset = False
-
-        self.stagnation_counter = 0
 
         self.ppo_agent = ppo_agent.PPOAgent(summary_writer=self.summary_writer)
 
@@ -180,15 +196,14 @@ class PPOModelNode(Node):
             self.get_logger().info(f"🆕 Started new training run in: {self.run_dir}")
 
         # Create client for the waypoints service
-        self.waypoints_client = self.create_client(
+        self.waypoint_client = self.create_client(
             GetTrackWaypoints, "get_track_waypoints"
         )
 
         # Check if the service is available
-        while not self.waypoints_client.wait_for_service(timeout_sec=1.0):
+        while not self.waypoint_client.wait_for_service(timeout_sec=1.0):
             self.get_logger().info("Waiting for track waypoints service...")
 
-        # Request track waypoints
         self.request_track_waypoints()
 
         self.get_logger().info(
@@ -228,7 +243,7 @@ class PPOModelNode(Node):
         # Core reward parameters
         progress_multiplier = 3000.0  # More balanced multiplier for progress
         base_time_penalty = -0.05  # Base penalty when not moving
-        stagnation_factor = 0.02  # Increases penalty over time
+        stagnation_factor = 0.05  # Increases penalty over time
         backwards_penalty = -5.0  # Penalty for going backwards
         collision_penalty = -10.0  # Stronger collision penalty
         lap_completion_bonus = 50.0  # Lap completion bonus
@@ -326,10 +341,55 @@ class PPOModelNode(Node):
         self.get_logger().info(f"Episode {self.episode_counter} finished. Resetting.")
 
     ##################################################################################################
+    #                                           THREADING
+    ##################################################################################################
+
+
+    def _process_background_tasks(self):
+        """Worker thread that processes background tasks from the queue"""
+        self.get_logger().info("Background task processor started")
+        while True:
+            try:
+                # Get task from queue
+                task, args, kwargs = self.task_queue.get()
+                
+                # Execute the task
+                start_time = time.time()
+                task(*args, **kwargs)
+                duration = time.time() - start_time
+                
+                # Log if task took a long time
+                if duration > 0.1:  # More than 100ms
+                    self.get_logger().debug(f"Background task {task.__name__} took {duration:.4f}s")
+                    
+                # Mark task as done
+                self.task_queue.task_done()
+            except Exception as e:
+                self.get_logger().error(f"Error in background task: {e}")
+
+    def log_system_metrics(self):
+        """Queue system metrics logging to run in background"""
+        # Don't run the actual code here - just queue it
+        self._queue_background_task(self._log_system_metrics_impl)
+
+    
+    def log_step_metrics(self, actor_loss, critic_loss, entropy):
+        """Queue step metrics logging to run in background"""
+        # Don't run the actual code here - just queue it
+        self._queue_background_task(self._log_step_metrics_impl(actor_loss, critic_loss, entropy))
+
+    def _queue_background_task(self, task, *args, **kwargs):
+        """Queue a task to run in the background thread"""
+        self.task_queue.put((task, args, kwargs))
+
+    ##################################################################################################
     #                                       TRAINING
     ##################################################################################################
 
     def training(self, msg):
+        if not hasattr(self, 'ready_to_collect') or not self.ready_to_collect:
+            return
+            
         if self.timestep_counter < self.total_timesteps:
             self.state = np.array(msg.data, dtype=np.float32)
             self.t1 = datetime.now()
@@ -361,12 +421,12 @@ class PPOModelNode(Node):
                 if self.timestep_counter % LEARN_EVERY_N_STEPS == 0:
                     try:
                         # Add CUDA memory debug information
-                        if torch.cuda.is_available():
-                            self.get_logger().info(
-                                f"CUDA Memory: Allocated: {torch.cuda.memory_allocated()/1024**2:.2f}MB, Reserved: {torch.cuda.memory_reserved()/1024**2:.2f}MB"
-                            )
-                            # Force garbage collection
-                            torch.cuda.empty_cache()
+                        # if torch.cuda.is_available():
+                        #     self.get_logger().info(
+                        #         f"CUDA Memory: Allocated: {torch.cuda.memory_allocated()/1024**2:.2f}MB, Reserved: {torch.cuda.memory_reserved()/1024**2:.2f}MB"
+                        #     )
+                        #     # Force garbage collection
+                        #     torch.cuda.empty_cache()
                         actor_loss, critic_loss, entropy = self.ppo_agent.learn()
                         self.get_logger().info(f"entropy: {entropy}")
                         self.log_step_metrics(actor_loss, critic_loss, entropy)
@@ -393,7 +453,7 @@ class PPOModelNode(Node):
                     return 1
 
             self.get_logger().info(
-                f"Episode: {self.episode_counter}, Timestep: {self.timestep_counter}, Reward: {self.current_ep_reward}"
+                f"Episode: {self.episode_counter}, Timestep: {self.current_step_in_episode}, Reward: {self.current_ep_reward}"
             )
 
         else:
@@ -526,7 +586,7 @@ class PPOModelNode(Node):
         except Exception as e:
             self.get_logger().error(f"❌ Metadata not loaded: {e}")
 
-    def log_step_metrics(self, actor_loss, critic_loss, entropy):
+    def _log_step_metrics_impl(self, actor_loss, critic_loss, entropy):
         log_file = os.path.join(self.log_dir, "training_log.csv")
         row = {
             "episode": self.episode_counter,
@@ -677,7 +737,7 @@ class PPOModelNode(Node):
         msg.data = json.dumps(performance)
         self.performance_metrics_pub.publish(msg)
 
-    def log_system_metrics(self):
+    def _log_system_metrics_impl(self):
         # CPU and RAM
         cpu_percent = psutil.cpu_percent()
         ram_percent = psutil.virtual_memory().percent
@@ -710,11 +770,14 @@ class PPOModelNode(Node):
             )
 
         prefix = "Train" if TRAIN else "Test"
-        self.summary_writer.add_scalar(
-            f"{prefix}/Episode Duration (s)",
-            (self.t2 - self.t1).total_seconds(),
-            self.episode_counter,
-        )
+        # Only log episode duration if both t1 and t2 are not None
+        if self.t1 is not None and self.t2 is not None:
+            self.summary_writer.add_scalar(
+                f"{prefix}/Episode Duration (s)",
+                (self.t2 - self.t1).total_seconds(),
+                self.episode_counter,
+            )
+
         self.summary_writer.add_scalar(
             f"{prefix}/Episode Reward", self.current_ep_reward, self.episode_counter
         )
@@ -731,28 +794,99 @@ class PPOModelNode(Node):
     #                                           UTILITIES
     ##################################################################################################
 
-    def collision_callback(self, msg):
-        """Handle collision notifications from topic"""
-        if not self.collision:  # Prevent duplicate penalties
+    def handle_system_state(self, msg):
+        """Handle state messages from the simulation coordinator"""
+        state_msg = msg.data
+        
+        # Parse state
+        if ':' in state_msg:
+            state_name, details = state_msg.split(':', 1)
+        else:
+            state_name = state_msg
+        
+        # Handle different states
+        if state_name == "RESPAWNING":
             self.collision = True
-            self.get_logger().warn(f"Collision detected: {msg.data}")
+            self.done = True
             self.termination_reason = "collision"
-
-            # Update reward immediately
-            self.calculate_reward()
-
-            # Log the collision penalty
-            self.get_logger().info(f"Applied collision penalty: {self.reward}")
+            self.ready_to_collect = False
+            self.get_logger().info("RESPAWNING: Paused data collection")
+        
+        elif state_name == "MAP_SWAPPING":
+            self.ready_to_collect = False  # FIX: Set to False during map swapping
+            self.collision = True
+            self.done = True
+            self.termination_reason = "map_swap"
+            self.track_waypoints = []
+            self.needs_progress_reset = True
+            self.get_logger().info("MAP_SWAPPING: Paused data collection")
+        
+        elif state_name == "RUNNING":
+            # When state is RUNNING, we should be ready to collect data
+            self.ready_to_collect = True
+            self.get_logger().info("RUNNING: Resumed data collection")
+            
+            # Also ensure we have waypoints
+            if not self.track_waypoints:
+                self.request_track_waypoints()
 
     def request_track_waypoints(self):
         """Request track waypoints from the map loader service"""
-        self.get_logger().info("Requesting track waypoints...")
-
+        if not self.waypoint_client.service_is_ready():
+            self.retry_timer = self.create_timer(1.0, self.retry_request_waypoints)
+            return
+                
         request = GetTrackWaypoints.Request()
-        future = self.waypoints_client.call_async(request)
+        future = self.waypoint_client.call_async(request)
+        future.add_done_callback(self.handle_track_waypoints)
 
-        # Add a callback for when the service call completes
-        future.add_done_callback(self.process_waypoints_response)
+    def retry_request_waypoints(self):
+        """Retry waypoint requests"""
+        self.retry_timer.cancel()
+        self.request_track_waypoints()
+
+
+    def handle_track_waypoints(self, future):
+        """Handle waypoints response"""
+        try:
+            response = future.result()
+            
+            if len(response.waypoints_x) == 0:
+                self.retry_timer = self.create_timer(2.0, self.retry_request_waypoints)
+                return
+                
+            # Process waypoints
+            self.track_waypoints = []
+            for i in range(len(response.waypoints_x)):
+                self.track_waypoints.append((response.waypoints_x[i], response.waypoints_y[i]))
+                
+            self.track_length = response.track_length
+            self.waypoint_count = len(self.track_waypoints)
+            
+            # Reset progress trackers for the new track
+            self.reset_progress_tracking()
+        except Exception as e:
+            self.retry_timer = self.create_timer(2.0, self.retry_request_waypoints)
+
+
+    def reset_progress_tracking(self):
+        """Reset all progress-related variables"""
+        if len(self.track_waypoints) == 0:
+            self.get_logger().warn("Can't reset progress tracking - no waypoints available")
+            return
+            
+        self.prev_waypoint_idx = 0
+        self.current_waypoint_idx = 0
+        self.closest_waypoint_idx = 0
+        self.progress_buffer = []
+        self.progress_timestamps = []
+        self.prev_progress_value = 0.0
+        self.total_progress = 0.0
+        self.lap_progress = 0.0
+        self.needs_progress_reset = False
+        
+        self.get_logger().info("Track progress variables fully reset for new track")
+    
 
     def location_callback(self, msg):
         """Process vehicle location updates and calculate track progress"""
@@ -900,8 +1034,6 @@ class PPOModelNode(Node):
         # Update progress
         self.track_progress = raw_progress
 
-        self.get_logger().info(f"Track progress: {self.track_progress:.8f}")
-
         # Log progress occasionally
         if (
             int(self.track_progress * 100) % 10 == 0
@@ -1020,7 +1152,7 @@ class PPOModelNode(Node):
             f"Received vehicle_ready notification: {request.vehicle_id}"
         )
         self.collision = False
-        # Reset track progress variables for new vehicle
+        self.ready_to_collect = True
         self.track_progress = 0.0
         self.prev_progress_distance = 0.0
         self.closest_waypoint_idx = 0
@@ -1110,6 +1242,13 @@ class PPOModelNode(Node):
         self.get_logger().info("SummaryWriter closed.")
 
     def destroy_node(self):
+        self.get_logger().info("Waiting for background tasks to complete...")
+        try:
+            self.task_queue.join()
+            self.get_logger().info("All background tasks completed")
+        except Exception as e:
+            self.get_logger().error(f"Error waiting for background tasks: {e}")
+
         if hasattr(self, "db"):
             mongo_connection.close_db()
         super().destroy_node()
