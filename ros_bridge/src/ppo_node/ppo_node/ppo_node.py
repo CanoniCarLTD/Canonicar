@@ -90,6 +90,10 @@ class PPOModelNode(Node):
         self.action = None
         self.reward = 0.0
         self.done = False
+        
+        self.actor_loss = 0.0
+        self.critic_loss = 0.0
+        self.entropy = 0.0
 
         self.termination_reason = "unknown"
         self.collision = False
@@ -367,9 +371,10 @@ class PPOModelNode(Node):
                             )
                             # Force garbage collection
                             torch.cuda.empty_cache()
-                        actor_loss, critic_loss, entropy = self.ppo_agent.learn()
-                        self.get_logger().info(f"entropy: {entropy}")
-                        self.log_step_metrics(actor_loss, critic_loss, entropy)
+                        
+                        self.actor_loss, self.critic_loss, self.entropy = self.ppo_agent.learn()
+                        self.get_logger().info(f"entropy: {self.entropy}")
+                        self.log_step_metrics()
                         self.log_system_metrics()
                     except RuntimeError as e:
                         # Handle CUDA errors
@@ -526,31 +531,32 @@ class PPOModelNode(Node):
         except Exception as e:
             self.get_logger().error(f"❌ Metadata not loaded: {e}")
 
-    def log_step_metrics(self, actor_loss, critic_loss, entropy):
-        log_file = os.path.join(self.log_dir, "training_log.csv")
+    def log_step_metrics(self):
+        log_file = os.path.join(self.log_dir, "training_step_log.csv")
         row = {
             "episode": self.episode_counter,
             "step": self.ppo_agent.learn_step_counter,
             "timestep": self.timestep_counter,
-            "actor_loss": actor_loss,
-            "critic_loss": critic_loss,
-            "entropy": entropy,
-            "action_std": self.ppo_agent.action_std,
+            "actor_loss": self.actor_loss,
+            "critic_loss": self.critic_loss,
+            "entropy": self.entropy,
+            "action_std": self.ppo_agent.action_std, # Constant.
             "step_reward": self.reward,  # Add step reward to log
             "cumulative_reward": self.current_ep_reward,
         }
         write_header = not os.path.exists(log_file)
+        
         with open(log_file, "a", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=row.keys())
             if write_header:
                 writer.writeheader()
             writer.writerow(row)
 
-        self.summary_writer.add_scalar("Loss/actor", actor_loss, self.timestep_counter)
+        self.summary_writer.add_scalar("Loss/actor", self.actor_loss, self.timestep_counter)
         self.summary_writer.add_scalar(
-            "Loss/critic", critic_loss, self.timestep_counter
+            "Loss/critic", self.critic_loss, self.timestep_counter
         )
-        self.summary_writer.add_scalar("Entropy", entropy, self.timestep_counter)
+        self.summary_writer.add_scalar("Entropy", self.entropy, self.timestep_counter)
         self.summary_writer.add_scalar(
             "Exploration/action_std", self.ppo_agent.action_std, self.timestep_counter
         )
@@ -560,40 +566,6 @@ class PPOModelNode(Node):
         self.summary_writer.add_scalar(
             "Rewards/cumulative_reward", self.current_ep_reward, self.timestep_counter
         )
-
-        try:
-            # Create metrics message
-            metrics = {
-                "episode": self.episode_counter,
-                "step": self.timestep_counter,
-                "timestep": self.timestep_counter * 64,  # Assuming batch size is 64
-                "actor_loss": float(actor_loss) if actor_loss is not None else None,
-                "critic_loss": float(critic_loss) if critic_loss is not None else None,
-                "entropy": float(entropy) if entropy is not None else None,
-                "action_std": float(self.ppo_agent.action_std),
-                "step_reward": float(
-                    self.current_ep_reward / max(1, self.current_step_in_episode)
-                ),
-                "cumulative_reward": float(self.current_ep_reward),
-            }
-
-            # Save metrics to MongoDB using the existing connection
-            try:
-                self.save_to_mongodb(schema=metrics)
-            except Exception as e:
-                self.get_logger().error(f"❌ Step metrics not saved to MongoDB: {e}")
-
-        except Exception as e:
-            self.get_logger().error(f"Failed to log step metrics: {e}")
-            self.log_error("log_step_metrics", str(e))
-
-    def save_to_mongodb(self, schema):
-        if self.db is not None:
-            collection = self.db["episodes"]
-            collection.insert_one(schema)
-            self.get_logger().info(f"✅ Step metrics saved to MongoDB: {schema}")
-        else:
-            self.get_logger().error("❌ MongoDB connection is not initialized.")
 
     def log_error(self, component, message):
         """Log error to MongoDB through DB service"""
@@ -608,7 +580,7 @@ class PPOModelNode(Node):
 
     def log_episode_metrics(self):
         log_file = os.path.join(
-            self.log_dir, "training_log.csv" if TRAIN else "testing_log.csv"
+            self.log_dir, "training_episode_log.csv" if TRAIN else "testing_log.csv"
         )
         row = {
             "episode": self.episode_counter,
@@ -617,8 +589,6 @@ class PPOModelNode(Node):
             "episode_length": self.current_step_in_episode,
             "termination_reason": self.termination_reason,
         }
-
-        # self.save_to_mongodb(schema=row)
 
         write_header = not os.path.exists(log_file)
         with open(log_file, "a", newline="") as f:
@@ -644,24 +614,43 @@ class PPOModelNode(Node):
         self.summary_writer.add_scalar(
             f"{prefix}/Action Std", self.ppo_agent.action_std, self.episode_counter
         )
+        
+        self.log_episode_metrics_to_db()
 
-    def log_and_publish_episode_metrics(self):
-        metrics = {
-            "episode": self.episode_counter,
-            "episode_reward": self.current_ep_reward,
-            "actor_loss": float(self.last_actor_loss) if self.last_actor_loss else None,
-            "critic_loss": (
-                float(self.last_critic_loss) if self.last_critic_loss else None
-            ),
-            "entropy": float(self.last_entropy) if self.last_entropy else None,
-            "duration": (self.t2 - self.t1).total_seconds(),
-            "episode_length": self.current_step_in_episode,
-            "train": TRAIN,
-        }
+    def log_episode_metrics_to_db(self):
+        try:
+            episode = {
+                "episode": self.episode_counter,
+                "step": self.timestep_counter,
+                "timestep": self.timestep_counter * 64,  # Assuming batch size is 64
+                "actor_loss": float(self.actor_loss) if self.actor_loss is not None else None,
+                "critic_loss": float(self.critic_loss) if self.critic_loss is not None else None,
+                "entropy": float(self.entropy) if self.entropy is not None else None,
+                "action_std": float(self.ppo_agent.action_std),
+                "step_reward": float(
+                    self.current_ep_reward / max(1, self.current_step_in_episode)
+                ),
+                "curr_episode_reward": float(self.current_ep_reward),
+                "episode_length": self.current_step_in_episode,                
+            }
 
-        msg = String()
-        msg.data = json.dumps(metrics)
-        self.episode_metrics_pub.publish(msg)
+            try:
+                self.save_to_mongodb(schema=episode)
+            except Exception as e:
+                self.get_logger().error(f"❌ Step metrics not saved to MongoDB: {e}")
+
+        except Exception as e:
+            self.get_logger().error(f"Failed to log step metrics: {e}")
+            self.log_error("log_step_metrics", str(e))
+            
+    def save_to_mongodb(self, schema):
+        if self.db is not None:
+            collection = self.db["episodes"]
+            collection.insert_one(schema)
+            self.get_logger().info(f"✅ Step metrics saved to MongoDB: {schema}")
+        else:
+            self.get_logger().error("❌ MongoDB connection is not initialized.")
+
 
     def log_and_publish_performance_metrics(self):
         # Publish performance metrics
