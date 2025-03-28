@@ -102,6 +102,10 @@ class PPOModelNode(Node):
 
         self.t2 = None
         self.t1 = None
+        
+        self.actor_loss = 0.0
+        self.critic_loss = 0.0
+        self.entropy = 0.0
 
         self.termination_reason = "unknown"
         self.collision = False
@@ -352,7 +356,9 @@ class PPOModelNode(Node):
             try:
                 # Get task from queue
                 task, args, kwargs = self.task_queue.get()
-                
+                if not callable(task):
+                    self.get_logger().error(f"Task is not callable: {task}")
+                    continue
                 # Execute the task
                 start_time = time.time()
                 task(*args, **kwargs)
@@ -372,13 +378,18 @@ class PPOModelNode(Node):
         # Don't run the actual code here - just queue it
         self._queue_background_task(self._log_system_metrics_impl)
 
-    def log_step_metrics(self, actor_loss, critic_loss, entropy):
+    def log_step_metrics(self):
         """Queue step metrics logging to run in background"""
         # Don't run the actual code here - just queue it
-        self._queue_background_task(self._log_step_metrics_impl(actor_loss, critic_loss, entropy))
+        # self._queue_background_task(self._log_step_metrics_impl(actor_loss, critic_loss, entropy))
+        self._queue_background_task(self._log_step_metrics_impl)
 
     def _queue_background_task(self, task, *args, **kwargs):
         """Queue a task to run in the background thread"""
+        if task is None or not callable(task):
+            self.get_logger().error(f"Invalid task added to queue: {task}")
+            return
+        self.get_logger().debug(f"Task added to queue: {task.__name__}")
         self.task_queue.put((task, args, kwargs))
 
     ##################################################################################################
@@ -426,9 +437,9 @@ class PPOModelNode(Node):
                         #     )
                         #     # Force garbage collection
                         #     torch.cuda.empty_cache()
-                        actor_loss, critic_loss, entropy = self.ppo_agent.learn()
-                        self.get_logger().info(f"entropy: {entropy}")
-                        self.log_step_metrics(actor_loss, critic_loss, entropy)
+                        self.actor_loss, self.critic_loss, self.entropy = self.ppo_agent.learn()
+                        self.get_logger().info(f"entropy: {self.entropy}")
+                        self.log_step_metrics()
                         self.log_system_metrics()
                     except RuntimeError as e:
                         # Handle CUDA errors
@@ -585,16 +596,15 @@ class PPOModelNode(Node):
         except Exception as e:
             self.get_logger().error(f"❌ Metadata not loaded: {e}")
 
-    def _log_step_metrics_impl(self, actor_loss, critic_loss, entropy):
+    def _log_step_metrics_impl(self):
         log_file = os.path.join(self.log_dir, "training_log.csv")
         row = {
             "episode": self.episode_counter,
             "step": self.ppo_agent.learn_step_counter,
             "timestep": self.timestep_counter,
-            "actor_loss": actor_loss,
-            "critic_loss": critic_loss,
-            "entropy": entropy,
-            "action_std": self.ppo_agent.action_std,
+            "actor_loss": self.actor_loss,
+            "critic_loss": self.critic_loss,
+            "entropy": self.entropy,
             "step_reward": self.reward,  # Add step reward to log
             "cumulative_reward": self.current_ep_reward,
         }
@@ -605,14 +615,11 @@ class PPOModelNode(Node):
                 writer.writeheader()
             writer.writerow(row)
 
-        self.summary_writer.add_scalar("Loss/actor", actor_loss, self.timestep_counter)
+        self.summary_writer.add_scalar("Loss/actor", self.actor_loss, self.timestep_counter)
         self.summary_writer.add_scalar(
-            "Loss/critic", critic_loss, self.timestep_counter
+            "Loss/critic", self.critic_loss, self.timestep_counter
         )
-        self.summary_writer.add_scalar("Entropy", entropy, self.timestep_counter)
-        self.summary_writer.add_scalar(
-            "Exploration/action_std", self.ppo_agent.action_std, self.timestep_counter
-        )
+        self.summary_writer.add_scalar("Entropy", self.entropy, self.timestep_counter)
         self.summary_writer.add_scalar(
             "Rewards/step_reward", self.reward, self.timestep_counter
         )
@@ -626,9 +633,9 @@ class PPOModelNode(Node):
                 "episode": self.episode_counter,
                 "step": self.timestep_counter,
                 "timestep": self.timestep_counter * 64,  # Assuming batch size is 64
-                "actor_loss": float(actor_loss) if actor_loss is not None else None,
-                "critic_loss": float(critic_loss) if critic_loss is not None else None,
-                "entropy": float(entropy) if entropy is not None else None,
+                "actor_loss": float(self.actor_loss) if self.actor_loss is not None else None,
+                "critic_loss": float(self.critic_loss) if self.critic_loss is not None else None,
+                "entropy": float(self.entropy) if self.entropy is not None else None,
                 "action_std": float(self.ppo_agent.action_std),
                 "step_reward": float(
                     self.current_ep_reward / max(1, self.current_step_in_episode)
@@ -700,9 +707,7 @@ class PPOModelNode(Node):
             self.current_step_in_episode,
             self.episode_counter,
         )
-        self.summary_writer.add_scalar(
-            f"{prefix}/Action Std", self.ppo_agent.action_std, self.episode_counter
-        )
+
 
     def log_and_publish_episode_metrics(self):
         metrics = {
@@ -767,27 +772,6 @@ class PPOModelNode(Node):
                 gpu_mem_reserved,
                 self.timestep_counter,
             )
-
-        prefix = "Train" if TRAIN else "Test"
-        # Only log episode duration if both t1 and t2 are not None
-        if self.t1 is not None and self.t2 is not None:
-            self.summary_writer.add_scalar(
-                f"{prefix}/Episode Duration (s)",
-                (self.t2 - self.t1).total_seconds(),
-                self.episode_counter,
-            )
-
-        self.summary_writer.add_scalar(
-            f"{prefix}/Episode Reward", self.current_ep_reward, self.episode_counter
-        )
-        self.summary_writer.add_scalar(
-            f"{prefix}/Episode Length",
-            self.current_step_in_episode,
-            self.episode_counter,
-        )
-        self.summary_writer.add_scalar(
-            f"{prefix}/Action Std", self.ppo_agent.action_std, self.episode_counter
-        )
 
     ##################################################################################################
     #                                           UTILITIES
@@ -1253,6 +1237,8 @@ class PPOModelNode(Node):
 
 
 def main(args=None):
+    # count running time
+    start_time = datetime.now()
     rclpy.init(args=args)
     node = PPOModelNode()
     try:
@@ -1263,6 +1249,8 @@ def main(args=None):
         node.save_training_state(node.run_dir)
         node.destroy_node()
         node.shutdown_writer()
+        end_time = datetime.now()
+        node.get_logger().info(f"Total running time: {end_time - start_time}")
         rclpy.shutdown()
 
 
