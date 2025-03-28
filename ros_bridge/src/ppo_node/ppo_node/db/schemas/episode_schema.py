@@ -3,14 +3,15 @@ from pymongo import MongoClient, ASCENDING
 # PyMongo schema definition (for reference)
 EPISODE_SCHEMA = {
     "episode_id": str,  # primary key
-    "reward": float,    # required
-    "average_reward": float,
-    "policy_loss": float,
-    "value_loss": float,
+    "episode_counter" : int,
+    "step_as_timestep" : int,
+    "actor_loss": float,
+    "critic_loss": float,
     "entropy": float,
-    "duration": float,
-    "num_steps": int,
-    "stage": str
+    "action_std": float,
+    "step_reward": float,  
+    "curr_episode_reward": float,  
+    "episode_length" : float
 }
 
 # Connect to MongoDB

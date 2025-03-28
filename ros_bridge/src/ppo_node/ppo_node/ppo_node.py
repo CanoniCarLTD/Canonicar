@@ -620,9 +620,9 @@ class PPOModelNode(Node):
     def log_episode_metrics_to_db(self):
         try:
             episode = {
-                "episode": self.episode_counter,
+                "episode_counter": self.episode_counter,
                 "step": self.timestep_counter,
-                "timestep": self.timestep_counter * 64,  # Assuming batch size is 64
+                "step_as_timestep": self.timestep_counter * LEARN_EVERY_N_STEPS,  # Assuming batch size is 64, IT WAS 64
                 "actor_loss": float(self.actor_loss) if self.actor_loss is not None else None,
                 "critic_loss": float(self.critic_loss) if self.critic_loss is not None else None,
                 "entropy": float(self.entropy) if self.entropy is not None else None,
