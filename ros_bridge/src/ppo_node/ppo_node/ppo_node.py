@@ -386,8 +386,8 @@ class PPOModelNode(Node):
     ##################################################################################################
 
     def training(self, msg):
-        # if not hasattr(self, 'ready_to_collect') or not self.ready_to_collect:
-        #     return
+        if not hasattr(self, 'ready_to_collect') or not self.ready_to_collect:
+            return
             
         if self.timestep_counter < self.total_timesteps:
             self.state = np.array(msg.data, dtype=np.float32)
@@ -419,7 +419,7 @@ class PPOModelNode(Node):
 
                 if self.timestep_counter % LEARN_EVERY_N_STEPS == 0:
                     try:
-                        # Add CUDA memory debug information
+                        # # Add CUDA memory debug information
                         # if torch.cuda.is_available():
                         #     self.get_logger().info(
                         #         f"CUDA Memory: Allocated: {torch.cuda.memory_allocated()/1024**2:.2f}MB, Reserved: {torch.cuda.memory_reserved()/1024**2:.2f}MB"
@@ -809,6 +809,8 @@ class PPOModelNode(Node):
             self.done = True
             self.termination_reason = "collision"
             self.ready_to_collect = False
+            self.calculate_reward()
+            self.store_transition()
             self.get_logger().info("RESPAWNING: Paused data collection")
         
         elif state_name == "MAP_SWAPPING":
@@ -1247,7 +1249,7 @@ class PPOModelNode(Node):
 
         if hasattr(self, "db"):
             mongo_connection.close_db()
-        super().destroy_node()
+        # super().destroy_node()
 
 
 def main(args=None):
@@ -1256,8 +1258,9 @@ def main(args=None):
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
-        node.save_training_state(node.run_dir)
+        node.get_logger().info("Keyboard interrupt received, shutting down... (ppo node)")
     finally:
+        node.save_training_state(node.run_dir)
         node.destroy_node()
         node.shutdown_writer()
         rclpy.shutdown()
