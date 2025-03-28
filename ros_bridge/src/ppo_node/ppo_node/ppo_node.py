@@ -459,6 +459,9 @@ class PPOModelNode(Node):
                     self.log_system_metrics()
                     self.get_logger().info(f"Checkpoint saved at {self.run_dir}")
                     self.reset_run()
+                    
+                    self.summary_writer.flush() # Added v3.1.1, check that it doesn't break anything
+                    
                     self.episode_counter += 1
                     return 1
 
@@ -597,7 +600,7 @@ class PPOModelNode(Node):
             self.get_logger().error(f"❌ Metadata not loaded: {e}")
 
     def _log_step_metrics_impl(self):
-        log_file = os.path.join(self.log_dir, "training_log.csv")
+        log_file = os.path.join(self.log_dir, "training_step_log.csv")
         row = {
             "episode": self.episode_counter,
             "step": self.ppo_agent.learn_step_counter,
@@ -674,7 +677,7 @@ class PPOModelNode(Node):
 
     def log_episode_metrics(self):
         log_file = os.path.join(
-            self.log_dir, "training_log.csv" if TRAIN else "testing_log.csv"
+            self.log_dir, "training_episode_log.csv" if TRAIN else "testing_episode_log.csv"
         )
         row = {
             "episode": self.episode_counter,
