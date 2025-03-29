@@ -70,7 +70,7 @@ with main_col:
         </div>
         """, unsafe_allow_html=True)
         if st.button("Open TensorBoard", key="tensorboard_button", use_container_width=True, type="primary"):
-            st.switch_page("pages/TensorBoard.py")
+            st.switch_page("pages/Tensor_board.py")
 
     # Add spacing
     st.markdown("<br>", unsafe_allow_html=True)
