@@ -1,7 +1,7 @@
 import streamlit as st
 
 # Replace with your actual ngrok URL
-tensorboard_url = "https://2f48-5-29-145-151.ngrok-free.app"  # ← change this!
+tensorboard_url = "https://0201-5-29-228-0.ngrok-free.app"  # ← change this!
 
 st.title("📊 Canonicar ML Dashboard")
 st.subheader("Live TensorBoard Logs")
