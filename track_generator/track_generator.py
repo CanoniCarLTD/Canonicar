@@ -49,7 +49,7 @@ class TrackGenerator:
         self._track_width = 10.0  # [m]
         self._cone_spacing = 5.0  # [m]
         self._length_start_area = 6.0  # [m]
-        self._curvature_threshold = 1.0 / 3.75  # [m^-1]
+        self._curvature_threshold = 1.0 / 4.0  # [m^-1]
         self._straight_threshold = 1.0 / 100.0  # [m^-1]
 
         # Output options
