@@ -93,6 +93,7 @@ def calculate_segment_lengths(centerline):
     return segment_lengths
 
 
+
 def create_xodr_file(
     centerline,
     segment_lengths,
@@ -119,7 +120,7 @@ def create_xodr_file(
     )
 
     # Calculate total road length
-    total_length = sum(segment_lengths)
+    total_length = sum(segment_lengths) + segment_lengths[0]
 
     # Create a road element
     road = ET.SubElement(
@@ -132,7 +133,6 @@ def create_xodr_file(
             "junction": "-1",
         },
     )
-    	
     link = ET.SubElement(road, "link")
     ET.SubElement(
         link,
@@ -166,6 +166,20 @@ def create_xodr_file(
         ET.SubElement(geometry, "line")
         s += length
 
+    x, y, hdg = centerline[0]
+    ET.SubElement(
+        plan_view,
+        "geometry",
+        {
+            "s": f"{s:.5f}",
+            "x": f"{x:.5f}",
+            "y": f"{y:.5f}",
+            "hdg": f"{hdg:.5f}",
+            "length": f"{segment_lengths[0]:.5f}",
+        },
+    )
+    s += length
+
     # Add lanes
     lanes = ET.SubElement(road, "lanes")
     lane_section = ET.SubElement(lanes, "laneSection", {"s": "0.0"})
@@ -196,28 +210,6 @@ def create_xodr_file(
 
     center = ET.SubElement(lane_section, "center")
     ET.SubElement(center, "lane", {"id": "0", "type": "none", "level": "false"})
-
-    # right_element = ET.SubElement(lane_section, "right")
-    # right_lane = ET.SubElement(right_element, "lane", {
-    #     "id": "-1",
-    #     "type": "driving",
-    #     "level": "false"
-    # })
-
-    # ET.SubElement(right_lane, "roadMark", {
-    #     "sOffset":"0.0",
-    #     "type":"solid",
-    #     "color":"standard",
-    #     "width":"0.15",
-    #     "laneChange":"none"
-    # })
-    # ET.SubElement(right_lane, "width", {
-    #     "sOffset": "0.0",
-    #     "a": str(lane_width),
-    #     "b": "0.0",
-    #     "c": "0.0",
-    #     "d": "0.0"
-    # })
 
     # Write to file
     tree = ET.ElementTree(opendrive)
