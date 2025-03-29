@@ -37,6 +37,8 @@ class PPOModelNode(Node):
 
         self.get_logger().info(f"Device is:{device} ")
 
+        self.current_sim_state = "INITIALIZING"
+
         self.task_queue = Queue()
         self.worker_thread = threading.Thread(target=self._process_background_tasks, daemon=True)
         self.worker_thread.start()
@@ -150,6 +152,10 @@ class PPOModelNode(Node):
             GetTrackWaypoints, "get_track_waypoints"
         )
 
+        self.episode_complete_pub = self.create_publisher(
+            String, '/episode_complete', 10
+        )
+
         # Check if the service is available
         while not self.waypoint_client.wait_for_service(timeout_sec=1.0):
             self.get_logger().info("Waiting for track waypoints service...")
@@ -199,10 +205,6 @@ class PPOModelNode(Node):
             self.create_new_run_dir()
             self.get_logger().info(f"🆕 Started new training run in: {self.run_dir}")
 
-        # Create client for the waypoints service
-        self.waypoint_client = self.create_client(
-            GetTrackWaypoints, "get_track_waypoints"
-        )
 
         # Check if the service is available
         while not self.waypoint_client.wait_for_service(timeout_sec=1.0):
@@ -318,6 +320,10 @@ class PPOModelNode(Node):
     ##################################################################################################
 
     def store_transition(self):
+        if self.current_sim_state in ["RESPAWNING", "MAP_SWAPPING"] or self.state is None:
+            self.get_logger().debug("Skipping transition storage during respawn or with None state")
+            return
+        
         value = self.ppo_agent.critic(
             torch.tensor(self.state, dtype=torch.float32).to(device).unsqueeze(0)
         ).item()
@@ -338,6 +344,7 @@ class PPOModelNode(Node):
         self.done = False
         self.current_ep_reward = 0.0
         self.current_step_in_episode = 0.0
+        self.stagnation_counter = 0
         self.collision = False
         self.lap_completed = False
         self.track_progress = 0.0
@@ -414,6 +421,10 @@ class PPOModelNode(Node):
                 if self.current_step_in_episode >= self.episode_length:
                     self.done = True
                     self.termination_reason = "episode_length"
+                    completion_msg = String()
+                    completion_msg.data = "episode_length"
+                    self.episode_complete_pub.publish(completion_msg)
+                    self.get_logger().info("Published episode completion notification")
 
                 # Later, if we detect crashes or other done causes and want to respawn, update:
                 # self.termination_reason = "timeout"
@@ -789,22 +800,37 @@ class PPOModelNode(Node):
             state_name, details = state_msg.split(':', 1)
         else:
             state_name = state_msg
+            details = ""
         
-        # Handle different states
+        self.current_sim_state = state_name
+        
         if state_name == "RESPAWNING":
-            self.collision = True
-            self.done = True
-            self.termination_reason = "collision"
+            self.get_logger().info(f"State msg: {state_msg} state name: {state_name} details: {details}")
             self.ready_to_collect = False
-            self.calculate_reward()
-            self.store_transition()
-            self.get_logger().info("RESPAWNING: Paused data collection")
+            # Check the reason for respawning
+            if "collision" in details.lower():
+                # Only set collision flags if it's actually a collision
+                self.collision = True
+                self.done = True
+                self.termination_reason = "collision"
+                
+                if self.state is not None:
+                    self.calculate_reward()
+                    self.store_transition()
+                
+                self.get_logger().info("RESPAWNING due to collision: Paused data collection")
+                
+            elif "episode_complete" in details.lower():
+                # Episode completed normally - don't apply collision penalty
+                self.collision = False
+                self.done = True
+                self.get_logger().info("RESPAWNING due to episode completion: Paused data collection")            
+            else:
+                # Other respawn reason
+                self.get_logger().info(f"RESPAWNING for other reason: {details}: Paused data collection")
         
         elif state_name == "MAP_SWAPPING":
-            self.ready_to_collect = False  # FIX: Set to False during map swapping
-            self.collision = True
-            self.done = True
-            self.termination_reason = "map_swap"
+            self.ready_to_collect = False
             self.track_waypoints = []
             self.needs_progress_reset = True
             self.get_logger().info("MAP_SWAPPING: Paused data collection")

@@ -42,10 +42,14 @@ class SimulationCoordinator(Node):
         self.map_state_sub = self.create_subscription(
             String, '/map/state', self.handle_map_state, 10)
         
+        self.episode_complete_sub = self.create_subscription(
+            String, '/episode_complete', self.handle_episode_complete, 10)
+        
         # Create timer for periodic state checks
         self.timer = self.create_timer(0.1, self.state_check)
 
         self.last_collision_time = 0.0
+        self.last_respawn_time = 0.0
         self.collision_cooldown = 1.0  # seconds between collision handling
         self.respawn_in_progress = False
         self.vehicle_id = None
@@ -62,9 +66,23 @@ class SimulationCoordinator(Node):
         
         # Check for stuck respawn (only in respawn state)
         elif self.state == SimState.RESPAWNING and self.respawn_in_progress:
-            if time.time() - self.last_collision_time > 10.0:
+            current_time = time.time()
+            # Use last_respawn_time instead of last_collision_time
+            if current_time - self.last_respawn_time > 10.0:  # Increased timeout slightly
+                self.get_logger().warn(f"Potential stuck respawn detected after {current_time - self.last_respawn_time:.1f} seconds")
                 self.respawn_in_progress = False
                 self.trigger_respawn("retry_stuck_respawn")
+
+
+    def handle_episode_complete(self, msg):
+        """Handle episode completion events"""
+        # Only handle in RUNNING state
+        if self.state != SimState.RUNNING:
+            return
+            
+        completion_reason = msg.data
+        self.get_logger().info(f"Episode completed: {completion_reason}")
+        self.trigger_respawn(f"episode_complete:{completion_reason}")
     
     def handle_collision(self, msg):
         """Handle collision events with cooldown protection"""
@@ -119,6 +137,7 @@ class SimulationCoordinator(Node):
     def trigger_respawn(self, reason):
         """Trigger vehicle respawn"""
         if self.respawn_in_progress:
+            self.get_logger().info(f"Respawn already in progress, ignoring new request: {reason}")
             return
             
         if not self.respawn_client.service_is_ready():
@@ -127,8 +146,11 @@ class SimulationCoordinator(Node):
                 
         self.respawn_in_progress = True
         self.state = SimState.RESPAWNING
-        self.publish_state('Respawning vehicle')
-        
+        if "collision" in reason:
+            self.publish_state('Respawning vehicle due to collision')
+        elif "episode_complete" in reason:
+            self.publish_state('Respawning vehicle due to episode_complete')
+        self.last_respawn_time = time.time()
         request = RespawnVehicle.Request()
         request.reason = reason
         
@@ -142,6 +164,7 @@ class SimulationCoordinator(Node):
             if response.success:
                 self.get_logger().info(f"Respawn successful: {response.message}")
                 self.last_collision_time = time.time()
+                self.respawn_in_progress = False
             else:
                 self.respawn_in_progress = False
                 self.retry_timer = self.create_timer(2.0, self.retry_respawn)

@@ -66,8 +66,14 @@ class VehicleControlNode(Node):
         """Handle simulation state updates"""
         state_msg = msg.data
         
-        if state_msg.startswith("RESPAWNING:") or state_msg.startswith("MAP_SWAPPING:"):
+        if ':' in state_msg:
+            state_name, details = state_msg.split(':', 1)
+        else:
+            state_name = state_msg
+        
+        if state_name in ["RESPAWNING", "MAP_SWAPPING"]:
             self.vehicle = None
+            self.get_logger().info(f"Vehicle control suspended: {details}")
 
 
     def collision_callback(self, msg):
