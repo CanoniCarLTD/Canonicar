@@ -62,7 +62,16 @@ Modified map swapping, Fixed errors regarding to vehicle respawn and destroy sen
 ### v3.1.1
 
 Changed Hyperparameters:
-- LEARN_EVERY_N_STEPS = 128 -> 512
-- MINIBATCH_SIZE = 32 -> 64
-- EPISODE_LENGTH = 640 -> 1024
-- EPISODES = 1e5 -> 1e8 (Negligible at the moment)
+- LEARN_EVERY_N_STEPS = 128 -> **512**
+- EPISODE_LENGTH = 640 -> **1024**
+- MINIBATCH_SIZE = 32 -> **64**
+- EPISODES = 1e5 -> **1e8** (Negligible at the moment)
+
+### v3.1.2
+
+Changed Hyperparameters:
+- LEARN_EVERY_N_STEPS = 512 -> **1024**
+- EPISODE_LENGTH = 1024 -> **512**
+- NUM_EPOCHS = 6 -> **4**
+- ACTOR_LEARNING_RATE = 1e-4 -> **3e-4**
+- CRITIC_LEARNING_RATE = 2.5e-4 -> **3e-4**
