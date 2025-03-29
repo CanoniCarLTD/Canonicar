@@ -25,7 +25,7 @@ st.markdown("""
 # Centered title
 st.markdown('<div class="title">Live YouTube Video</div>', unsafe_allow_html=True)
 
-video_id = "yUa9mgTmDj8" 
+video_id = "DFOeRcof5Zs" 
 live_embed = f"""
 <div class="video-container">
     <iframe src="https://www.youtube.com/embed/{video_id}?autoplay=1&controls=0&modestbranding=1&rel=0&vq=hd1080" 
