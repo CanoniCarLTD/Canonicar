@@ -60,7 +60,7 @@ def generate_tracks(config: dict, generated_track_path):
                 if attr in adj:
                     setattr(track_gen, f"_{attr}", getattr(track_gen, f"_{attr}") + adj[attr])
             track_gen.create_track()
-            xodr_path = os.path.join(output_path,f"{track_name}.xodr")
+            xodr_path = os.path.join("ros_bridge\src\map_loader\map_loader",f"{track_name}.xodr")
             line_path = os.path.join(output_path,f"{track_name}.line")
             trackgen(line_path, xodr_path)
         except Exception as e:
@@ -149,6 +149,7 @@ def create_xodr_file(
     plan_view = ET.SubElement(road, "planView")
     s = 0.0  # Cumulative road length
 
+    # Add all geometry segments except the last closing one
     for i in range(len(centerline) - 1):
         x, y, hdg = centerline[i]
         length = segment_lengths[i]
@@ -166,8 +167,10 @@ def create_xodr_file(
         ET.SubElement(geometry, "line")
         s += length
 
-    x, y, hdg = centerline[0]
-    ET.SubElement(
+    # Add the final geometry element that closes the loop
+    x, y, hdg = centerline[-1]  # Use the last point from centerline
+    close_length = segment_lengths[0]  # Distance back to the starting point
+    geometry = ET.SubElement(
         plan_view,
         "geometry",
         {
@@ -175,10 +178,10 @@ def create_xodr_file(
             "x": f"{x:.5f}",
             "y": f"{y:.5f}",
             "hdg": f"{hdg:.5f}",
-            "length": f"{segment_lengths[0]:.5f}",
+            "length": f"{close_length:.5f}",
         },
     )
-    s += length
+    ET.SubElement(geometry, "line")  # Don't forget to add the line element!
 
     # Add lanes
     lanes = ET.SubElement(road, "lanes")
