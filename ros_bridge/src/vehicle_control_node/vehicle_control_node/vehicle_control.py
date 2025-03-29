@@ -7,8 +7,8 @@ class VehicleControlNode(Node):
     def __init__(self):
         super().__init__('vehicle_control_node')
                 
-        self.declare_parameter("host", "localhost")  # Default fallback value
-        self.declare_parameter("port", 2000)        # Default fallback value
+        self.declare_parameter("host", "localhost") 
+        self.declare_parameter("port", 2000)        
         self.declare_parameter("vehicle_type", "vehicle.tesla.model3")
 
         self.host = self.get_parameter("host").value
@@ -36,6 +36,21 @@ class VehicleControlNode(Node):
             self.control_callback,
             10
         )
+
+        self.collision_sub = self.create_subscription(
+            String,
+            '/collision_detected',
+            self.collision_callback,
+            10
+        )
+        
+        # Subscribe to simulation state
+        self.state_sub = self.create_subscription(
+            String,
+            '/simulation/state',
+            self.state_callback,
+            10
+        )
         
         # Create vehicle ready service server
         self.vehicle_ready_server = self.create_service(
@@ -46,25 +61,41 @@ class VehicleControlNode(Node):
 
         self.get_logger().info('VehicleControlNode initialized')
 
+
+    def state_callback(self, msg):
+        """Handle simulation state updates"""
+        state_msg = msg.data
+        
+        if state_msg.startswith("RESPAWNING:") or state_msg.startswith("MAP_SWAPPING:"):
+            self.vehicle = None
+
+
+    def collision_callback(self, msg):
+        """Handle collision events"""
+        collision_info = msg.data
+        self.get_logger().warn(f"Collision detected: {collision_info}")
+        
+        # Temporarily stop the vehicle
+        if self.vehicle:
+            control = VehicleControl()
+            control.steer = 0.0
+            control.throttle = 0.0
+            control.brake = 1.0
+            self.vehicle.apply_control(control)
+            self.get_logger().info("Applied emergency brake after collision")
     
     def handle_vehicle_ready(self, request, response):
         """Service handler when spawn_vehicle_node notifies that a vehicle is ready"""
-        self.get_logger().info(f'Received vehicle_ready notification with vehicle ID: {request.vehicle_id}')
-        
         try:
-            # Find the vehicle with the provided ID
             self.vehicle = self.world.get_actor(request.vehicle_id)
             
             if self.vehicle:
-                self.get_logger().info(f'Successfully found vehicle with ID: {request.vehicle_id}')
                 response.success = True
-                response.message = f"Vehicle control started for vehicle {request.vehicle_id}"
+                response.message = "Vehicle control ready"
             else:
-                self.get_logger().error(f'Could not find vehicle with ID: {request.vehicle_id}')
                 response.success = False
                 response.message = f"Vehicle with ID {request.vehicle_id} not found"
         except Exception as e:
-            self.get_logger().error(f'Error finding vehicle')
             response.success = False
             response.message = f"Error: {str(e)}"
             
@@ -76,20 +107,25 @@ class VehicleControlNode(Node):
             return
             
         steer, throttle, brake = msg.data
-        
-        if self.vehicle:
+        if self.vehicle and self.vehicle.is_alive:
             control = VehicleControl()
             control.steer = float(steer)
             control.throttle = float(throttle)
             control.brake = float(brake)
             self.vehicle.apply_control(control)
+        else:
+            self.get_logger().warn("Control message received but no vehicle available")
 
 def main(args=None):
     rclpy.init(args=args)
     node = VehicleControlNode()
-    rclpy.spin(node)
-    node.destroy_node()
-    rclpy.shutdown()
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        node.get_logger().info("KeyboardInterrupt received, shutting down...")
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
 
 if __name__ == '__main__':
     main()

@@ -1,12 +1,10 @@
-
 services:
-
   # # Carla server container
   # carla:
   #   image: carlasim/carla:0.9.13
   #   container_name: carla_server
   #   runtime: nvidia
-  #   ports: 
+  #   ports:
   #     - 2000-2002:2000-2002
   #   command: >
   #     bash -c "
@@ -42,7 +40,7 @@ services:
   #   command: ros2 launch carla_ros_bridge carla_ros_bridge_with_example_ego_vehicle.launch.py host:=10.10.248.44 port:=2000 timeout:=15
   #   runtime: nvidia
   #   restart: always
-  #   depends_on: 
+  #   depends_on:
   #     carla:
   #       condition: service_started
 
@@ -53,7 +51,7 @@ services:
   #     dockerfile: Dockerfile
   #   container_name: ros2_container
   #   command: ros2 run ros2_utils list_topics_node
-  #   depends_on: 
+  #   depends_on:
   #     bridge:
   #       condition: service_started
 
@@ -67,7 +65,7 @@ services:
     stdin_open: true
     ports:
       - 9090:9090
-      - 6006:6006  # for TensorBoard
+      - 6006:6006 # for TensorBoard
     command: bash -c "
       rosdep update && \
       rosdep install --from-paths src --ignore-src -r -y && \
@@ -76,6 +74,7 @@ services:
       tail -f /dev/null"
     volumes:
       - ./ros_bridge/src:/ros_bridge/src
+      - ./ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models:/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models
     deploy:
       resources:
         reservations:
@@ -86,12 +85,19 @@ services:
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=all
-    # restart: always
-    # depends_on: 
-    #   bridge:
-    #     condition: service_started
-
-  # foxglove to visualize live data 
+      - MONGO_CONNECTION_STRING=${MONGO_CONNECTION_STRING}
+      - MONGO_DB=${MONGO_DB}
+  tensor_board_hosting:
+    build:
+      context: ./tensor_board_hosting/
+      dockerfile: Dockerfile
+    container_name: tensorboard_host
+    ports:
+      - "7007:6006"
+    volumes:
+      - ./ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models:/logdir:ro
+    command: tensorboard --logdir=/logdir --bind_all --port=6006
+  # foxglove to visualize live data
   foxglove_bridge:
     build:
       context: ./docker/foxglove_bridge/
@@ -101,8 +107,6 @@ services:
     container_name: foxglove_bridge
     command: ros2 launch foxglove_bridge foxglove_bridge_launch.xml port:=8765
     restart: always
-    # depends_on: 
+    # depends_on:
     #   bridge:
     #     condition: service_started
-
-
