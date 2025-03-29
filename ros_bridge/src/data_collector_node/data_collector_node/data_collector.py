@@ -85,16 +85,20 @@ class DataCollector(Node):
         
         # Handle different states
         if state_name in ["RESPAWNING", "MAP_SWAPPING"]:
-            # Vehicle is being destroyed, stop data collection and clear buffers
             self.ready_to_collect = False
-            self.setup_done = False
-            self.data_buffer.clear()
             
+            if state_name == "RESPAWNING":
+                if "collision" in details.lower():
+                    self.get_logger().info("Respawning due to collision")
+                elif "episode_complete" in details.lower():
+                    self.get_logger().info("Respawning due to episode completion")
+                else:
+                    self.get_logger().info(f"Respawning for other reason: {details}")
+        
         elif state_name == "RUNNING":
-            # Only mark as running when we've actually received sensor data
-            if self.setup_done:
-                self.ready_to_collect = True
-                self.setup_subscribers()
+            # Don't immediately set ready_to_collect to True
+            # We need to wait for vehicle_ready notification first
+            self.get_logger().info("System returned to RUNNING state, waiting for vehicle ready")
     
     def handle_vehicle_ready(self, msg):
         """Handle notification that a vehicle is ready"""
