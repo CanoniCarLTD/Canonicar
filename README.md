@@ -6,16 +6,26 @@ This repository contains the setup and instructions to run the CARLA simulator w
 
 ## Table of Contents
 
-- [Prerequisites](#prerequisites)
-- [Installation](#installation)
-- [Running the Setup](#running-the-setup)
-  - [1. Run the Load Map Script](#1-run-the-load-map-script)
-  - [2. Build the Docker Image](#2-build-the-docker-image)
-  - [3. Run the Docker Container Interactively](#3-run-the-docker-container-interactively)
-  - [4. Configure and Launch the CARLA Client Inside the Container](#4-configure-and-launch-the-carla-client-inside-the-container)
-- [Troubleshooting](#troubleshooting)
-- [Contributing](#contributing)
-- [License](#license)
+- [Canonicar](#canonicar)
+- [CARLA ROS 2 Client Setup](#carla-ros-2-client-setup)
+  - [Table of Contents](#table-of-contents)
+  - [Prerequisites](#prerequisites)
+  - [Installation](#installation)
+  - [Running the Setup](#running-the-setup)
+    - [1. Build the Docker Image](#1-build-the-docker-image)
+    - [2. Run the Docker Container Interactively](#2-run-the-docker-container-interactively)
+    - [3. Configure and Launch the CARLA Client Inside the Container](#3-configure-and-launch-the-carla-client-inside-the-container)
+      - [a. Source ROS 2 Environment](#a-source-ros-2-environment)
+      - [b. Run the CARLA Pipeline](#b-run-the-carla-pipeline)
+    - [Watching live training metrics progress (STILL NEEDS TESTING)](#watching-live-training-metrics-progress-still-needs-testing)
+  - [Troubleshooting](#troubleshooting)
+  - [Checkpoint \& Model Loading Guide](#checkpoint--model-loading-guide)
+    - [1. Start Training from Scratch](#1-start-training-from-scratch)
+    - [2. Resume Training from an Exact Run (same version)](#2-resume-training-from-an-exact-run-same-version)
+    - [3. Load Model Weights from Another Run/Version](#3-load-model-weights-from-another-runversion)
+  - [Watch nvidia-smi live for GPU machines](#watch-nvidia-smi-live-for-gpu-machines)
+  - [Deploy Tensor_board to view in app](#deploy-tensor_board-to-view-in-app)
+  - [License](#license)
 
 ## Prerequisites
 
@@ -34,8 +44,6 @@ Before you begin, ensure you have the following installed on your machine:
    git clone https://github.com/CanoniCarLTD/Canonicar.git
    cd Canonicar
    ```
-
-
 
 ## Running the Setup
 
@@ -75,8 +83,8 @@ Launch the CARLA pipeline using ROS 2.
 ```bash
 ros2 launch ros_bridge_launch system_launch.py host:=your_host_ip_addres
 ```
-**Replace `your_host_ip_address` with the actual IP address of your host machine.**
 
+**Replace `your_host_ip_address` with the actual IP address of your host machine.**
 
 ### Watching live training metrics progress (STILL NEEDS TESTING)
 
@@ -87,13 +95,16 @@ tensorboard --logdir=/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models 
 ## Troubleshooting
 
 - **Cannot Connect to CARLA Host:**
+
   - Verify that the CARLA server is running and accessible from the Docker container.
 
 - **Docker Compose Issues:**
+
   - Make sure Docker and Docker Compose are properly installed and running.
   - Check for any errors during the `docker compose up --build` process and resolve them accordingly.
 
 - **ROS 2 Errors:**
+
   - Ensure that ROS 2 is correctly sourced and all dependencies are installed.
   - Refer to the [ROS 2 Documentation](https://docs.ros.org/en/foxy/index.html) for detailed troubleshooting steps.
 
@@ -133,8 +144,9 @@ LOAD_STATE_DICT_FROM_RUN = None
 ```
 
 ### 3. Load Model Weights from Another Run/Version
+
 - start a fresh run with a previous run model state dict
-For example if we did trained for a long time and we want to do changes to the code and level up the version - we can load the state dict into a new model.
+  For example if we did trained for a long time and we want to do changes to the code and level up the version - we can load the state dict into a new model.
 
 ```python
 MODEL_LOAD = True
@@ -148,6 +160,32 @@ VERSION = "new_version_for_this_run" # (e.g. "v2.0.0")
 ```bash
 watch -n 1 nvidia-smi
 ```
+
+## Deploy Tensor_board to view in app
+
+1. in order to deploy the tensor board we are going to use ngrok to get an https url to present in streamlint.
+2. first, we need to install ngrok
+3. use WSL/Linux and insert:
+
+```bash
+sudo snap install ngrok
+```
+
+4. sign up to https://ngrok.com
+5. go to your dashboard and copy your auth token. run:
+
+```bash
+ngrok config add-authtoken YOUR_AUTH_TOKEN
+```
+
+6. start the docker compose with `docker compose up`. make sore you create `logs` dir under `tensor_board_hosting`
+7. open another WSL/Linux terminal and run
+
+```bash
+ngrok http 7007
+```
+
+8. put the url at the streamlint app.
 
 ## License
 
