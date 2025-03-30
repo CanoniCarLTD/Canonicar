@@ -55,6 +55,9 @@ a706b6a722cc69fab66c03bd77d9ed59128959332f5fb6477aa8c8751d5f2a4b  path.../preTra
 
 Removed GNSS sensor - Begin new training from scratch
 
+PPO_INPUT_DIM = 203 -> **198** 
+
+
 ### v3.1.0
 
 Modified map swapping, Fixed errors regarding to vehicle respawn and destroy sensors function.

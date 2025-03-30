@@ -205,7 +205,8 @@ class PPOModelNode(Node):
             self.create_new_run_dir()
             self.get_logger().info(f"🆕 Started new training run in: {self.run_dir}")
 
-
+        self.log_hyperparameters()
+        
         # Check if the service is available
         while not self.waypoint_client.wait_for_service(timeout_sec=1.0):
             self.get_logger().info("Waiting for track waypoints service...")
@@ -413,8 +414,11 @@ class PPOModelNode(Node):
 
             if self.current_step_in_episode < self.episode_length:
                 self.current_step_in_episode += 1
+                # action_get_and_publish_Start_time = time.time()
                 self.get_action(self.state)
                 self.publish_action()
+                # action_get_and_publish_duration = time.time() - action_get_and_publish_Start_time
+                # self.get_logger().info(f"Action get and publish duration: {action_get_and_publish_duration:.4f}s")
                 self.calculate_reward()
 
                 # Mark episode as done if episode_length reached
@@ -448,7 +452,11 @@ class PPOModelNode(Node):
                         #     )
                         #     # Force garbage collection
                         #     torch.cuda.empty_cache()
+                        self.get_logger().info("Learning step started")
+                        learn_start_time = time.time()
                         self.actor_loss, self.critic_loss, self.entropy = self.ppo_agent.learn()
+                        learn_duration = time.time() - learn_start_time
+                        self.get_logger().info("Learn duration: {:.4f}s".format(learn_duration))
                         self.get_logger().info(f"entropy: {self.entropy}")
                         self.log_step_metrics()
                         self.log_system_metrics()
@@ -609,7 +617,32 @@ class PPOModelNode(Node):
                 )
         except Exception as e:
             self.get_logger().error(f"❌ Metadata not loaded: {e}")
+    
+    def log_hyperparameters(self):
+        hparams = {
+            "episode_length": EPISODE_LENGTH,
+            "learn_every_N_steps": LEARN_EVERY_N_STEPS,
+            "minibatch_size": MINIBATCH_SIZE,
+            "learn_epochs": NUM_EPOCHS,
+            "actor learning_rate": ACTOR_LEARNING_RATE,
+            "critic learning_rate": CRITIC_LEARNING_RATE,
+            "gamma": GAMMA,
+            "lambda_gae": LAMBDA_GAE,
+            "entropy_coef": ENTROPY_COEF,
+            "policy_clip": POLICY_CLIP,
+            "input_dim": PPO_INPUT_DIM,
+        }
 
+        markdown_table = "|param|value|\n|-|-|\n" + "\n".join(
+            [f"|{key}|{value}|" for key, value in hparams.items()]
+        )
+
+        self.summary_writer.add_text(
+            "hyperparameters/text_summary",
+            markdown_table,
+            global_step=0  # Important for correct rendering
+        )
+        
     def _log_step_metrics_impl(self):
         log_file = os.path.join(self.log_dir, "training_step_log.csv")
         row = {
@@ -658,10 +691,10 @@ class PPOModelNode(Node):
             }
 
             # Save metrics to MongoDB using the existing connection
-            try:
-                self.save_to_mongodb(schema=metrics)
-            except Exception as e:
-                self.get_logger().error(f"❌ Step metrics not saved to MongoDB: {e}")
+            # try:
+            #     self.save_to_mongodb(schema=metrics)
+            # except Exception as e:
+            #     self.get_logger().error(f"❌ Step metrics not saved to MongoDB: {e}")
 
         except Exception as e:
             self.get_logger().error(f"Failed to log step metrics: {e}")
