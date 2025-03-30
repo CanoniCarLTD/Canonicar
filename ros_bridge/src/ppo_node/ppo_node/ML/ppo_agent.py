@@ -37,47 +37,77 @@ class ActorNetwork(nn.Module):
             nn.init.zeros_(layer.bias)
 
     def forward(self, state):
-        x = torch.tanh(self.fc1(state))
-        x = torch.tanh(self.fc2(x))
-        x = torch.tanh(self.fc3(x))
-        
+        x = self.fc1(state)
+        x = torch.tanh(x)
         if not torch.isfinite(x).all():
-            print("🛑 [Actor] Detected NaN or Inf in hidden layers!")
-            print("Input state:", state)
-            raise RuntimeError("Non-finite values in Actor forward pass.")
-        
+            raise RuntimeError(f"NaN/Inf after fc1 → tanh: {x}")
+
+        x = self.fc2(x)
+        x = torch.tanh(x)
+        if not torch.isfinite(x).all():
+            raise RuntimeError(f"NaN/Inf after fc2 → tanh: {x}")
+
+        x = self.fc3(x)
+        x = torch.tanh(x)
+        if not torch.isfinite(x).all():
+            raise RuntimeError(f"NaN/Inf after fc3 → tanh: {x}")
+
         action_mean = self.fc4(x)
-        
-    
-        steering_mean = torch.tanh(action_mean[:, 0:1])  # tanh to restrict to [-1, 1]
-        throttle_mean = torch.sigmoid(
-            action_mean[:, 1:2]
-        )  # sigmoid to restrict to [0, 1]
-        brake_mean = torch.sigmoid(action_mean[:, 2:3])  # sigmoid to restrict to [0, 1]
+        if not torch.isfinite(action_mean).all():
+            raise RuntimeError(f"NaN/Inf in action_mean (before squashing): {action_mean}")
+
+        # Split and squash
+        steering_mean = torch.tanh(action_mean[:, 0:1])
+        throttle_mean = torch.sigmoid(action_mean[:, 1:2])
+        brake_mean = torch.sigmoid(action_mean[:, 2:3])
         action_mean = torch.cat([steering_mean, throttle_mean, brake_mean], dim=1)
+
+        if not torch.isfinite(action_mean).all():
+            raise RuntimeError(f"NaN/Inf in action_mean (after squashing): {action_mean}")
+
         return action_mean
+
 
     def get_dist(self, state):
         action_mean = self.forward(state)
+
+        if not torch.isfinite(self.log_std).all():
+            raise RuntimeError(f"NaN/Inf in log_std: {self.log_std}")
+
         action_std = torch.exp(self.log_std)
+
+        if not torch.isfinite(action_std).all():
+            raise RuntimeError(f"NaN/Inf in exp(log_std): {action_std}")
+
+        if (action_std < 1e-6).any():
+            raise RuntimeError(f"Action std too small: {action_std}")
+
         cov_mat = torch.diag_embed(action_std.expand_as(action_mean))
+        
+        if not torch.isfinite(cov_mat).all():
+            raise RuntimeError(f"NaN/Inf in cov_mat: {cov_mat}")
+        
         dist = MultivariateNormal(action_mean, cov_mat)
         return dist
 
     def sample_action(self, state):
         dist = self.get_dist(state)
         action = dist.sample()
-        action_logprob = dist.log_prob(action).sum(dim=-1, keepdim=True)
-
-        # Clamp actions to appropriate ranges
-        action_np = action.detach().cpu().numpy()
-        action_np[:, 0] = np.clip(action_np[:, 0], -1.0, 1.0)  # steering
-        action_np[:, 1] = np.clip(action_np[:, 1], 0.0, 1.0)  # throttle
-        action_np[:, 2] = np.clip(action_np[:, 2], 0.0, 1.0)  # brake
         
-        action = torch.FloatTensor(action_np).to(device)
+        if not torch.isfinite(action).all():
+            raise RuntimeError(f"NaN/Inf in sampled action: {action}")
 
-        return action, action_logprob
+        action_logprob = dist.log_prob(action).sum(dim=-1, keepdim=True)
+        
+        if not torch.isfinite(action_logprob).all():
+            raise RuntimeError(f"NaN/Inf in log_prob: {action_logprob}")
+        
+        # Clamp and return
+        action[:, 0] = torch.clamp(action[:, 0], -1.0, 1.0)  # steering
+        action[:, 1] = torch.clamp(action[:, 1], 0.0, 1.0)   # throttle
+        action[:, 2] = torch.clamp(action[:, 2], 0.0, 1.0)   # brake
+
+        return action.detach(), action_logprob  # detach if you're not backproping through
 
     def evaluate_actions(self, state, action):
         dist = self.get_dist(state)
@@ -103,14 +133,28 @@ class CriticNetwork(nn.Module):
             nn.init.zeros_(layer.bias)
 
     def forward(self, state):
-        x = torch.tanh(self.fc1(state))
-        x = torch.tanh(self.fc2(x))
-        x = torch.tanh(self.fc3(x))
+        x = self.fc1(state)
+        x = torch.tanh(x)
+        
         if not torch.isfinite(x).all():
-            print("🛑 [Actor] Detected NaN or Inf in hidden layers!")
-            print("Input state:", state)
-            raise RuntimeError("Non-finite values in Actor forward pass.")
+            raise RuntimeError("NaN/Inf after critic fc1")
+
+        x = self.fc2(x)
+        x = torch.tanh(x)
+        
+        if not torch.isfinite(x).all():
+            raise RuntimeError("NaN/Inf after critic fc2")
+
+        x = self.fc3(x)
+        x = torch.tanh(x)
+        
+        if not torch.isfinite(x).all():
+            raise RuntimeError("NaN/Inf after critic fc3")
+
         value = self.fc4(x)
+        
+        if not torch.isfinite(value).all():
+            raise RuntimeError("NaN/Inf in critic output")
         return value
 
 
@@ -219,16 +263,16 @@ class PPOAgent:
     def load_model_and_optimizers(self, directory):
         print(f"Loading model + optimizer from: {directory}")
         try:
-            self.actor.load_state_dict(torch.load(os.path.join(directory, "actor.pth")))
+            self.actor.load_state_dict(torch.load(os.path.join(directory, "actor.pth"), weights_only=True))
             self.critic.load_state_dict(
-                torch.load(os.path.join(directory, "critic.pth"))
+                torch.load(os.path.join(directory, "critic.pth"), weights_only=True)
             )
 
             self.actor_optimizer.load_state_dict(
-                torch.load(os.path.join(directory, "actor_optim.pth"))
+                torch.load(os.path.join(directory, "actor_optim.pth"), weights_only=True)
             )
             self.critic_optimizer.load_state_dict(
-                torch.load(os.path.join(directory, "critic_optim.pth"))
+                torch.load(os.path.join(directory, "critic_optim.pth"), weights_only=True)
             )
 
             print("Model and optimizer states loaded successfully.")

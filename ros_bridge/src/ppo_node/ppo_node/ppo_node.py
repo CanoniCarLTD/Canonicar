@@ -25,6 +25,8 @@ from .ML import ppo_agent
 from .ML import parameters
 from .ML.parameters import *
 
+os.environ["CUDA_LAUNCH_BLOCKING"] = "1"  # Uncomment for debugging CUDA errors
+
 # from .db.mongo_connection import init_db, close_db
 from .db import mongo_connection
 
@@ -56,7 +58,7 @@ class PPOModelNode(Node):
         self.get_logger().info(f"mongo DB is: {self.db}")
         if self.db is None:
             self.get_logger().error("Failed to connect to MongoDB1")
-        train = TRAIN
+
         self.current_step_in_episode = 0
 
         self.data_sub = self.create_subscription(
@@ -91,7 +93,9 @@ class PPOModelNode(Node):
         self.summary_writer = None
         if DETERMINISTIC_CUDNN:
             self.set_global_seed_and_determinism(SEED, DETERMINISTIC_CUDNN)
-
+            
+        # torch.autograd.set_detect_anomaly(True) # slows things down, so only enable it for debugging.
+        
         self.ppo_agent = ppo_agent.PPOAgent()
         self.get_logger().info(f"Model version: {VERSION}")
         self.get_logger().info(f"Checkpoint directory: {PPO_CHECKPOINT_DIR}")
@@ -223,10 +227,12 @@ class PPOModelNode(Node):
     #                                       ACTION PUBLISHING
     ##################################################################################################
 
-    def publish_action(self):
+    def publish_action(self, action=None):
         action_msg = Float32MultiArray()
-        action_msg.data = self.action.tolist()
-        self.get_logger().info(f"Publishing Trottle: {self.action[0]}, Brake: {self.action[1]}, Steering: {self.action[2]}")
+        if action is None:
+            action = self.action
+        action_msg.data = action.tolist()
+        self.get_logger().info(f"Publishing | Steer: {action[0]} | Throttle: {action[1]} | Brake: {action[2]}")
         self.action_publisher.publish(action_msg)
 
     ##################################################################################################
@@ -431,6 +437,9 @@ class PPOModelNode(Node):
                 if self.timestep_counter % LEARN_EVERY_N_STEPS == 0:
                     try:
                         self.get_logger().info("\nLearning step started\n")
+                        # stop vehicle before learning
+                        stop_action = np.array([0.0, 0.0, 1.0], dtype=np.float32)
+                        self.publish_action(stop_action)
                         learn_start_time = time.time()
                         self.actor_loss, self.critic_loss, self.entropy = (
                             self.ppo_agent.learn()
@@ -443,9 +452,6 @@ class PPOModelNode(Node):
                         self.log_system_metrics()
                     except RuntimeError as e:
                         self.get_logger().error(f"CUDA Error during learning: {e}")
-                        # Try to recover - empty cache and continue
-                        if torch.cuda.is_available():
-                            torch.cuda.empty_cache()
                 if self.timestep_counter % SAVE_EVERY_N_TIMESTEPS == 0:
                     self.save_training_state(self.run_dir)
                 if self.done:
@@ -458,7 +464,8 @@ class PPOModelNode(Node):
                     self.reset_run()
 
                     self.summary_writer.flush()  # Added v3.1.1, check that it doesn't break anything
-
+                    # torch.cuda.empty_cache()
+                    
                     self.episode_counter += 1
                     return 1
 
@@ -1208,7 +1215,7 @@ class PPOModelNode(Node):
         os.environ["PYTHONHASHSEED"] = str(seed)
 
         if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+            # torch.cuda.empty_cache()
             torch.cuda.manual_seed(seed)
             torch.cuda.manual_seed_all(seed)
             print("✅ CUDA is available.")
@@ -1287,6 +1294,8 @@ def main(args=None):
             "Keyboard interrupt received, shutting down... (ppo node)"
         )
     finally:
+        time.sleep(1)
+        print("Saving training state in finally block")
         node.save_training_state(node.run_dir)
         node.destroy_node()
         node.shutdown_writer()
