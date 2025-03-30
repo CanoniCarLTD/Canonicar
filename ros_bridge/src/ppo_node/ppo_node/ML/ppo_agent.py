@@ -5,11 +5,10 @@ import torch.optim as optim
 import torch.nn.functional as F
 import numpy as np
 from torch.distributions import MultivariateNormal
-import sys
 from .parameters import *
 
-import ppo_node  # check that it doesnt affect something badly
-
+os.environ["CUDA_LAUNCH_BLOCKING"] = "1"  # Uncomment for debugging CUDA errors
+os.environ["TORCH_USE_CUDA_DSA"] = "1"  # Uncomment for debugging CUDA errors
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 ##################################################################################################
@@ -21,122 +20,94 @@ class ActorNetwork(nn.Module):
     def __init__(self, input_dim, action_dim, action_std_init):
         super(ActorNetwork, self).__init__()
         self.action_dim = action_dim
-        # self.action_var = torch.full(
-        #     (action_dim,), action_std_init * action_std_init
-        # ).to(device) # Been replaced by the line below log_std
         self.log_std = nn.Parameter(
             torch.ones(action_dim) * np.log(action_std_init)
         )  # log_std is learnable
 
-        # Actor network layers
         self.fc1 = nn.Linear(input_dim, 256)
         self.fc2 = nn.Linear(256, 128)
         self.fc3 = nn.Linear(128, 64)
-        self.fc4 = nn.Linear(64, action_dim)  # Output layer for all actions
+        self.fc4 = nn.Linear(64, action_dim)
 
         self.init_weights()
 
     def init_weights(self):
         for layer in [self.fc1, self.fc2, self.fc3, self.fc4]:
-            nn.init.kaiming_normal_(layer.weight)
+            nn.init.xavier_uniform_(layer.weight, gain=nn.init.calculate_gain("tanh"))
             nn.init.zeros_(layer.bias)
 
     def forward(self, state):
-        try:
-            x = F.relu(self.fc1(state))
-            if torch.isnan(x).any():
-                raise ValueError(f"NaN detected after fc1 in ActorNetwork{x}")
-        except ValueError as e:
-            print(e)
-            return None
+        x = self.fc1(state)
+        x = torch.tanh(x)
+        if not torch.isfinite(x).all():
+            raise RuntimeError(f"NaN/Inf after fc1 → tanh: {x}")
 
-        try:
-            x = F.relu(self.fc2(x))
-            if torch.isnan(x).any():
-                raise ValueError(f"NaN detected after fc2 in ActorNetwork{x}")
-        except ValueError as e:
-            print(e)
-            return None
+        x = self.fc2(x)
+        x = torch.tanh(x)
+        if not torch.isfinite(x).all():
+            raise RuntimeError(f"NaN/Inf after fc2 → tanh: {x}")
 
-        try:
-            x = F.relu(self.fc3(x))
-            if torch.isnan(x).any():
-                raise ValueError(f"NaN detected after fc3 in ActorNetwork {x}")
-        except ValueError as e:
-            print(e)
-            return None
+        x = self.fc3(x)
+        x = torch.tanh(x)
+        if not torch.isfinite(x).all():
+            raise RuntimeError(f"NaN/Inf after fc3 → tanh: {x}")
 
-        try:
-            action_mean = self.fc4(x)
-            if torch.isnan(action_mean).any():
-                raise ValueError(f"NaN detected after fc4 in ActorNetwork{x}")
-        except ValueError as e:
-            print(e)
-            return None
+        action_mean = self.fc4(x)
+        if not torch.isfinite(action_mean).all():
+            raise RuntimeError(f"NaN/Inf in action_mean (before squashing): {action_mean}")
 
-        try:
-            steering_mean = torch.tanh(
-                action_mean[:, 0:1]
-            )  # tanh to restrict to [-1, 1]
-            throttle_mean = torch.sigmoid(
-                action_mean[:, 1:2]
-            )  # sigmoid to restrict to [0, 1]
-            brake_mean = torch.sigmoid(
-                action_mean[:, 2:3]
-            )  # sigmoid to restrict to [0, 1]
+        # Split and squash
+        steering_mean = torch.tanh(action_mean[:, 0:1])
+        throttle_mean = torch.sigmoid(action_mean[:, 1:2])
+        brake_mean = torch.sigmoid(action_mean[:, 2:3])
+        action_mean = torch.cat([steering_mean, throttle_mean, brake_mean], dim=1)
 
-            action_mean = torch.cat([steering_mean, throttle_mean, brake_mean], dim=1)
-            if torch.isnan(action_mean).any():
-                raise ValueError(
-                    "NaN detected after concatenating means in ActorNetwork"
-                )
-        except ValueError as e:
-            print(e)
-            return None
+        if not torch.isfinite(action_mean).all():
+            raise RuntimeError(f"NaN/Inf in action_mean (after squashing): {action_mean}")
 
         return action_mean
 
-    # def set_action_std(self, new_action_std):
-    #     self.action_var = torch.full((self.action_dim,), new_action_std * new_action_std).to(device)
 
     def get_dist(self, state):
         action_mean = self.forward(state)
-        # action_var = self.action_var.expand_as(action_mean) # Been replaced by the line below action_std
+
+        if not torch.isfinite(self.log_std).all():
+            raise RuntimeError(f"NaN/Inf in log_std: {self.log_std}")
+
         action_std = torch.exp(self.log_std)
 
-        # Check for NaNs after expand_as
-        if torch.isnan(action_std).any():
-            raise ValueError("NaN detected after expand_as in ActorNetwork")
+        if not torch.isfinite(action_std).all():
+            raise RuntimeError(f"NaN/Inf in exp(log_std): {action_std}")
 
-        # cov_mat = torch.diag_embed(action_var) # Been replaced by the line below cov_mat
+        if (action_std < 1e-6).any():
+            raise RuntimeError(f"Action std too small: {action_std}")
+
         cov_mat = torch.diag_embed(action_std.expand_as(action_mean))
-
-        # Check for NaNs after diag_embed
-        if torch.isnan(cov_mat).any():
-            raise ValueError("NaN detected after diag_embed in ActorNetwork")
-
+        
+        if not torch.isfinite(cov_mat).all():
+            raise RuntimeError(f"NaN/Inf in cov_mat: {cov_mat}")
+        
         dist = MultivariateNormal(action_mean, cov_mat)
         return dist
 
     def sample_action(self, state):
         dist = self.get_dist(state)
         action = dist.sample()
-
-        # Check for NaNs after sampling action
-        if torch.isnan(action).any():
-            raise ValueError("NaN detected after sampling action in ActorNetwork")
+        
+        if not torch.isfinite(action).all():
+            raise RuntimeError(f"NaN/Inf in sampled action: {action}")
 
         action_logprob = dist.log_prob(action).sum(dim=-1, keepdim=True)
+        
+        if not torch.isfinite(action_logprob).all():
+            raise RuntimeError(f"NaN/Inf in log_prob: {action_logprob}")
+        
+        # Clamp and return
+        action[:, 0] = torch.clamp(action[:, 0], -1.0, 1.0)  # steering
+        action[:, 1] = torch.clamp(action[:, 1], 0.0, 1.0)   # throttle
+        action[:, 2] = torch.clamp(action[:, 2], 0.0, 1.0)   # brake
 
-        # Clamp actions to appropriate ranges
-        action_np = action.detach().cpu().numpy()
-        action_np[:, 0] = np.clip(action_np[:, 0], -1.0, 1.0)  # steering
-        action_np[:, 1] = np.clip(action_np[:, 1], 0.0, 1.0)  # throttle
-        action_np[:, 2] = np.clip(action_np[:, 2], 0.0, 1.0)  # brake
-
-        action = torch.FloatTensor(action_np).to(device)
-
-        return action, action_logprob
+        return action.detach(), action_logprob  # detach if you're not backproping through
 
     def evaluate_actions(self, state, action):
         dist = self.get_dist(state)
@@ -153,18 +124,37 @@ class CriticNetwork(nn.Module):
         self.fc2 = nn.Linear(256, 128)
         self.fc3 = nn.Linear(128, 64)
         self.fc4 = nn.Linear(64, 1)
+
         self.init_weights()
 
     def init_weights(self):
         for layer in [self.fc1, self.fc2, self.fc3, self.fc4]:
-            nn.init.kaiming_normal_(layer.weight)
+            nn.init.xavier_uniform_(layer.weight, gain=nn.init.calculate_gain("tanh"))
             nn.init.zeros_(layer.bias)
 
     def forward(self, state):
-        x = F.relu(self.fc1(state))
-        x = F.relu(self.fc2(x))
-        x = F.relu(self.fc3(x))
+        x = self.fc1(state)
+        x = torch.tanh(x)
+        
+        if not torch.isfinite(x).all():
+            raise RuntimeError("NaN/Inf after critic fc1")
+
+        x = self.fc2(x)
+        x = torch.tanh(x)
+        
+        if not torch.isfinite(x).all():
+            raise RuntimeError("NaN/Inf after critic fc2")
+
+        x = self.fc3(x)
+        x = torch.tanh(x)
+        
+        if not torch.isfinite(x).all():
+            raise RuntimeError("NaN/Inf after critic fc3")
+
         value = self.fc4(x)
+        
+        if not torch.isfinite(value).all():
+            raise RuntimeError("NaN/Inf in critic output")
         return value
 
 
@@ -209,11 +199,6 @@ class PPOAgent:
 
         self.learn_step_counter = 0  # Track PPO updates
 
-        self.prefix = "Train" if TRAIN else "Test"  # For logging
-
-        # print(f"Initial action std: {self.actor.log_std.exp().detach().cpu().numpy()}") # To check that log_std.exp() is around ACTION_STD_INIT:
-
-        # Ensure checkpoint directory exists
         if not os.path.exists(PPO_CHECKPOINT_DIR):
             os.makedirs(PPO_CHECKPOINT_DIR)
 
@@ -225,19 +210,17 @@ class PPOAgent:
         """Select an action and return its log probability."""
         state = torch.tensor(state, dtype=torch.float32).to(device).unsqueeze(0)
 
-        # Check if the input dimension matches the expected input dimension
         if state.shape[1] != self.input_dim:
             raise ValueError(
                 f"Expected input dimension {self.input_dim}, but got {state.shape[1]}"
             )
 
-        # Check for NaN values in the input state
         if torch.isnan(state).any():
             raise ValueError(f"NaN detected in input state: {state}")
 
         with torch.no_grad():
             action, log_prob = self.actor.sample_action(state)
-        # print(f"\nSteering: {action[0][0]}, Throttle: {action[0][1]}, Brake: {action[0][2]}\n")
+
         return action.cpu().numpy()[0], log_prob
 
     ##################################################################################################
@@ -261,11 +244,9 @@ class PPOAgent:
         print("Saving model + optimizer...")
         try:
 
-            # Save model parameters
             torch.save(self.actor.state_dict(), os.path.join(directory, "actor.pth"))
             torch.save(self.critic.state_dict(), os.path.join(directory, "critic.pth"))
 
-            # Save optimizer states
             torch.save(
                 self.actor_optimizer.state_dict(),
                 os.path.join(directory, "actor_optim.pth"),
@@ -282,50 +263,21 @@ class PPOAgent:
     def load_model_and_optimizers(self, directory):
         print(f"Loading model + optimizer from: {directory}")
         try:
-            # Load model weights
-            self.actor.load_state_dict(torch.load(os.path.join(directory, "actor.pth")))
+            self.actor.load_state_dict(torch.load(os.path.join(directory, "actor.pth"), weights_only=True))
             self.critic.load_state_dict(
-                torch.load(os.path.join(directory, "critic.pth"))
+                torch.load(os.path.join(directory, "critic.pth"), weights_only=True)
             )
 
-            # Load optimizer states
             self.actor_optimizer.load_state_dict(
-                torch.load(os.path.join(directory, "actor_optim.pth"))
+                torch.load(os.path.join(directory, "actor_optim.pth"), weights_only=True)
             )
             self.critic_optimizer.load_state_dict(
-                torch.load(os.path.join(directory, "critic_optim.pth"))
+                torch.load(os.path.join(directory, "critic_optim.pth"), weights_only=True)
             )
 
             print("Model and optimizer states loaded successfully.")
         except Exception as e:
             print(f"❌ Error loading model and optimizer: {e}")
-
-    ##################################################################################################
-    #                                  DECAY ACTION STD - NOT USED
-    ##################################################################################################
-
-    # Removed for now - trying to use a learnable log_std instead of decaying action_std
-
-    # def decay_action_std(self, episode_num):
-    #     """
-    #     Decay the action standard deviation for the exploration-exploitation tradeoff.
-    #     At the beginning of training, the agent should explore more, so the action_std is higher.
-    #     Due to frequent collisions at the start of training, we wait for more episodes before starting to decay the action_std.
-    #     As training progresses, the agent should exploit more, so the action_std is gradually reduced.
-    #     """
-
-    #     if episode_num < 5000:
-    #         decay_freq = 2500
-    #     else:
-    #         decay_freq = 1000
-
-    #     if episode_num % decay_freq == 0 and self.action_std > MIN_ACTION_STD:
-    #         self.action_std = max(
-    #             MIN_ACTION_STD, self.action_std - ACTION_STD_DECAY_RATE
-    #         )
-    #         self.actor.set_action_std(self.action_std)
-    #         if self.summary_writer is not None:
-    #             self.summary_writer.add_scalar("Exploration/ActionStd", self.action_std, episode_num)
 
     ##################################################################################################
     #                                       NORMALIZE ADVANTAGES
@@ -396,10 +348,8 @@ class PPOAgent:
         rewards = torch.tensor(rewards).to(device)
         dones = torch.tensor(dones).to(device)
 
-        # Normalize rewards
         self.normalize_rewards()
 
-        # Compute advantages
         advantages = self.compute_gae(values, rewards, dones)
 
         total_actor_loss = 0.0
@@ -457,15 +407,9 @@ class PPOAgent:
                     value_loss_unclipped, value_loss_clipped
                 )
 
-                # Critic loss - Old implementation
-                # critic_loss = VF_COEF * F.mse_loss(state_values.view(-1), batch_returns.detach().view(-1))
-
-                # Optimize actor
                 self.actor_optimizer.zero_grad()
                 actor_loss.backward()
-                torch.nn.utils.clip_grad_norm_(
-                    self.actor.parameters(), 0.5
-                )  # Gradient clipping
+                torch.nn.utils.clip_grad_norm_(self.actor.parameters(), 0.5)
                 self.actor_optimizer.step()
 
                 with torch.no_grad():
@@ -473,12 +417,9 @@ class PPOAgent:
                         np.log(0.05), np.log(1.5)
                     )  # Prevent entropy from exploding
 
-                # Optimize critic
                 self.critic_optimizer.zero_grad()
                 critic_loss.backward()
-                torch.nn.utils.clip_grad_norm_(
-                    self.critic.parameters(), 0.5
-                )  # Gradient clipping
+                torch.nn.utils.clip_grad_norm_(self.critic.parameters(), 0.5)
                 self.critic_optimizer.step()
 
                 total_actor_loss += actor_loss.item()
@@ -486,7 +427,6 @@ class PPOAgent:
                 total_entropy += entropy.mean().item()
                 num_batches += 1
 
-        # Increment learn step counter
         self.learn_step_counter += 1
 
         if self.summary_writer is not None:
