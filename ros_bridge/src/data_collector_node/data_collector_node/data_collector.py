@@ -134,7 +134,10 @@ class DataCollector(Node):
 
     def process_data(self, image_msg, lidar_msg, imu_msg):
         """Process sensor data into state vector"""
+        # start_time = time.time()
         vision_features = self.process_vision_data(image_msg, lidar_msg)
+        # end_time = time.time()
+        # self.get_logger().info(f"Vision processing time: {end_time - start_time:.4f} seconds")
         return self.aggregate_state_vector(
             vision_features,
             self.process_imu(imu_msg)
