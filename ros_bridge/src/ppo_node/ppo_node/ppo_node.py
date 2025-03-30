@@ -553,8 +553,11 @@ class PPOModelNode(Node):
 
     def save_training_metadata(self, state_dict_dir):
         log_std = (
-            self.ppo_agent.actor.log_std.detach().cpu().tolist()
-        )  # convert tensor to list
+            self.ppo_agent.actor.log_std
+        )
+        if not torch.isfinite(log_std).all():
+            raise RuntimeError(f"NaN/Inf detected in log_std: {log_std}")
+        log_std = log_std.detach().cpu().tolist()
         meta = {
             "episode_counter": self.episode_counter,
             "timestep_counter": self.timestep_counter,

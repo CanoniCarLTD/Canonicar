@@ -70,10 +70,25 @@ class ActorNetwork(nn.Module):
 
     def get_dist(self, state):
         action_mean = self.forward(state)
-
+            # Ensure log_std is on the same device as state
+            
+        if self.log_std.device != state.device:
+            self.log_std = self.log_std.to(state.device)
+            raise RuntimeError(
+                f"log_std device {self.log_std.device} did not match state device {state.device}, moving log_std to state device"
+            )
+            
         if not torch.isfinite(self.log_std).all():
             raise RuntimeError(f"NaN/Inf in log_std: {self.log_std}")
-
+        
+        # Check log_std with CPU operation first
+        log_std_cpu = self.log_std.detach().cpu()
+        if not torch.isfinite(log_std_cpu).all():
+            print(f"Warning: Non-finite values in log_std: {log_std_cpu}")
+            # Clamp log_std values to a safe range if needed
+            with torch.no_grad():
+                self.log_std.data.clamp_(np.log(0.05), np.log(1.5))
+                
         action_std = torch.exp(self.log_std)
 
         if not torch.isfinite(action_std).all():
@@ -263,16 +278,16 @@ class PPOAgent:
     def load_model_and_optimizers(self, directory):
         print(f"Loading model + optimizer from: {directory}")
         try:
-            self.actor.load_state_dict(torch.load(os.path.join(directory, "actor.pth"), weights_only=True))
+            self.actor.load_state_dict(torch.load(os.path.join(directory, "actor.pth"), weights_only=False))
             self.critic.load_state_dict(
-                torch.load(os.path.join(directory, "critic.pth"), weights_only=True)
+                torch.load(os.path.join(directory, "critic.pth"), weights_only=False)
             )
 
             self.actor_optimizer.load_state_dict(
-                torch.load(os.path.join(directory, "actor_optim.pth"), weights_only=True)
+                torch.load(os.path.join(directory, "actor_optim.pth"), weights_only=False)
             )
             self.critic_optimizer.load_state_dict(
-                torch.load(os.path.join(directory, "critic_optim.pth"), weights_only=True)
+                torch.load(os.path.join(directory, "critic_optim.pth"), weights_only=False)
             )
 
             print("Model and optimizer states loaded successfully.")

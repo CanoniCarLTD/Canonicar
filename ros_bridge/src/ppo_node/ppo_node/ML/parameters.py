@@ -8,9 +8,9 @@ MODEL_LOAD = True
 PPO_CHECKPOINT_DIR = "/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models"
 
 # Set to None unless you're continuing an exact run (same version/run folder)
-CHECKPOINT_FILE = "/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models/v3.2.1/run_20250330_0003"
+CHECKPOINT_FILE = "/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models/v3.3.0/run_20250330_0003"
 
-VERSION = "v3.2.1"
+VERSION = "v3.3.0"
 
 # Point this to a full run directory from any version (must contain actor.pth etc.)
 # Example: "/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models/v2.1.3/run_20250325_0001"
@@ -36,7 +36,7 @@ TOTAL_TIMESTEPS = 2e8  # Total number of timesteps for training
 GAMMA = 0.99
 
 # Exploration settings (action noise)
-ACTION_STD_INIT = 0.4
+ACTION_STD_INIT = 0.2
 ACTION_STD_DECAY_RATE = 0.05 # Not used as we are currently using learnable action std
 MIN_ACTION_STD = 0.05
 
