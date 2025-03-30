@@ -103,6 +103,14 @@ class LoadMapNode(Node):
             self.get_logger().info(f"Using improved OpenDRIVE generation parameters")
             self.client.generate_opendrive_world(opendrive_data, opendrive_params)
             self.world = self.client.get_world()
+
+            settings = self.world.get_settings()
+            settings.synchronous_mode = False
+            settings.fixed_delta_seconds = 0.025  # 40Hz simulation (4× sensor frequency)
+            settings.substepping = True
+            settings.max_substep_delta_time = 0.01  # 100Hz physics calculations
+            settings.max_substeps = 3  # Ensures 0.03 <= 0.01×3
+            self.world.apply_settings(settings)
             
             spectator = self.world.get_spectator()
             spectator.set_transform(carla.Transform(carla.Location(x=-2, y=-4, z=9), carla.Rotation(pitch=-20, yaw=40, roll=0)))
@@ -128,7 +136,6 @@ class LoadMapNode(Node):
             self.publish_state("ERROR")
             self.get_logger().error(f"Error during map setup")
             self.destroy_node()
-
 
     def publish_state(self, state):
         """Publish the current state of the map"""

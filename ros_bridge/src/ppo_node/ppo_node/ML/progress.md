@@ -87,3 +87,8 @@ Changed Hyperparameters:
 ### v3.2.1
 
 - Removed unnecessary prints
+
+### v3.3.0
+
+- Implemented ground filtering
+- Improved Vision Model components

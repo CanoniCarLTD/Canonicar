@@ -8,7 +8,7 @@ from torchvision import transforms
 
 class LiDAREncoder(nn.Module):
     """Lightweight encoder for LiDAR point cloud data converted to a BEV depth map."""
-    def __init__(self, input_channels=1, output_features=64):
+    def __init__(self, input_channels=3, output_features=64):
         super(LiDAREncoder, self).__init__()
         self.conv1 = nn.Conv2d(input_channels, 16, kernel_size=3, stride=2, padding=1)
         self.bn1 = nn.BatchNorm2d(16)
@@ -30,15 +30,12 @@ class LiDAREncoder(nn.Module):
 
 
 class RGBEncoder(nn.Module):
-    """Efficient RGB encoder using MobileNetV2 pretrained on ImageNet."""
     def __init__(self, output_features=128):
         super(RGBEncoder, self).__init__()
         self.mobilenet = models.mobilenet_v2(weights=models.MobileNet_V2_Weights.IMAGENET1K_V1)
-        # Remove classifier, keep only features
-        self.encoder = self.mobilenet.features
+        self.encoder = nn.Sequential(*list(self.mobilenet.features[:10]))
         self.global_pool = nn.AdaptiveAvgPool2d((1, 1))
-        # Last layer of MobileNetV2 features outputs 1280 channels
-        self.fc = nn.Linear(1280, output_features)
+        self.fc = nn.Linear(64, output_features)  # Channel count at layer 10
         
     def forward(self, x):
         x = self.encoder(x)
@@ -67,7 +64,7 @@ class SensorFusionModel(nn.Module):
         
         Args:
             rgb_image (tensor): RGB image [B, 3, H, W]
-            lidar_bev (tensor): LiDAR bird's eye view depth map [B, 1, H, W]
+            lidar_bev (tensor): LiDAR bird's eye view depth map [B, 2, H, W]
             
         Returns:
             tensor: Fused feature vector
@@ -99,62 +96,58 @@ class VisionProcessor:
         self.height_range = height_range
         self.device = device
         
+        self.rgb_mean = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1).to(device)
+        self.rgb_std = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1).to(device)
+        self.rgb_tensor = torch.zeros((1, 3, 224, 224), device=device)
+
         # Create and load the model
-        self.model = SensorFusionModel().to(device)
+        self.model = SensorFusionModel(rgb_features=128, lidar_features=64, final_features=192).to(device)
         self.model.eval()
+
+        # Model warmup for more consistent timing
+        dummy_rgb = torch.zeros((1, 3, 224, 224), device=device)
+        dummy_lidar = torch.zeros((1, 3, 64, 64), device=device)
+        with torch.no_grad():
+            self.model(dummy_rgb, dummy_lidar)
+
         
     def process_rgb(self, rgb_image):
-        """
-        Process RGB image to tensor format
-        
-        Args:
-            rgb_image: np.array of shape [H, W, 3] in RGB format
-            
-        Returns:
-            tensor: Processed RGB tensor ready for the model
-        """
-        # Convert to torch tensor and normalize
+        """Optimized RGB processing with pre-allocated tensors"""
         if isinstance(rgb_image, np.ndarray):
-            # Convert from [H, W, 3] to [3, H, W]
-            # Make sure the array is C-contiguous before converting to tensor
-            rgb_image = np.ascontiguousarray(rgb_image)
-            rgb_tensor = torch.from_numpy(rgb_image).permute(2, 0, 1).float() / 255.0
+            # Use a more direct conversion path with fewer operations
+            if rgb_image.shape[0] == 224 and rgb_image.shape[1] == 224:
+                # Already correct size
+                rgb_tensor = torch.from_numpy(rgb_image).permute(2, 0, 1).float().div_(255.0).unsqueeze(0)
+            else:
+                # Resize using OpenCV instead of torch (much faster)
+                import cv2
+                resized = cv2.resize(rgb_image, (224, 224), interpolation=cv2.INTER_LINEAR)
+                rgb_tensor = torch.from_numpy(resized).permute(2, 0, 1).float().div_(255.0).unsqueeze(0)
+                
+            # Fast normalization 
+            rgb_tensor = rgb_tensor.to(self.device)
+            rgb_tensor = (rgb_tensor - self.rgb_mean) / self.rgb_std
             
-            # Resize to expected input size (224x224 for MobileNetV2)
-            rgb_tensor = F.interpolate(rgb_tensor.unsqueeze(0), size=(224, 224), 
-                                       mode='bilinear', align_corners=False).squeeze(0)
-            
-            # Normalize with ImageNet stats
-            rgb_tensor = torch.clamp(rgb_tensor, 0, 1)
-            normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], 
-                                            std=[0.229, 0.224, 0.225])
-            rgb_tensor = normalize(rgb_tensor)
-            
-            return rgb_tensor.unsqueeze(0).to(self.device)  # Add batch dimension
+            return rgb_tensor
         return None
     
     def lidar_to_bev(self, lidar_points):
         """
-        Convert LiDAR points to bird's eye view depth map
-        
-        Args:
-            lidar_points: List of [x, y, z] points or np.array of shape [N, 3+]
-            
-        Returns:
-            tensor: BEV representation as [1, 1, H, W] tensor
+        Convert LiDAR points to bird's eye view depth map with vectorized operations
         """
         if not isinstance(lidar_points, np.ndarray):
             lidar_points = np.array(lidar_points)
             
-        # Extract x, y, z coordinates (assuming points are [x, y, z, ...])
+        # Extract x, y, z, intensity coordinates
         x, y, z = lidar_points[:, 0], lidar_points[:, 1], lidar_points[:, 2]
+        intensities = lidar_points[:, 3] if lidar_points.shape[1] > 3 else np.ones_like(x)
         
         # Filter points within height range
         mask = (z >= self.height_range[0]) & (z <= self.height_range[1])
-        x, y, z = x[mask], y[mask], z[mask]
+        x, y, z, intensities = x[mask], y[mask], z[mask], intensities[mask]
         
-        # Define grid boundaries (assuming points are centered around vehicle)
-        grid_range = 50.0  # meters in each direction
+        # Define grid boundaries
+        grid_range = 50.0
         grid_size = self.lidar_grid_size
         
         # Calculate grid indices
@@ -163,22 +156,53 @@ class VisionProcessor:
         
         # Filter indices within grid
         mask = (x_indices >= 0) & (x_indices < grid_size[1]) & (y_indices >= 0) & (y_indices < grid_size[0])
-        x_indices, y_indices, z = x_indices[mask], y_indices[mask], z[mask]
+        x_indices, y_indices = x_indices[mask], y_indices[mask]
+        x, y, z, intensities = x[mask], y[mask], z[mask], intensities[mask]
         
-        # Create empty grid
-        grid = np.zeros(grid_size, dtype=np.float32)
+        # Pre-compute all distances once (faster than computing in loop)
+        distances = np.sqrt(x**2 + y**2)
         
-        # Fill grid with max height values
-        for i in range(len(x_indices)):
-            if grid[y_indices[i], x_indices[i]] < z[i]:
-                grid[y_indices[i], x_indices[i]] = z[i]
+        # Initialize grids - combined approach with vectorized operations where possible
+        grid_occupancy = np.zeros(grid_size, dtype=np.float32)
+        grid_distance = np.full(grid_size, 50.0, dtype=np.float32)
         
-        # Normalize grid values to [0, 1]
-        if np.max(grid) > np.min(grid):
-            grid = (grid - np.min(grid)) / (np.max(grid) - np.min(grid))
+        # Create flat indices for faster operations
+        flat_indices = y_indices * grid_size[1] + x_indices
         
-        # Convert to tensor
-        grid_tensor = torch.from_numpy(grid).float().unsqueeze(0).unsqueeze(0)  # [1, 1, H, W]
+        # For density, use numpy's bincount for faster counting
+        grid_density_flat = np.bincount(flat_indices, minlength=grid_size[0]*grid_size[1])
+        grid_density = grid_density_flat.reshape(grid_size)
+        
+        # Create a weighted occupancy that highlights closer barriers
+        distance_weights = 1.0 - (distances / 50.0)
+        distance_weights = np.clip(distance_weights, 0.1, 1.0)
+        
+        # Use a combination of vectorized operations and a loop for occupancy and distance
+        for i in range(len(flat_indices)):
+            idx = flat_indices[i]
+            y_idx, x_idx = y_indices[i], x_indices[i]
+            
+            # Set weighted occupancy based on distance (closer = higher weight)
+            if grid_occupancy[y_idx, x_idx] < distance_weights[i]:
+                grid_occupancy[y_idx, x_idx] = distance_weights[i]
+            
+            # Update minimum distance
+            if grid_distance[y_idx, x_idx] > distances[i]:
+                grid_distance[y_idx, x_idx] = distances[i]
+        
+        # Normalize and invert distance
+        grid_distance = 1.0 - (grid_distance / 50.0)
+        
+        # Normalize density 
+        max_density = np.max(grid_density)
+        if max_density > 0:
+            grid_density = grid_density / max_density
+        
+        # Stack channels
+        grid_combined = np.stack([grid_occupancy, grid_distance, grid_density], axis=0)
+        
+        # Convert to tensor [1, 3, H, W]
+        grid_tensor = torch.from_numpy(grid_combined).float().unsqueeze(0)
         return grid_tensor.to(self.device)
     
     def process_sensor_data(self, rgb_image, lidar_points):

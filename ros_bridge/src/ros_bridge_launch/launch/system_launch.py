@@ -45,6 +45,17 @@ def generate_launch_description():
         'track2.xodr'
     )
 
+    sim_state_node = Node(
+        package='sim_state_node',
+        executable='sim_state', 
+        name='simulation_coordinator',
+        output='screen',
+        parameters=[
+            {'max_collisions': 5}
+        ]
+    )
+
+
     run_load_map_node = Node(
         package='map_loader',
         executable='load_map_node',
@@ -58,6 +69,33 @@ def generate_launch_description():
                 'port': LaunchConfiguration('port'),
             }
         ]
+    )
+
+    vehicle_control_node = Node(
+        package='vehicle_control_node',
+        executable='vehicle_control_node',
+        name='vehicle_control_node',
+        output='screen',
+        parameters=[
+            {
+                'host': LaunchConfiguration('host'),
+                'port': LaunchConfiguration('port'),
+            }
+        ]
+    )
+
+    data_collector_node = Node(
+        package='data_collector_node',
+        executable='data_collector',
+        name='data_collector_node',
+        output='screen'
+    )
+
+    ppo_node = Node(
+        package='ppo_node',
+        executable='ppo_node',
+        name='ppo_node',
+        output='screen'
     )
 
     spawn_vehicle_launch = IncludeLaunchDescription(
@@ -75,55 +113,11 @@ def generate_launch_description():
         }.items()
     )
 
-
     delayed_spawn_vehicle = TimerAction(
         period=5.0,
         actions=[spawn_vehicle_launch]
     )
-    
-    
-        # Add DataCollector node
-    data_collector_node = Node(
-        package='data_collector_node',
-        executable='data_collector',
-        name='data_collector_node',
-        output='screen'
-    )
-
-    delayed_data_collector = TimerAction(
-        period=5.0,  # Delay to ensure vehicle is spawned first
-        actions=[data_collector_node]
-    )
-    ppo_node = Node(
-        package='ppo_node',
-        executable='ppo_node',
-        name='ppo_node',
-        output='screen'
-    )
-    
-    vehicle_control_node = Node(
-        package='vehicle_control_node',
-        executable='vehicle_control_node',
-        name='vehicle_control_node',
-        output='screen',
-        parameters=[
-            {
-                'host': LaunchConfiguration('host'),
-                'port': LaunchConfiguration('port'),
-            }
-        ]
-    )
-
-    sim_state_node = Node(
-        package='sim_state_node',
-        executable='sim_state', 
-        name='simulation_coordinator',
-        output='screen',
-        parameters=[
-            {'max_collisions': 5}
-        ]
-    )
-
+        
     db_service_node = Node(
         package='db_service_node',
         executable='db_service',
@@ -139,7 +133,7 @@ def generate_launch_description():
     ld.add_action(vehicle_control_node)
     ld.add_action(data_collector_node)
     ld.add_action(ppo_node)
-    ld.add_action(db_service_node)
+    #ld.add_action(db_service_node)
     ld.add_action(delayed_spawn_vehicle)
 
     
