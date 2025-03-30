@@ -226,4 +226,7 @@ class VisionProcessor:
         with torch.no_grad():
             features = self.model(rgb_tensor, lidar_tensor)
             
+        if not torch.isfinite(features).all():
+            raise RuntimeError("NaN/Inf in output fused features")
+        
         return features.cpu().numpy()[0]  # Return as numpy array

@@ -15,12 +15,16 @@ import torch.nn as nn
 from std_msgs.msg import Float32MultiArray, String
 from vision_model import VisionProcessor
 
+os.environ["CUDA_LAUNCH_BLOCKING"] = "1"  # Uncomment for debugging CUDA errors
+
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class DataCollector(Node):
     def __init__(self):
         super().__init__("data_collector")
         
+        # torch.autograd.set_detect_anomaly(True) # slows things down, so only enable it for debugging.
+
         # Flag to track collector readiness
         self.ready_to_collect = False
         self.vehicle_id = None
