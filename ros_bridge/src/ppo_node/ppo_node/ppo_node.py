@@ -40,11 +40,12 @@ class PPOModelNode(Node):
         self.current_sim_state = "INITIALIZING"
 
         self.task_queue = Queue()
-        self.worker_thread = threading.Thread(target=self._process_background_tasks, daemon=True)
+        self.worker_thread = threading.Thread(
+            target=self._process_background_tasks, daemon=True
+        )
         self.worker_thread.start()
         self.get_logger().info("Background worker thread started")
-        
-        # Add locks for thread safety
+
         self.metrics_lock = threading.Lock()
         self.model_lock = threading.Lock()
 
@@ -83,7 +84,6 @@ class PPOModelNode(Node):
 
         self.error_logs_pub = self.create_publisher(String, "/training/error_logs", 10)
 
-
         self.location_sub = self.create_subscription(
             Float32MultiArray, "/carla/vehicle/location", self.location_callback, 10
         )
@@ -92,7 +92,6 @@ class PPOModelNode(Node):
         if DETERMINISTIC_CUDNN:
             self.set_global_seed_and_determinism(SEED, DETERMINISTIC_CUDNN)
 
-        # Initialize PPO Agent (loads from checkpoint if available)
         self.ppo_agent = ppo_agent.PPOAgent()
         self.get_logger().info(f"Model version: {VERSION}")
         self.get_logger().info(f"Checkpoint directory: {PPO_CHECKPOINT_DIR}")
@@ -104,7 +103,7 @@ class PPOModelNode(Node):
 
         self.t2 = None
         self.t1 = None
-        
+
         self.actor_loss = 0.0
         self.critic_loss = 0.0
         self.entropy = 0.0
@@ -141,19 +140,15 @@ class PPOModelNode(Node):
         self.last_entropy = None
 
         self.state_subscription = self.create_subscription(
-            String,
-            '/simulation/state',
-            self.handle_system_state,
-            10
+            String, "/simulation/state", self.handle_system_state, 10
         )
 
-        # Create client for the waypoints service
         self.waypoint_client = self.create_client(
             GetTrackWaypoints, "get_track_waypoints"
         )
 
         self.episode_complete_pub = self.create_publisher(
-            String, '/episode_complete', 10
+            String, "/episode_complete", 10
         )
 
         # Check if the service is available
@@ -206,8 +201,7 @@ class PPOModelNode(Node):
             self.get_logger().info(f"🆕 Started new training run in: {self.run_dir}")
 
         self.log_hyperparameters()
-        
-        # Check if the service is available
+
         while not self.waypoint_client.wait_for_service(timeout_sec=1.0):
             self.get_logger().info("Waiting for track waypoints service...")
 
@@ -232,6 +226,7 @@ class PPOModelNode(Node):
     def publish_action(self):
         action_msg = Float32MultiArray()
         action_msg.data = self.action.tolist()
+        self.get_logger().info(f"Publishing Trottle: {self.action[0]}, Brake: {self.action[1]}, Steering: {self.action[2]}")
         self.action_publisher.publish(action_msg)
 
     ##################################################################################################
@@ -321,10 +316,15 @@ class PPOModelNode(Node):
     ##################################################################################################
 
     def store_transition(self):
-        if self.current_sim_state in ["RESPAWNING", "MAP_SWAPPING"] or self.state is None:
-            self.get_logger().debug("Skipping transition storage during respawn or with None state")
+        if (
+            self.current_sim_state in ["RESPAWNING", "MAP_SWAPPING"]
+            or self.state is None
+        ):
+            self.get_logger().debug(
+                "Skipping transition storage during respawn or with None state"
+            )
             return
-        
+
         value = self.ppo_agent.critic(
             torch.tensor(self.state, dtype=torch.float32).to(device).unsqueeze(0)
         ).item()
@@ -356,13 +356,11 @@ class PPOModelNode(Node):
     #                                           THREADING
     ##################################################################################################
 
-
     def _process_background_tasks(self):
         """Worker thread that processes background tasks from the queue"""
         self.get_logger().info("Background task processor started")
         while True:
             try:
-                # Get task from queue
                 task, args, kwargs = self.task_queue.get()
                 if not callable(task):
                     self.get_logger().error(f"Task is not callable: {task}")
@@ -371,25 +369,21 @@ class PPOModelNode(Node):
                 start_time = time.time()
                 task(*args, **kwargs)
                 duration = time.time() - start_time
-                
-                # Log if task took a long time
-                if duration > 0.1:  # More than 100ms
-                    self.get_logger().debug(f"Background task {task.__name__} took {duration:.4f}s")
-                    
-                # Mark task as done
+                if duration > 0.1:
+                    self.get_logger().debug(
+                        f"Background task {task.__name__} took {duration:.4f}s"
+                    )
+
                 self.task_queue.task_done()
             except Exception as e:
                 self.get_logger().error(f"Error in background task: {e}")
 
     def log_system_metrics(self):
         """Queue system metrics logging to run in background"""
-        # Don't run the actual code here - just queue it
         self._queue_background_task(self._log_system_metrics_impl)
 
     def log_step_metrics(self):
         """Queue step metrics logging to run in background"""
-        # Don't run the actual code here - just queue it
-        # self._queue_background_task(self._log_step_metrics_impl(actor_loss, critic_loss, entropy))
         self._queue_background_task(self._log_step_metrics_impl)
 
     def _queue_background_task(self, task, *args, **kwargs):
@@ -405,9 +399,9 @@ class PPOModelNode(Node):
     ##################################################################################################
 
     def training(self, msg):
-        if not hasattr(self, 'ready_to_collect') or not self.ready_to_collect:
+        if not hasattr(self, "ready_to_collect") or not self.ready_to_collect:
             return
-            
+
         if self.timestep_counter < self.total_timesteps:
             self.state = np.array(msg.data, dtype=np.float32)
             self.t1 = datetime.now()
@@ -430,38 +424,24 @@ class PPOModelNode(Node):
                     self.episode_complete_pub.publish(completion_msg)
                     self.get_logger().info("Published episode completion notification")
 
-                # Later, if we detect crashes or other done causes and want to respawn, update:
-                # self.termination_reason = "timeout"
-                # self.termination_reason = "goal_reached"
-
                 self.store_transition()
                 self.timestep_counter += 1
                 self.current_ep_reward += self.reward
 
-                # Log reward at every step (add this line)
-                self.summary_writer.add_scalar(
-                    "Rewards/step reward", self.reward, self.timestep_counter
-                )
-
                 if self.timestep_counter % LEARN_EVERY_N_STEPS == 0:
                     try:
-                        # # Add CUDA memory debug information
-                        # if torch.cuda.is_available():
-                        #     self.get_logger().info(
-                        #         f"CUDA Memory: Allocated: {torch.cuda.memory_allocated()/1024**2:.2f}MB, Reserved: {torch.cuda.memory_reserved()/1024**2:.2f}MB"
-                        #     )
-                        #     # Force garbage collection
-                        #     torch.cuda.empty_cache()
-                        self.get_logger().info("Learning step started")
+                        self.get_logger().info("\nLearning step started\n")
                         learn_start_time = time.time()
-                        self.actor_loss, self.critic_loss, self.entropy = self.ppo_agent.learn()
+                        self.actor_loss, self.critic_loss, self.entropy = (
+                            self.ppo_agent.learn()
+                        )
                         learn_duration = time.time() - learn_start_time
-                        self.get_logger().info("Learn duration: {:.4f}s".format(learn_duration))
-                        self.get_logger().info(f"entropy: {self.entropy}")
+                        self.get_logger().info(
+                            "Learn duration: {:.4f}s".format(learn_duration)
+                        )
                         self.log_step_metrics()
                         self.log_system_metrics()
                     except RuntimeError as e:
-                        # Handle CUDA errors
                         self.get_logger().error(f"CUDA Error during learning: {e}")
                         # Try to recover - empty cache and continue
                         if torch.cuda.is_available():
@@ -471,16 +451,14 @@ class PPOModelNode(Node):
                 if self.done:
                     self.t2 = datetime.now()
                     self.get_logger().info(f"Episode duration: {self.t2 - self.t1}")
-
-                    # Save state, log data
                     self.save_training_state(self.run_dir)
                     self.log_episode_metrics()
                     self.log_system_metrics()
                     self.get_logger().info(f"Checkpoint saved at {self.run_dir}")
                     self.reset_run()
-                    
-                    self.summary_writer.flush() # Added v3.1.1, check that it doesn't break anything
-                    
+
+                    self.summary_writer.flush()  # Added v3.1.1, check that it doesn't break anything
+
                     self.episode_counter += 1
                     return 1
 
@@ -513,18 +491,11 @@ class PPOModelNode(Node):
                 # Mark episode as done if episode_length reached
                 if self.current_step_in_episode >= self.episode_length:
                     self.done = True
-
                     self.termination_reason = "episode_length"
-
-                # Later, if we detect crashes or other done causes and want to respawn, update:
-                # self.termination_reason = "timeout"
-                # self.termination_reason = "goal_reached"
-
                 self.store_transition()
                 self.timestep_counter += 1
                 self.current_ep_reward += self.reward
 
-                # Log reward at every step
                 self.summary_writer.add_scalar(
                     "Rewards/step reward", self.reward, self.timestep_counter
                 )
@@ -617,7 +588,7 @@ class PPOModelNode(Node):
                 )
         except Exception as e:
             self.get_logger().error(f"❌ Metadata not loaded: {e}")
-    
+
     def log_hyperparameters(self):
         hparams = {
             "episode_length": EPISODE_LENGTH,
@@ -638,11 +609,9 @@ class PPOModelNode(Node):
         )
 
         self.summary_writer.add_text(
-            "hyperparameters/text_summary",
-            markdown_table,
-            global_step=0  # Important for correct rendering
+            "hyperparameters/text_summary", markdown_table, global_step=0
         )
-        
+
     def _log_step_metrics_impl(self):
         log_file = os.path.join(self.log_dir, "training_step_log.csv")
         row = {
@@ -652,7 +621,7 @@ class PPOModelNode(Node):
             "actor_loss": self.actor_loss,
             "critic_loss": self.critic_loss,
             "entropy": self.entropy,
-            "step_reward": self.reward,  # Add step reward to log
+            "step_reward": self.reward,
             "cumulative_reward": self.current_ep_reward,
         }
         write_header = not os.path.exists(log_file)
@@ -662,16 +631,15 @@ class PPOModelNode(Node):
                 writer.writeheader()
             writer.writerow(row)
 
-        self.summary_writer.add_scalar("Loss/actor", self.actor_loss, self.timestep_counter)
+        self.summary_writer.add_scalar(
+            "Loss/actor", self.actor_loss, self.timestep_counter
+        )
         self.summary_writer.add_scalar(
             "Loss/critic", self.critic_loss, self.timestep_counter
         )
         self.summary_writer.add_scalar("Entropy", self.entropy, self.timestep_counter)
         self.summary_writer.add_scalar(
             "Rewards/step_reward", self.reward, self.timestep_counter
-        )
-        self.summary_writer.add_scalar(
-            "Rewards/cumulative_reward", self.current_ep_reward, self.timestep_counter
         )
 
         try:
@@ -680,8 +648,12 @@ class PPOModelNode(Node):
                 "episode": self.episode_counter,
                 "step": self.timestep_counter,
                 "timestep": self.timestep_counter * 64,  # Assuming batch size is 64
-                "actor_loss": float(self.actor_loss) if self.actor_loss is not None else None,
-                "critic_loss": float(self.critic_loss) if self.critic_loss is not None else None,
+                "actor_loss": (
+                    float(self.actor_loss) if self.actor_loss is not None else None
+                ),
+                "critic_loss": (
+                    float(self.critic_loss) if self.critic_loss is not None else None
+                ),
                 "entropy": float(self.entropy) if self.entropy is not None else None,
                 "action_std": float(self.ppo_agent.action_std),
                 "step_reward": float(
@@ -721,7 +693,8 @@ class PPOModelNode(Node):
 
     def log_episode_metrics(self):
         log_file = os.path.join(
-            self.log_dir, "training_episode_log.csv" if TRAIN else "testing_episode_log.csv"
+            self.log_dir,
+            "training_episode_log.csv" if TRAIN else "testing_episode_log.csv",
         )
         row = {
             "episode": self.episode_counter,
@@ -742,19 +715,18 @@ class PPOModelNode(Node):
 
         prefix = "Train" if TRAIN else "Test"
         self.summary_writer.add_scalar(
-            f"{prefix}/Episode Duration (s)",
+            f"Episode/Episode Duration (s)",
             (self.t2 - self.t1).total_seconds(),
             self.episode_counter,
         )
         self.summary_writer.add_scalar(
-            f"{prefix}/Episode Reward", self.current_ep_reward, self.episode_counter
-        )
-        self.summary_writer.add_scalar(
-            f"{prefix}/Episode Length",
+            f"Episode/Episode Length",
             self.current_step_in_episode,
             self.episode_counter,
         )
-
+        self.summary_writer.add_scalar(
+            f"Rewards/Episode Reward", self.current_ep_reward, self.episode_counter
+        )
 
     def log_and_publish_episode_metrics(self):
         metrics = {
@@ -769,13 +741,11 @@ class PPOModelNode(Node):
             "episode_length": self.current_step_in_episode,
             "train": TRAIN,
         }
-
         msg = String()
         msg.data = json.dumps(metrics)
         self.episode_metrics_pub.publish(msg)
 
     def log_and_publish_performance_metrics(self):
-        # Publish performance metrics
         performance = {
             "episode_id": f"ep_{self.episode_counter}",
             "lap_times": [],  # Add actual lap times if available
@@ -789,7 +759,6 @@ class PPOModelNode(Node):
         self.performance_metrics_pub.publish(msg)
 
     def _log_system_metrics_impl(self):
-        # CPU and RAM
         cpu_percent = psutil.cpu_percent()
         ram_percent = psutil.virtual_memory().percent
         process = psutil.Process()
@@ -804,8 +773,6 @@ class PPOModelNode(Node):
         self.summary_writer.add_scalar(
             "System/Process_RAM (MB)", process_mem_mb, self.timestep_counter
         )
-
-        # GPU (if available)
         if torch.cuda.is_available():
             gpu_mem_allocated = torch.cuda.memory_allocated() / 1024**2
             gpu_mem_reserved = torch.cuda.memory_reserved() / 1024**2
@@ -827,18 +794,20 @@ class PPOModelNode(Node):
     def handle_system_state(self, msg):
         """Handle state messages from the simulation coordinator"""
         state_msg = msg.data
-        
+
         # Parse state
-        if ':' in state_msg:
-            state_name, details = state_msg.split(':', 1)
+        if ":" in state_msg:
+            state_name, details = state_msg.split(":", 1)
         else:
             state_name = state_msg
             details = ""
-        
+
         self.current_sim_state = state_name
-        
+
         if state_name == "RESPAWNING":
-            self.get_logger().info(f"State msg: {state_msg} state name: {state_name} details: {details}")
+            self.get_logger().info(
+                f"State msg: {state_msg} state name: {state_name} details: {details}"
+            )
             self.ready_to_collect = False
             # Check the reason for respawning
             if "collision" in details.lower():
@@ -846,33 +815,38 @@ class PPOModelNode(Node):
                 self.collision = True
                 self.done = True
                 self.termination_reason = "collision"
-                
+
                 if self.state is not None:
                     self.calculate_reward()
                     self.store_transition()
-                
-                self.get_logger().info("RESPAWNING due to collision: Paused data collection")
-                
+
+                self.get_logger().info(
+                    "RESPAWNING due to collision: Paused data collection"
+                )
+
             elif "episode_complete" in details.lower():
                 # Episode completed normally - don't apply collision penalty
                 self.collision = False
                 self.done = True
-                self.get_logger().info("RESPAWNING due to episode completion: Paused data collection")            
+                self.get_logger().info(
+                    "RESPAWNING due to episode completion: Paused data collection"
+                )
             else:
-                # Other respawn reason
-                self.get_logger().info(f"RESPAWNING for other reason: {details}: Paused data collection")
-        
+                self.get_logger().info(
+                    f"RESPAWNING for other reason: {details}: Paused data collection"
+                )
+
         elif state_name == "MAP_SWAPPING":
             self.ready_to_collect = False
             self.track_waypoints = []
             self.needs_progress_reset = True
             self.get_logger().info("MAP_SWAPPING: Paused data collection")
-        
+
         elif state_name == "RUNNING":
             # When state is RUNNING, we should be ready to collect data
             self.ready_to_collect = True
             self.get_logger().info("RUNNING: Resumed data collection")
-            
+
             # Also ensure we have waypoints
             if not self.track_waypoints:
                 self.request_track_waypoints()
@@ -882,7 +856,7 @@ class PPOModelNode(Node):
         if not self.waypoint_client.service_is_ready():
             self.retry_timer = self.create_timer(1.0, self.retry_request_waypoints)
             return
-                
+
         request = GetTrackWaypoints.Request()
         future = self.waypoint_client.call_async(request)
         future.add_done_callback(self.handle_track_waypoints)
@@ -896,19 +870,21 @@ class PPOModelNode(Node):
         """Handle waypoints response"""
         try:
             response = future.result()
-            
+
             if len(response.waypoints_x) == 0:
                 self.retry_timer = self.create_timer(2.0, self.retry_request_waypoints)
                 return
-                
+
             # Process waypoints
             self.track_waypoints = []
             for i in range(len(response.waypoints_x)):
-                self.track_waypoints.append((response.waypoints_x[i], response.waypoints_y[i]))
-                
+                self.track_waypoints.append(
+                    (response.waypoints_x[i], response.waypoints_y[i])
+                )
+
             self.track_length = response.track_length
             self.waypoint_count = len(self.track_waypoints)
-            
+
             # Reset progress trackers for the new track
             self.reset_progress_tracking()
         except Exception as e:
@@ -917,9 +893,11 @@ class PPOModelNode(Node):
     def reset_progress_tracking(self):
         """Reset all progress-related variables"""
         if len(self.track_waypoints) == 0:
-            self.get_logger().warn("Can't reset progress tracking - no waypoints available")
+            self.get_logger().warn(
+                "Can't reset progress tracking - no waypoints available"
+            )
             return
-            
+
         self.prev_waypoint_idx = 0
         self.current_waypoint_idx = 0
         self.closest_waypoint_idx = 0
@@ -929,9 +907,9 @@ class PPOModelNode(Node):
         self.total_progress = 0.0
         self.lap_progress = 0.0
         self.needs_progress_reset = False
-        
+
         self.get_logger().info("Track progress variables fully reset for new track")
-    
+
     def location_callback(self, msg):
         """Process vehicle location updates and calculate track progress"""
         if len(self.track_waypoints) == 0:
@@ -1230,6 +1208,7 @@ class PPOModelNode(Node):
         os.environ["PYTHONHASHSEED"] = str(seed)
 
         if torch.cuda.is_available():
+            torch.cuda.empty_cache()
             torch.cuda.manual_seed(seed)
             torch.cuda.manual_seed_all(seed)
             print("✅ CUDA is available.")
@@ -1238,7 +1217,7 @@ class PPOModelNode(Node):
                 if deterministic_cudnn:
                     torch.backends.cudnn.deterministic = True
                     torch.backends.cudnn.benchmark = False
-                    print("✅ CuDNN deterministic mode enabled.")
+                    print("CuDNN deterministic mode enabled.")
                 else:
                     torch.backends.cudnn.deterministic = False
                     torch.backends.cudnn.benchmark = True
@@ -1250,7 +1229,7 @@ class PPOModelNode(Node):
         else:
             print("⚠️ CUDA is not available. Running on CPU.")
 
-        print("✅ Global seed and determinism setup complete.")
+        print("Global seed and determinism setup complete.")
 
     def create_new_run_dir(self, load_from_run=None):
 
@@ -1295,18 +1274,18 @@ class PPOModelNode(Node):
 
         if hasattr(self, "db"):
             mongo_connection.close_db()
-        # super().destroy_node()
 
 
 def main(args=None):
-    # count running time
     start_time = datetime.now()
     rclpy.init(args=args)
     node = PPOModelNode()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
-        node.get_logger().info("Keyboard interrupt received, shutting down... (ppo node)")
+        node.get_logger().info(
+            "Keyboard interrupt received, shutting down... (ppo node)"
+        )
     finally:
         node.save_training_state(node.run_dir)
         node.destroy_node()
