@@ -78,3 +78,17 @@ Changed Hyperparameters:
 - NUM_EPOCHS = 6 -> **4**
 - ACTOR_LEARNING_RATE = 1e-4 -> **3e-4**
 - CRITIC_LEARNING_RATE = 2.5e-4 -> **3e-4**
+
+### v3.2.0
+
+- Changed activation function to tanh (was relu)
+- Changed weights initialization to xavier uniform (was kaiming normal)
+
+### v3.2.1
+
+- Removed unnecessary prints
+
+### v3.3.0
+
+- Implemented ground filtering
+- Improved Vision Model components

@@ -43,7 +43,6 @@ class SpawnVehicleNode(Node):
             self.client.set_timeout(10.0)
             self.world = self.client.get_world()
             settings = self.world.get_settings()
-            settings.synchronous_mode = False
             self.traffic_manager = self.client.get_trafficmanager(8000)
             self.world.apply_settings(settings)
             self.spawned_sensors = []
@@ -202,7 +201,6 @@ class SpawnVehicleNode(Node):
                 self.spawn_sensors(sensors)
                 
             self.notify_vehicle_ready()
-            self.world.tick()
 
             '''
                 AUTOPILOT

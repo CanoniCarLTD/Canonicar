@@ -115,6 +115,8 @@ class DataCollector(Node):
         if not self.ready_to_collect:
             return
         try:
+            # callback_start = time.time()
+
             # Update timestamp to know sensors are active
             self.last_sensor_timestamp = time.time()
             
@@ -126,6 +128,8 @@ class DataCollector(Node):
             
             if not np.isnan(processed_data).any():
                 self.publish_to_PPO.publish(response)
+                # process_time = time.time() - callback_start
+                # self.get_logger().info(f"Sensor sync callback took: {process_time:.4f}s")
             else:
                 self.get_logger().warn("State vector contains NaN values. Skipping...")
                 

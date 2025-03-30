@@ -15,23 +15,23 @@
             {
                 "type": "sensor.camera.rgb",
                 "id": "rgb_front",
-                "spawn_point": {"x": 2.0, "y": 0.0, "z": 2.0, "roll": 0.0, "pitch": 0.0, "yaw": 0.0},
+                "spawn_point": {"x": 2.0, "y": 0.0, "z": 2.0, "roll": 0.0, "pitch": -10.0, "yaw": 0.0},
                 "image_size_x": 640,
                 "image_size_y": 480,
-                "fov": 90.0,
+                "fov": 100.0,
                 "sensor_tick": 0.1
             },
             {
                 "type": "sensor.lidar.ray_cast",
                 "id": "lidar",
                 "spawn_point": {"x": 0.0, "y": 0.0, "z": 2.4, "roll": 0.0, "pitch": 0.0, "yaw": 0.0},
-                "range": 160,
-                "channels": 200,
-                "points_per_second": 452000,
-                "horizontal_fov": 120,
-                "upper_fov": 12.5,
-                "lower_fov": -12.5,
-                "rotation_frequency": 100,
+                "range": 150,                 
+                "channels": 144,               
+                "points_per_second": 452000,    
+                "horizontal_fov": 120,          
+                "upper_fov": 12.5,              
+                "lower_fov": -12.5,            
+                "rotation_frequency": 10,       
                 "sensor_tick": 0.1
             },
             {
@@ -40,7 +40,8 @@
                 "spawn_point": {"x": 2.0, "y": 0.0, "z": 2.0, "roll": 0.0, "pitch": 0.0, "yaw": 0.0},
                 "noise_accel_stddev_x": 0.0, "noise_accel_stddev_y": 0.0, "noise_accel_stddev_z": 0.0,
                 "noise_gyro_stddev_x": 0.0, "noise_gyro_stddev_y": 0.0, "noise_gyro_stddev_z": 0.0,
-                "noise_gyro_bias_x": 0.0, "noise_gyro_bias_y": 0.0, "noise_gyro_bias_z": 0.0
+                "noise_gyro_bias_x": 0.0, "noise_gyro_bias_y": 0.0, "noise_gyro_bias_z": 0.0,
+                "sensor_tick": 0.1
             }
         ]
     }
