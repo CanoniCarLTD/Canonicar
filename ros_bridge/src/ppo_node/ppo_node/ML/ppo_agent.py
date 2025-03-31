@@ -74,7 +74,7 @@ class ActorNetwork(nn.Module):
             
         if self.log_std.device != state.device:
             self.log_std = self.log_std.to(state.device)
-            print(f"Warning: log_std device moved from {self.log_std.device} to {state.device}")
+            self.logger.info(f"Warning: log_std device moved from {self.log_std.device} to {state.device}")
             
         if not torch.isfinite(self.log_std).all():
             raise RuntimeError(f"NaN/Inf in log_std: {self.log_std}")
@@ -82,7 +82,7 @@ class ActorNetwork(nn.Module):
         # Check log_std with CPU operation first
         log_std_cpu = self.log_std.detach().cpu()
         if not torch.isfinite(log_std_cpu).all():
-            print(f"Warning: Non-finite values in log_std: {log_std_cpu}")
+            self.logger.info(f"Warning: Non-finite values in log_std: {log_std_cpu}")
             # Clamp log_std values to a safe range if needed
             with torch.no_grad():
                 self.log_std.data.clamp_(np.log(0.05), np.log(1.5))
@@ -177,13 +177,16 @@ class CriticNetwork(nn.Module):
 
 
 class PPOAgent:
-    def __init__(self, input_dim=198, action_dim=3, summary_writer=None):
-        print("\nInitializing PPO Agent...\n")
-        print("device: ", device)
+    def __init__(self, input_dim=198, action_dim=3, summary_writer=None, logger=None):
+        self.logger = logger
+        if self.logger is None:
+            raise ValueError("Logger not provided. Please provide a logger instance.")
+        self.logger.info("Initializing PPO Agent...")
+        self.logger.info(f"device: {device}")
         self.input_dim = input_dim if PPO_INPUT_DIM is None else PPO_INPUT_DIM
-        print(f"Action input dimension: {self.input_dim}")
+        self.logger.info(f"Action input dimension: {self.input_dim}")
         self.action_dim = action_dim
-        print(f"Action output dimension: {self.action_dim}")
+        self.logger.info(f"Action output dimension: {self.action_dim}")
         self.action_std = ACTION_STD_INIT
 
         self.summary_writer = summary_writer
@@ -214,6 +217,8 @@ class PPOAgent:
 
         if not os.path.exists(PPO_CHECKPOINT_DIR):
             os.makedirs(PPO_CHECKPOINT_DIR)
+    
+        self.logger.info("PPO Agent initialized.")
 
     ##################################################################################################
     #                                        SELECT ACTION
@@ -254,7 +259,7 @@ class PPOAgent:
     ##################################################################################################
 
     def save_model_and_optimizers(self, directory):
-        print("Saving model + optimizer...")
+        self.logger.info("Saving model + optimizer...")
         try:
 
             torch.save(self.actor.state_dict(), os.path.join(directory, "actor.pth"))
@@ -269,12 +274,12 @@ class PPOAgent:
                 os.path.join(directory, "critic_optim.pth"),
             )
 
-            print(f"Model + optimizer saved to {directory}")
+            self.logger.info(f"Model + optimizer saved to {directory}")
         except Exception as e:
-            print(f"❌ Error saving model + optimizer: {e}")
+            self.logger.info(f"❌ Error saving model + optimizer: {e}")
 
     def load_model_and_optimizers(self, directory):
-        print(f"Loading model + optimizer from: {directory}")
+        self.logger.info(f"Loading model + optimizer from: {directory}")
         try:
             self.actor.load_state_dict(torch.load(os.path.join(directory, "actor.pth"), weights_only=False))
             self.critic.load_state_dict(
@@ -288,9 +293,9 @@ class PPOAgent:
                 torch.load(os.path.join(directory, "critic_optim.pth"), weights_only=False)
             )
 
-            print("Model and optimizer states loaded successfully.")
+            self.logger.info("Model and optimizer states loaded successfully.")
         except Exception as e:
-            print(f"❌ Error loading model and optimizer: {e}")
+            self.logger.info(f"❌ Error loading model and optimizer: {e}")
 
     ##################################################################################################
     #                                       NORMALIZE ADVANTAGES
@@ -438,7 +443,7 @@ class PPOAgent:
             current_action_std = torch.exp(self.actor.log_std).mean().item()
             current_log_std = self.actor.log_std.data.cpu().numpy()
 
-            print(
+            self.logger.info(
                 f"[Learn Step {self.learn_step_counter}] log_std: {current_log_std}, action_std: {current_action_std}"
             )
 

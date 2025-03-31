@@ -96,3 +96,4 @@ Changed Hyperparameters:
 ### v3.3.1
 
 - Fixed rewards normalization bug
+- Integration of get_logger into ppo_agent
