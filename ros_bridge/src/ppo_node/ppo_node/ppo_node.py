@@ -36,7 +36,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 class PPOModelNode(Node):
     def __init__(self):
         super().__init__("ppo_model_node")
-
+        self.logger = self.get_logger()
         self.get_logger().info(f"Device is:{device} ")
 
         self.current_sim_state = "INITIALIZING"
@@ -52,7 +52,6 @@ class PPOModelNode(Node):
         self.model_lock = threading.Lock()
 
         self.train = TRAIN
-        self.prefix = "Train" if TRAIN else "Test"
 
         self.db = mongo_connection.init_db()
         self.get_logger().info(f"mongo DB is: {self.db}")
@@ -91,12 +90,12 @@ class PPOModelNode(Node):
         )
 
         self.summary_writer = None
+        
         if DETERMINISTIC_CUDNN:
             self.set_global_seed_and_determinism(SEED, DETERMINISTIC_CUDNN)
             
         # torch.autograd.set_detect_anomaly(True) # slows things down, so only enable it for debugging.
         
-        self.ppo_agent = ppo_agent.PPOAgent()
         self.get_logger().info(f"Model version: {VERSION}")
         self.get_logger().info(f"Checkpoint directory: {PPO_CHECKPOINT_DIR}")
 
@@ -160,7 +159,7 @@ class PPOModelNode(Node):
             self.get_logger().info("Waiting for track waypoints service...")
         self.needs_progress_reset = False
 
-        self.ppo_agent = ppo_agent.PPOAgent(summary_writer=self.summary_writer)
+        self.ppo_agent = ppo_agent.PPOAgent(summary_writer=self.summary_writer, logger=self.get_logger())
 
         if MODEL_LOAD:
             if CHECKPOINT_FILE and LOAD_STATE_DICT_FROM_RUN:
@@ -203,7 +202,7 @@ class PPOModelNode(Node):
         else:
             self.create_new_run_dir()
             self.get_logger().info(f"🆕 Started new training run in: {self.run_dir}")
-
+                    
         self.log_hyperparameters()
 
         while not self.waypoint_client.wait_for_service(timeout_sec=1.0):
@@ -212,7 +211,7 @@ class PPOModelNode(Node):
         self.request_track_waypoints()
 
         self.get_logger().info(
-            "PPOModelNode initialized,subscribed to data topic and PPO model loaded."
+            "PPOModelNode initialized, Subscribed to data topic and PPO model loaded."
         )
 
     ##################################################################################################
@@ -719,7 +718,6 @@ class PPOModelNode(Node):
                 writer.writeheader()
             writer.writerow(row)
 
-        prefix = "Train" if TRAIN else "Test"
         self.summary_writer.add_scalar(
             f"Episode/Episode Duration (s)",
             (self.t2 - self.t1).total_seconds(),
@@ -1206,7 +1204,7 @@ class PPOModelNode(Node):
         Sets global seeds for full reproducibility and configures CuDNN for deterministic behavior.
         Call this at the start of training before any randomness or model initialization.
         """
-        print(f"🔒 [SEEDING] Setting global seed to {seed}")
+        self.get_logger().info(f"🔒 [SEEDING] Setting global seed to {seed}")
 
         random.seed(seed)
         np.random.seed(seed)
@@ -1217,25 +1215,25 @@ class PPOModelNode(Node):
             # torch.cuda.empty_cache()
             torch.cuda.manual_seed(seed)
             torch.cuda.manual_seed_all(seed)
-            print("✅ CUDA is available.")
+            self.get_logger().info("✅ CUDA is available.")
 
             if hasattr(torch.backends, "cudnn") and torch.backends.cudnn.enabled:
                 if deterministic_cudnn:
                     torch.backends.cudnn.deterministic = True
                     torch.backends.cudnn.benchmark = False
-                    print("CuDNN deterministic mode enabled.")
+                    self.get_logger().info("CuDNN deterministic mode enabled.")
                 else:
                     torch.backends.cudnn.deterministic = False
                     torch.backends.cudnn.benchmark = True
-                    print(
+                    self.get_logger().info(
                         "⚠️ CuDNN benchmarking mode enabled (faster but nondeterministic)."
                     )
             else:
-                print("⚠️ CuDNN is not enabled or available.")
+                self.get_logger().info("⚠️ CuDNN is not enabled or available.")
         else:
-            print("⚠️ CUDA is not available. Running on CPU.")
+            self.get_logger().info("⚠️ CUDA is not available. Running on CPU.")
 
-        print("Global seed and determinism setup complete.")
+        self.get_logger().info("Global seed and determinism setup complete.")
 
     def create_new_run_dir(self, load_from_run=None):
 
