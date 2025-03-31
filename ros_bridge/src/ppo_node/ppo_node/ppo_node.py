@@ -331,16 +331,12 @@ class PPOModelNode(Node):
             )
             return
 
-        value = self.ppo_agent.critic(
-            torch.tensor(self.state, dtype=torch.float32).to(device).unsqueeze(0)
-        ).item()
+        value = self.ppo_agent.critic(torch.tensor(self.state, dtype=torch.float32).to(device).unsqueeze(0)).item()
 
-        self.ppo_agent.store_transition(
-            self.state, self.action, float(self.log_prob), value, self.reward, self.done
-        )
+        self.ppo_agent.store_transition(self.state, self.action, float(self.log_prob), value, self.reward, self.done)
 
     ##################################################################################################
-    #                                           RUN RESET
+    #                                           RESET RUN
     ##################################################################################################
 
     def reset_run(self):
@@ -388,9 +384,9 @@ class PPOModelNode(Node):
         """Queue system metrics logging to run in background"""
         self._queue_background_task(self._log_system_metrics_impl)
 
-    def log_step_metrics(self):
+    def log_every_learn_step_metrics(self):
         """Queue step metrics logging to run in background"""
-        self._queue_background_task(self._log_step_metrics_impl)
+        self._queue_background_task(self._log_every_learn_step_metrics_impl)
 
     def _queue_background_task(self, task, *args, **kwargs):
         """Queue a task to run in the background thread"""
@@ -448,7 +444,7 @@ class PPOModelNode(Node):
                         self.get_logger().info(
                             "Learn duration: {:.4f}s".format(learn_duration)
                         )
-                        self.log_step_metrics()
+                        self.log_every_learn_step_metrics()
                         self.log_system_metrics()
                     except RuntimeError as e:
                         self.get_logger().error(f"CUDA Error during learning: {e}")
@@ -622,8 +618,8 @@ class PPOModelNode(Node):
             "hyperparameters/text_summary", markdown_table, global_step=0
         )
 
-    def _log_step_metrics_impl(self):
-        log_file = os.path.join(self.log_dir, "training_step_log.csv")
+    def _log_every_learn_step_metrics_impl(self):
+        log_file = os.path.join(self.log_dir, "training_every_learn_step_log.csv")
         row = {
             "episode": self.episode_counter,
             "step": self.ppo_agent.learn_step_counter,
@@ -680,7 +676,7 @@ class PPOModelNode(Node):
 
         except Exception as e:
             self.get_logger().error(f"Failed to log step metrics: {e}")
-            self.log_error("log_step_metrics", str(e))
+            self.log_error("log_every_learn_step_metrics", str(e))
 
     def save_to_mongodb(self, schema):
         if self.db is not None:

@@ -92,3 +92,7 @@ Changed Hyperparameters:
 
 - Implemented ground filtering
 - Improved Vision Model components
+
+### v3.3.1
+
+- Fixed rewards normalization bug

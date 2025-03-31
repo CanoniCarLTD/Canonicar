@@ -74,9 +74,7 @@ class ActorNetwork(nn.Module):
             
         if self.log_std.device != state.device:
             self.log_std = self.log_std.to(state.device)
-            raise RuntimeError(
-                f"log_std device {self.log_std.device} did not match state device {state.device}, moving log_std to state device"
-            )
+            print(f"Warning: log_std device moved from {self.log_std.device} to {state.device}")
             
         if not torch.isfinite(self.log_std).all():
             raise RuntimeError(f"NaN/Inf in log_std: {self.log_std}")
@@ -311,18 +309,12 @@ class PPOAgent:
 
     def compute_gae(self, values, rewards, dones, gamma=GAMMA, lam=LAMBDA_GAE):
         """Compute Generalized Advantage Estimation (GAE)."""
-        values = torch.cat(
-            (values, torch.zeros(1).to(device))
-        )  # Add zero for last next_value
+        values = torch.cat((values, torch.zeros(1).to(device)))  # Add zero for last next_value
         advantages = torch.zeros_like(rewards).to(device)
         gae = 0
 
         for step in reversed(range(len(rewards))):
-            delta = (
-                rewards[step]
-                + gamma * values[step + 1] * (1 - dones[step])
-                - values[step]
-            )
+            delta = (rewards[step]+ gamma * values[step + 1] * (1 - dones[step])- values[step])
             gae = delta + gamma * lam * (1 - dones[step]) * gae
             advantages[step] = gae
 
@@ -332,11 +324,9 @@ class PPOAgent:
     #                                       NORMALIZE REWARDS
     ##################################################################################################
 
-    def normalize_rewards(self):
+    def normalize_rewards(self, rewards):
         """Normalize rewards before training."""
-        self.rewards = (self.rewards - np.mean(self.rewards)) / (
-            np.std(self.rewards) + 1e-8
-        )
+        return (rewards - rewards.mean()) / (rewards.std() + 1e-8)
 
     ##################################################################################################
     #                                       MAIN PPO ALGORITHM
@@ -363,7 +353,7 @@ class PPOAgent:
         rewards = torch.tensor(rewards).to(device)
         dones = torch.tensor(dones).to(device)
 
-        self.normalize_rewards()
+        rewards = self.normalize_rewards(rewards)
 
         advantages = self.compute_gae(values, rewards, dones)
 
