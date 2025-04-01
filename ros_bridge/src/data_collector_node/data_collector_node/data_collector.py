@@ -15,7 +15,7 @@ import torch.nn as nn
 from std_msgs.msg import Float32MultiArray, String
 from vision_model import VisionProcessor
 
-os.environ["CUDA_LAUNCH_BLOCKING"] = "1"  # Uncomment for debugging CUDA errors
+# os.environ["CUDA_LAUNCH_BLOCKING"] = "1"  # might reduce performance time! Uncomment for debugging CUDA errors
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 

@@ -97,3 +97,8 @@ Changed Hyperparameters:
 
 - Fixed rewards normalization bug
 - Integration of get_logger into ppo_agent
+- Fixed store transition order to align all vars storage
+- Commented cuda bebug flag (slows down the process when turned on)
+
+Changed Hyperparameters:
+- EPISODE_LENGTH = 512 -> **3000**

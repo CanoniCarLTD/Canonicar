@@ -25,7 +25,7 @@ from .ML import ppo_agent
 from .ML import parameters
 from .ML.parameters import *
 
-os.environ["CUDA_LAUNCH_BLOCKING"] = "1"  # Uncomment for debugging CUDA errors
+# os.environ["CUDA_LAUNCH_BLOCKING"] = "1"  # might reduce performance time! Uncomment for debugging CUDA errors
 
 # from .db.mongo_connection import init_db, close_db
 from .db import mongo_connection
@@ -103,6 +103,10 @@ class PPOModelNode(Node):
         self.action = None
         self.reward = 0.0
         self.done = False
+
+        self.prev_state = None # new
+        self.prev_action = None # new
+        self.prev_log_prob = None # new
 
         self.t2 = None
         self.t1 = None
@@ -320,19 +324,27 @@ class PPOModelNode(Node):
     #                                       STORE TRANSITION
     ##################################################################################################
 
-    def store_transition(self):
+    def store_transition(self, state=None, action=None, log_prob=None, reward=None, done=None):
+        state = self.state if state is None else state
         if (
             self.current_sim_state in ["RESPAWNING", "MAP_SWAPPING"]
-            or self.state is None
+            or state is None
         ):
             self.get_logger().debug(
                 "Skipping transition storage during respawn or with None state"
             )
             return
+        
+        action = self.action if action is None else action
+        log_prob = self.log_prob if log_prob is None else log_prob
+        reward = self.reward if reward is None else reward
+        done = self.done if done is None else done
+        
+        assert action is not None, "Trying to store transition with None action!"
 
-        value = self.ppo_agent.critic(torch.tensor(self.state, dtype=torch.float32).to(device).unsqueeze(0)).item()
-
-        self.ppo_agent.store_transition(self.state, self.action, float(self.log_prob), value, self.reward, self.done)
+        value = self.ppo_agent.critic(torch.tensor(state, dtype=torch.float32).to(device).unsqueeze(0)).item()
+        
+        self.ppo_agent.store_transition(state, action, float(log_prob), value, reward, done)
 
     ##################################################################################################
     #                                           RESET RUN
@@ -344,6 +356,9 @@ class PPOModelNode(Node):
         self.action = None
         self.reward = 0.0
         self.done = False
+        self.prev_state = None # new
+        self.prev_action = None # new
+        self.prev_log_prob = None # new
         self.current_ep_reward = 0.0
         self.current_step_in_episode = 0.0
         self.stagnation_counter = 0
@@ -405,16 +420,25 @@ class PPOModelNode(Node):
 
         if self.timestep_counter < self.total_timesteps:
             self.state = np.array(msg.data, dtype=np.float32)
+            
+            self.calculate_reward() # compute reward for previous transition
+            reward_to_store = self.reward
+            done_to_store = self.done
+            if self.prev_state is not None and self.prev_action is not None and self.prev_log_prob is not None:
+                self.store_transition(state=self.prev_state, action=self.prev_action, log_prob=self.prev_log_prob, reward=reward_to_store, done=done_to_store)
+                
             self.t1 = datetime.now()
 
             if self.current_step_in_episode < self.episode_length:
                 self.current_step_in_episode += 1
-                # action_get_and_publish_Start_time = time.time()
                 self.get_action(self.state)
                 self.publish_action()
-                # action_get_and_publish_duration = time.time() - action_get_and_publish_Start_time
-                # self.get_logger().info(f"Action get and publish duration: {action_get_and_publish_duration:.4f}s")
-                self.calculate_reward()
+                
+                self.prev_state = self.state # new
+                self.prev_action = self.action # new
+                self.prev_log_prob = self.log_prob # new
+                
+                # self.calculate_reward() # moved up to compute reward for previous transition
 
                 # Mark episode as done if episode_length reached
                 if self.current_step_in_episode >= self.episode_length:
@@ -425,7 +449,7 @@ class PPOModelNode(Node):
                     self.episode_complete_pub.publish(completion_msg)
                     self.get_logger().info("Published episode completion notification")
 
-                self.store_transition()
+                # self.store_transition()
                 self.timestep_counter += 1
                 self.current_ep_reward += self.reward
 
@@ -626,7 +650,7 @@ class PPOModelNode(Node):
             "actor_loss": self.actor_loss,
             "critic_loss": self.critic_loss,
             "entropy": self.entropy,
-            "step_reward": self.reward,
+            "learn_step_reward": self.reward,
             "cumulative_reward": self.current_ep_reward,
         }
         write_header = not os.path.exists(log_file)
@@ -644,7 +668,7 @@ class PPOModelNode(Node):
         )
         self.summary_writer.add_scalar("Entropy", self.entropy, self.timestep_counter)
         self.summary_writer.add_scalar(
-            "Rewards/step_reward", self.reward, self.timestep_counter
+            "Rewards/learn_step_reward", self.reward, self.timestep_counter
         )
 
         try:
@@ -820,9 +844,15 @@ class PPOModelNode(Node):
                 self.done = True
                 self.termination_reason = "collision"
 
-                if self.state is not None:
+                # if self.state is not None:
+                #     self.calculate_reward()
+                #     self.store_transition()
+                
+                # new
+                if self.prev_state is not None and self.prev_action is not None and self.prev_log_prob is not None:
                     self.calculate_reward()
-                    self.store_transition()
+                    self.store_transition(state=self.prev_state,action=self.prev_action,log_prob=self.prev_log_prob,
+                        reward=self.reward,done=True)
 
                 self.get_logger().info(
                     "RESPAWNING due to collision: Paused data collection"

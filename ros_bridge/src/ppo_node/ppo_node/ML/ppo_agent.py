@@ -7,8 +7,9 @@ import numpy as np
 from torch.distributions import MultivariateNormal
 from .parameters import *
 
-os.environ["CUDA_LAUNCH_BLOCKING"] = "1"  # Uncomment for debugging CUDA errors
-os.environ["TORCH_USE_CUDA_DSA"] = "1"  # Uncomment for debugging CUDA errors
+# os.environ["CUDA_LAUNCH_BLOCKING"] = "1"  # might reduce performance time! Uncomment for debugging CUDA errors
+os.environ["TORCH_USE_CUDA_DSA"] = "1"
+
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 ##################################################################################################
@@ -204,7 +205,7 @@ class PPOAgent:
         )
 
         # Experience storage
-        self.states, self.actions, self.probs, self.vals, self.rewards, self.dones = (
+        self.states, self.actions, self.log_probs, self.vals, self.rewards, self.dones = (
             [],
             [],
             [],
@@ -245,11 +246,11 @@ class PPOAgent:
     #                                     STORE LAST EXPERIENCE
     ##################################################################################################
 
-    def store_transition(self, state, action, prob, val, reward, done):
+    def store_transition(self, state, action, log_prob, val, reward, done):
         """Store experience for PPO updates. (every stored data will be used in the next update)"""
         self.states.append(state)
         self.actions.append(action)
-        self.probs.append(prob)
+        self.log_probs.append(log_prob)
         self.vals.append(val)
         self.rewards.append(reward)
         self.dones.append(done)
@@ -345,7 +346,7 @@ class PPOAgent:
         # Convert lists to numpy arrays first
         states = np.array(self.states, dtype=np.float32)
         actions = np.array(self.actions, dtype=np.float32)
-        old_probs = np.array(self.probs, dtype=np.float32)
+        old_log_probs = np.array(self.log_probs, dtype=np.float32)
         values = np.array(self.vals, dtype=np.float32)
         rewards = np.array(self.rewards, dtype=np.float32)
         dones = np.array(self.dones, dtype=np.float32)
@@ -353,7 +354,8 @@ class PPOAgent:
         # Convert lists to tensors
         states = torch.tensor(states).to(device)
         actions = torch.tensor(actions).to(device)
-        old_probs = torch.tensor(old_probs).to(device).detach()
+        # old_log_probs = torch.tensor(old_log_probs).to(device).detach()
+        old_log_probs = torch.tensor(np.array(self.log_probs), dtype=torch.float32).to(device).detach().unsqueeze(1) # To match the shape of new_probs
         values = torch.tensor(values).to(device).detach()
         rewards = torch.tensor(rewards).to(device)
         dones = torch.tensor(dones).to(device)
@@ -375,18 +377,18 @@ class PPOAgent:
 
                 batch_states = states[batch]
                 batch_actions = actions[batch]
-                batch_old_probs = old_probs[batch]
+                batch_old_log_probs = old_log_probs[batch]
                 batch_advantages = advantages[batch]
                 batch_returns = batch_advantages + values[batch]  # Proper critic target
 
                 # Get new action probabilities and entropy
-                new_probs, entropy = self.actor.evaluate_actions(
+                new_log_probs, entropy = self.actor.evaluate_actions(
                     batch_states, batch_actions
                 )
                 state_values = self.critic(batch_states).squeeze()
 
                 # PPO ratio
-                ratio = torch.exp(new_probs - batch_old_probs)
+                ratio = torch.exp(new_log_probs - batch_old_log_probs)
 
                 # PPO loss terms
                 surr1 = ratio * batch_advantages
@@ -459,7 +461,7 @@ class PPOAgent:
             )
 
         # Clear stored experiences
-        self.states, self.actions, self.probs, self.vals, self.rewards, self.dones = (
+        self.states, self.actions, self.log_probs, self.vals, self.rewards, self.dones = (
             [],
             [],
             [],
