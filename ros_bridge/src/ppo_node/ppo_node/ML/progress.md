@@ -102,3 +102,9 @@ Changed Hyperparameters:
 
 Changed Hyperparameters:
 - EPISODE_LENGTH = 512 -> **3000**
+
+v3.3.2
+- Lowered upper bound for log_std: log(1.5) -> **log(0.4)**
+
+Changed Hyperparameters:
+- ACTOR_LEARNING_RATE = 3e-4 -> **2.5e-4**
