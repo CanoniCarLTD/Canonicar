@@ -583,6 +583,7 @@ class PPOModelNode(Node):
             "log_std": log_std,
             "current_ep_reward": self.current_ep_reward,
             "current_step_in_episode": self.current_step_in_episode,
+            "learn_step_counter": self.ppo_agent.learn_step_counter,
         }
         # self.save_to_mongodb(meta)
         try:
@@ -603,6 +604,7 @@ class PPOModelNode(Node):
                 self.timestep_counter = meta.get("timestep_counter", 0)
                 self.current_ep_reward = meta.get("current_ep_reward", 0)
                 self.current_step_in_episode = meta.get("current_step_in_episode", 0)
+                self.ppo_agent.learn_step_counter = meta.get("learn_step_counter", 0)
                 log_std_list = meta.get("log_std")
                 if log_std_list is not None:
                     log_std_tensor = torch.tensor(
