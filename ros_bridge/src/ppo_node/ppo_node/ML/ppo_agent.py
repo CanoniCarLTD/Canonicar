@@ -55,7 +55,9 @@ class ActorNetwork(nn.Module):
 
         action_mean = self.fc4(x)
         if not torch.isfinite(action_mean).all():
-            raise RuntimeError(f"NaN/Inf in action_mean (before squashing): {action_mean}")
+            raise RuntimeError(
+                f"NaN/Inf in action_mean (before squashing): {action_mean}"
+            )
 
         # Split and squash
         steering_mean = torch.tanh(action_mean[:, 0:1])
@@ -64,30 +66,33 @@ class ActorNetwork(nn.Module):
         action_mean = torch.cat([steering_mean, throttle_mean, brake_mean], dim=1)
 
         if not torch.isfinite(action_mean).all():
-            raise RuntimeError(f"NaN/Inf in action_mean (after squashing): {action_mean}")
+            raise RuntimeError(
+                f"NaN/Inf in action_mean (after squashing): {action_mean}"
+            )
 
         return action_mean
 
-
     def get_dist(self, state):
         action_mean = self.forward(state)
-            # Ensure log_std is on the same device as state
-            
+        # Ensure log_std is on the same device as state
+
         if self.log_std.device != state.device:
             self.log_std = self.log_std.to(state.device)
-            self.logger.info(f"Warning: log_std device moved from {self.log_std.device} to {state.device}")
-            
+            self.logger.info(
+                f"Warning: log_std device moved from {self.log_std.device} to {state.device}"
+            )
+
         if not torch.isfinite(self.log_std).all():
             raise RuntimeError(f"NaN/Inf in log_std: {self.log_std}")
-        
+
         # Check log_std with CPU operation first
         log_std_cpu = self.log_std.detach().cpu()
         if not torch.isfinite(log_std_cpu).all():
             self.logger.info(f"Warning: Non-finite values in log_std: {log_std_cpu}")
             # Clamp log_std values to a safe range if needed
             with torch.no_grad():
-                self.log_std.data.clamp_(np.log(0.05), np.log(1.5))
-                
+                self.log_std.data.clamp_(np.log(0.05), np.log(0.4))
+
         action_std = torch.exp(self.log_std)
 
         if not torch.isfinite(action_std).all():
@@ -97,31 +102,34 @@ class ActorNetwork(nn.Module):
             raise RuntimeError(f"Action std too small: {action_std}")
 
         cov_mat = torch.diag_embed(action_std.expand_as(action_mean))
-        
+
         if not torch.isfinite(cov_mat).all():
             raise RuntimeError(f"NaN/Inf in cov_mat: {cov_mat}")
-        
+
         dist = MultivariateNormal(action_mean, cov_mat)
         return dist
 
     def sample_action(self, state):
         dist = self.get_dist(state)
         action = dist.sample()
-        
+
         if not torch.isfinite(action).all():
             raise RuntimeError(f"NaN/Inf in sampled action: {action}")
 
         action_logprob = dist.log_prob(action).sum(dim=-1, keepdim=True)
-        
+
         if not torch.isfinite(action_logprob).all():
             raise RuntimeError(f"NaN/Inf in log_prob: {action_logprob}")
-        
+
         # Clamp and return
         action[:, 0] = torch.clamp(action[:, 0], -1.0, 1.0)  # steering
-        action[:, 1] = torch.clamp(action[:, 1], 0.0, 1.0)   # throttle
-        action[:, 2] = torch.clamp(action[:, 2], 0.0, 1.0)   # brake
+        action[:, 1] = torch.clamp(action[:, 1], 0.0, 1.0)  # throttle
+        action[:, 2] = torch.clamp(action[:, 2], 0.0, 1.0)  # brake
 
-        return action.detach(), action_logprob  # detach if you're not backproping through
+        return (
+            action.detach(),
+            action_logprob,
+        )  # detach if you're not backproping through
 
     def evaluate_actions(self, state, action):
         dist = self.get_dist(state)
@@ -149,24 +157,24 @@ class CriticNetwork(nn.Module):
     def forward(self, state):
         x = self.fc1(state)
         x = torch.tanh(x)
-        
+
         if not torch.isfinite(x).all():
             raise RuntimeError("NaN/Inf after critic fc1")
 
         x = self.fc2(x)
         x = torch.tanh(x)
-        
+
         if not torch.isfinite(x).all():
             raise RuntimeError("NaN/Inf after critic fc2")
 
         x = self.fc3(x)
         x = torch.tanh(x)
-        
+
         if not torch.isfinite(x).all():
             raise RuntimeError("NaN/Inf after critic fc3")
 
         value = self.fc4(x)
-        
+
         if not torch.isfinite(value).all():
             raise RuntimeError("NaN/Inf in critic output")
         return value
@@ -205,7 +213,14 @@ class PPOAgent:
         )
 
         # Experience storage
-        self.states, self.actions, self.log_probs, self.vals, self.rewards, self.dones = (
+        (
+            self.states,
+            self.actions,
+            self.log_probs,
+            self.vals,
+            self.rewards,
+            self.dones,
+        ) = (
             [],
             [],
             [],
@@ -218,7 +233,7 @@ class PPOAgent:
 
         if not os.path.exists(PPO_CHECKPOINT_DIR):
             os.makedirs(PPO_CHECKPOINT_DIR)
-    
+
         self.logger.info("PPO Agent initialized.")
 
     ##################################################################################################
@@ -282,16 +297,22 @@ class PPOAgent:
     def load_model_and_optimizers(self, directory):
         self.logger.info(f"Loading model + optimizer from: {directory}")
         try:
-            self.actor.load_state_dict(torch.load(os.path.join(directory, "actor.pth"), weights_only=False))
+            self.actor.load_state_dict(
+                torch.load(os.path.join(directory, "actor.pth"), weights_only=False)
+            )
             self.critic.load_state_dict(
                 torch.load(os.path.join(directory, "critic.pth"), weights_only=False)
             )
 
             self.actor_optimizer.load_state_dict(
-                torch.load(os.path.join(directory, "actor_optim.pth"), weights_only=False)
+                torch.load(
+                    os.path.join(directory, "actor_optim.pth"), weights_only=False
+                )
             )
             self.critic_optimizer.load_state_dict(
-                torch.load(os.path.join(directory, "critic_optim.pth"), weights_only=False)
+                torch.load(
+                    os.path.join(directory, "critic_optim.pth"), weights_only=False
+                )
             )
 
             self.logger.info("Model and optimizer states loaded successfully.")
@@ -315,12 +336,18 @@ class PPOAgent:
 
     def compute_gae(self, values, rewards, dones, gamma=GAMMA, lam=LAMBDA_GAE):
         """Compute Generalized Advantage Estimation (GAE)."""
-        values = torch.cat((values, torch.zeros(1).to(device)))  # Add zero for last next_value
+        values = torch.cat(
+            (values, torch.zeros(1).to(device))
+        )  # Add zero for last next_value
         advantages = torch.zeros_like(rewards).to(device)
         gae = 0
 
         for step in reversed(range(len(rewards))):
-            delta = (rewards[step]+ gamma * values[step + 1] * (1 - dones[step])- values[step])
+            delta = (
+                rewards[step]
+                + gamma * values[step + 1] * (1 - dones[step])
+                - values[step]
+            )
             gae = delta + gamma * lam * (1 - dones[step]) * gae
             advantages[step] = gae
 
@@ -355,7 +382,12 @@ class PPOAgent:
         states = torch.tensor(states).to(device)
         actions = torch.tensor(actions).to(device)
         # old_log_probs = torch.tensor(old_log_probs).to(device).detach()
-        old_log_probs = torch.tensor(np.array(self.log_probs), dtype=torch.float32).to(device).detach().unsqueeze(1) # To match the shape of new_probs
+        old_log_probs = (
+            torch.tensor(np.array(self.log_probs), dtype=torch.float32)
+            .to(device)
+            .detach()
+            .unsqueeze(1)
+        )  # To match the shape of new_probs
         values = torch.tensor(values).to(device).detach()
         rewards = torch.tensor(rewards).to(device)
         dones = torch.tensor(dones).to(device)
@@ -461,7 +493,14 @@ class PPOAgent:
             )
 
         # Clear stored experiences
-        self.states, self.actions, self.log_probs, self.vals, self.rewards, self.dones = (
+        (
+            self.states,
+            self.actions,
+            self.log_probs,
+            self.vals,
+            self.rewards,
+            self.dones,
+        ) = (
             [],
             [],
             [],

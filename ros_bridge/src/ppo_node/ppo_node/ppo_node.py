@@ -1,7 +1,7 @@
-from sensor_msgs.msg import Image, PointCloud2, Imu, NavSatFix
-import rclpy
-from rclpy.node import Node
-from std_msgs.msg import Float32MultiArray, String
+from sensor_msgs.msg import Image, PointCloud2, Imu, NavSatFix  # type: ignore
+import rclpy  # type: ignore
+from rclpy.node import Node  # type: ignore
+from std_msgs.msg import Float32MultiArray, String  # type: ignore
 from ros_interfaces.srv import VehicleReady, GetTrackWaypoints
 import torch
 import numpy as np
@@ -15,7 +15,7 @@ from torch.utils.tensorboard import SummaryWriter
 import math
 import psutil
 import json
-from std_msgs.msg import String
+from std_msgs.msg import String  # type: ignore
 from datetime import datetime
 import threading
 from queue import Queue
@@ -90,12 +90,12 @@ class PPOModelNode(Node):
         )
 
         self.summary_writer = None
-        
+
         if DETERMINISTIC_CUDNN:
             self.set_global_seed_and_determinism(SEED, DETERMINISTIC_CUDNN)
-            
+
         # torch.autograd.set_detect_anomaly(True) # slows things down, so only enable it for debugging.
-        
+
         self.get_logger().info(f"Model version: {VERSION}")
         self.get_logger().info(f"Checkpoint directory: {PPO_CHECKPOINT_DIR}")
 
@@ -104,9 +104,9 @@ class PPOModelNode(Node):
         self.reward = 0.0
         self.done = False
 
-        self.prev_state = None # new
-        self.prev_action = None # new
-        self.prev_log_prob = None # new
+        self.prev_state = None  # new
+        self.prev_action = None  # new
+        self.prev_log_prob = None  # new
 
         self.t2 = None
         self.t1 = None
@@ -163,7 +163,9 @@ class PPOModelNode(Node):
             self.get_logger().info("Waiting for track waypoints service...")
         self.needs_progress_reset = False
 
-        self.ppo_agent = ppo_agent.PPOAgent(summary_writer=self.summary_writer, logger=self.get_logger())
+        self.ppo_agent = ppo_agent.PPOAgent(
+            summary_writer=self.summary_writer, logger=self.get_logger()
+        )
 
         if MODEL_LOAD:
             if CHECKPOINT_FILE and LOAD_STATE_DICT_FROM_RUN:
@@ -206,7 +208,7 @@ class PPOModelNode(Node):
         else:
             self.create_new_run_dir()
             self.get_logger().info(f"🆕 Started new training run in: {self.run_dir}")
-                    
+
         self.log_hyperparameters()
 
         while not self.waypoint_client.wait_for_service(timeout_sec=1.0):
@@ -235,7 +237,9 @@ class PPOModelNode(Node):
         if action is None:
             action = self.action
         action_msg.data = action.tolist()
-        self.get_logger().info(f"Publishing | Steer: {action[0]} | Throttle: {action[1]} | Brake: {action[2]}")
+        self.get_logger().info(
+            f"Publishing | Steer: {action[0]} | Throttle: {action[1]} | Brake: {action[2]}"
+        )
         self.action_publisher.publish(action_msg)
 
     ##################################################################################################
@@ -324,27 +328,30 @@ class PPOModelNode(Node):
     #                                       STORE TRANSITION
     ##################################################################################################
 
-    def store_transition(self, state=None, action=None, log_prob=None, reward=None, done=None):
+    def store_transition(
+        self, state=None, action=None, log_prob=None, reward=None, done=None
+    ):
         state = self.state if state is None else state
-        if (
-            self.current_sim_state in ["RESPAWNING", "MAP_SWAPPING"]
-            or state is None
-        ):
+        if self.current_sim_state in ["RESPAWNING", "MAP_SWAPPING"] or state is None:
             self.get_logger().debug(
                 "Skipping transition storage during respawn or with None state"
             )
             return
-        
+
         action = self.action if action is None else action
         log_prob = self.log_prob if log_prob is None else log_prob
         reward = self.reward if reward is None else reward
         done = self.done if done is None else done
-        
+
         assert action is not None, "Trying to store transition with None action!"
 
-        value = self.ppo_agent.critic(torch.tensor(state, dtype=torch.float32).to(device).unsqueeze(0)).item()
-        
-        self.ppo_agent.store_transition(state, action, float(log_prob), value, reward, done)
+        value = self.ppo_agent.critic(
+            torch.tensor(state, dtype=torch.float32).to(device).unsqueeze(0)
+        ).item()
+
+        self.ppo_agent.store_transition(
+            state, action, float(log_prob), value, reward, done
+        )
 
     ##################################################################################################
     #                                           RESET RUN
@@ -356,9 +363,9 @@ class PPOModelNode(Node):
         self.action = None
         self.reward = 0.0
         self.done = False
-        self.prev_state = None # new
-        self.prev_action = None # new
-        self.prev_log_prob = None # new
+        self.prev_state = None  # new
+        self.prev_action = None  # new
+        self.prev_log_prob = None  # new
         self.current_ep_reward = 0.0
         self.current_step_in_episode = 0.0
         self.stagnation_counter = 0
@@ -420,24 +427,34 @@ class PPOModelNode(Node):
 
         if self.timestep_counter < self.total_timesteps:
             self.state = np.array(msg.data, dtype=np.float32)
-            
-            self.calculate_reward() # compute reward for previous transition
+
+            self.calculate_reward()  # compute reward for previous transition
             reward_to_store = self.reward
             done_to_store = self.done
-            if self.prev_state is not None and self.prev_action is not None and self.prev_log_prob is not None:
-                self.store_transition(state=self.prev_state, action=self.prev_action, log_prob=self.prev_log_prob, reward=reward_to_store, done=done_to_store)
-                
+            if (
+                self.prev_state is not None
+                and self.prev_action is not None
+                and self.prev_log_prob is not None
+            ):
+                self.store_transition(
+                    state=self.prev_state,
+                    action=self.prev_action,
+                    log_prob=self.prev_log_prob,
+                    reward=reward_to_store,
+                    done=done_to_store,
+                )
+
             self.t1 = datetime.now()
 
             if self.current_step_in_episode < self.episode_length:
                 self.current_step_in_episode += 1
                 self.get_action(self.state)
                 self.publish_action()
-                
-                self.prev_state = self.state # new
-                self.prev_action = self.action # new
-                self.prev_log_prob = self.log_prob # new
-                
+
+                self.prev_state = self.state  # new
+                self.prev_action = self.action  # new
+                self.prev_log_prob = self.log_prob  # new
+
                 # self.calculate_reward() # moved up to compute reward for previous transition
 
                 # Mark episode as done if episode_length reached
@@ -484,7 +501,7 @@ class PPOModelNode(Node):
 
                     self.summary_writer.flush()  # Added v3.1.1, check that it doesn't break anything
                     # torch.cuda.empty_cache()
-                    
+
                     self.episode_counter += 1
                     return 1
 
@@ -571,9 +588,7 @@ class PPOModelNode(Node):
         self.load_training_metadata(state_dict_dir)
 
     def save_training_metadata(self, state_dict_dir):
-        log_std = (
-            self.ppo_agent.actor.log_std
-        )
+        log_std = self.ppo_agent.actor.log_std
         if not torch.isfinite(log_std).all():
             raise RuntimeError(f"NaN/Inf detected in log_std: {log_std}")
         log_std = log_std.detach().cpu().tolist()
@@ -849,12 +864,21 @@ class PPOModelNode(Node):
                 # if self.state is not None:
                 #     self.calculate_reward()
                 #     self.store_transition()
-                
+
                 # new
-                if self.prev_state is not None and self.prev_action is not None and self.prev_log_prob is not None:
+                if (
+                    self.prev_state is not None
+                    and self.prev_action is not None
+                    and self.prev_log_prob is not None
+                ):
                     self.calculate_reward()
-                    self.store_transition(state=self.prev_state,action=self.prev_action,log_prob=self.prev_log_prob,
-                        reward=self.reward,done=True)
+                    self.store_transition(
+                        state=self.prev_state,
+                        action=self.prev_action,
+                        log_prob=self.prev_log_prob,
+                        reward=self.reward,
+                        done=True,
+                    )
 
                 self.get_logger().info(
                     "RESPAWNING due to collision: Paused data collection"
