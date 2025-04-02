@@ -60,15 +60,12 @@ class SpawnVehicleNode(Node):
 
         self.vehicle = None
         self.respawn_in_progress = False
+        self.verify_sensor_timer = None
 
         self.collision_publisher = self.create_publisher(
             String,
             "/collision_detected",
             10
-        )
-
-        self.vehicle_ready_pub = self.create_publisher(
-            String, '/vehicle_ready', 10
         )
 
         self.location_publisher = self.create_publisher(
@@ -233,15 +230,19 @@ class SpawnVehicleNode(Node):
         else:
             state_name = state_msg
         
+        self.current_state = state_name
+        
         if state_name == "VEHICLE_SPAWNING":
-            if (not self.vehicle or not self.vehicle.is_alive) and not self.respawn_in_progress:
-                self.get_logger().info("Vehicle spawn state detected, spawning new vehicle...")
-                self.respawn_in_progress = True
-                try:
-                    self.destroy_actors()
-                    self.spawn_objects_from_config()
-                finally:
-                    self.respawn_in_progress = False
+            # Only spawn if we don't already have a vehicle and no spawn is in progress
+            if not self.vehicle and not self.respawn_in_progress:
+                self.get_logger().info("Detected VEHICLE_SPAWNING state - initiating spawn")
+                self.spawn_objects_from_config()
+            else:
+                self.get_logger().info(f"Ignoring VEHICLE_SPAWNING state - vehicle exists: {bool(self.vehicle)}, " +
+                                    f"respawn in progress: {self.respawn_in_progress}")
+        elif state_name == "MAP_SWAPPING":
+            self.get_logger().info(f"Detected {state_name}: {details}")
+            self.destroy_actors()  # Clean up actors during map swap
 
 
     def respawn_vehicle_callback(self, request, response):
@@ -279,19 +280,42 @@ class SpawnVehicleNode(Node):
         
 
     def notify_vehicle_ready(self):
-        """Call the vehicle_ready service to notify the control node"""
+        """Call the vehicle_ready service to notify the simulation coordinator"""
         if not self.vehicle or not self.vehicle.is_alive:
             return
             
         request = VehicleReady.Request()
         request.vehicle_id = self.vehicle.id
         
-        self.get_logger().info(f"Notifying vehicle_control that vehicle {self.vehicle.id} is ready")
+        self.get_logger().info(f"Notifying coordinator that vehicle {self.vehicle.id} is ready")
         future = self.vehicle_ready_client.call_async(request)
 
-        ready_msg = String()
-        ready_msg.data = str(self.vehicle.id)
-        self.vehicle_ready_pub.publish(ready_msg)
+        future.add_done_callback(self.handle_vehicle_ready_response)
+
+    def handle_vehicle_ready_response(self, future):
+        """Handle response from vehicle_ready service"""
+        try:
+            response = future.result()
+            if response.success:
+                self.get_logger().info(f"Vehicle ready acknowledgement: {response.message}")
+            else:
+                self.get_logger().warn(f"Vehicle ready not acknowledged properly: {response.message}")
+        except Exception as e:
+            self.get_logger().error(f"Error in vehicle ready service call: {e}")
+
+    def verify_sensors_active(self):
+        """Check that all sensors are publishing data"""
+        if not self.vehicle or not self.vehicle.is_alive:
+            return
+            
+        active_sensors = sum(1 for sensor_id, info in self.sensors_publishers.items() 
+                            if hasattr(info, "last_publish_time") and 
+                            time.time() - info.get("last_publish_time", 0) < 1.0)
+        
+        if active_sensors == len(self.sensors_publishers):
+            self.get_logger().info(f"All {active_sensors} sensors are active")
+            self.verify_sensor_timer.cancel()
+            self.verify_sensor_timer = None
 
 
     def _on_collision(self, event):
@@ -410,6 +434,8 @@ class SpawnVehicleNode(Node):
                         f"Detected attached object (pseudo) {ao['type']} with id '{ao['id']}'"
                     )
                 
+                self.verify_sensor_timer = self.create_timer(0.5, self.verify_sensors_active)
+
 
             except Exception as e:
                 self.get_logger().error(f"Error spawning sensor '{sensor_def}': {e}")
@@ -478,26 +504,23 @@ class SpawnVehicleNode(Node):
         Clean up all spawned actors (vehicle and sensors) when node shuts down.
         """
         self.get_logger().info("Destroying all spawned actors...")
+        active_ids = set()
         try:
-            # Destroy all sensors first
-            for i, sensor in enumerate(self.spawned_sensors):
-                if sensor is not None:
+            # Get active actor IDs from world for verification
+            for actor in self.world.get_actors():
+                active_ids.add(actor.id)
+                
+            for sensor in self.spawned_sensors:
+                if sensor.id in active_ids:
                     try:
                         sensor.stop()
                         sensor.destroy()
-                    except Exception as e:
-                        self.get_logger().error(f"Failed to destroy sensor: {e}")
-            
-            self.spawned_sensors.clear()
+                        self.get_logger().info(f"Destroyed sensor {sensor.id}")
+                    except:
+                        pass
 
             # Then destroy the vehicle
             if self.vehicle is not None and self.vehicle.is_alive:
-                # Disable autopilot before destroying
-                try:
-                    self.vehicle.set_autopilot(False)
-                except:
-                    pass
-
                 self.vehicle.destroy()
                 self.get_logger().info(f"Destroyed vehicle {self.vehicle.id}")
                 self.vehicle = None
