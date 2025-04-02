@@ -45,6 +45,8 @@ class SimulationCoordinator(Node):
         self.episode_complete_sub = self.create_subscription(
             String, '/episode_complete', self.handle_episode_complete, 10)
         
+        self.wait_for_services_timer = self.create_timer(2.0, self.check_service_availability)
+
         # Create timer for periodic state checks
         self.timer = self.create_timer(0.1, self.state_check)
 
@@ -53,25 +55,47 @@ class SimulationCoordinator(Node):
         self.collision_cooldown = 1.0  # seconds between collision handling
         self.respawn_in_progress = False
         self.vehicle_id = None
+
+        self.map_state_translation = {
+            "MAP_LOADING": SimState.MAP_LOADING,
+            "MAP_READY": SimState.VEHICLE_SPAWNING,
+            "MAP_ERROR": SimState.ERROR,
+            "MAP_SWAPPING": SimState.MAP_SWAPPING,
+        }
         
         self.get_logger().info('Simulation Coordinator started')
         self.publish_state('Initializing simulation')
 
     def state_check(self):
-        """Minimal periodic state check"""
+        """Periodic state check with health monitoring"""
+        # Initial setup check
         if self.state == SimState.INITIALIZING:
             if self.map_swap_client.service_is_ready() and self.respawn_client.service_is_ready():
                 self.state = SimState.RUNNING
                 self.publish_state('Simulation running')
         
-        # Check for stuck respawn (only in respawn state)
+        # Check for stuck respawn 
         elif self.state == SimState.RESPAWNING and self.respawn_in_progress:
             current_time = time.time()
-            # Use last_respawn_time instead of last_collision_time
-            if current_time - self.last_respawn_time > 10.0:  # Increased timeout slightly
+            if current_time - self.last_respawn_time > 10.0:
                 self.get_logger().warn(f"Potential stuck respawn detected after {current_time - self.last_respawn_time:.1f} seconds")
                 self.respawn_in_progress = False
                 self.trigger_respawn("retry_stuck_respawn")
+        
+        
+        elif not self.map_swap_client.service_is_ready() or not self.respawn_client.service_is_ready():
+            self.get_logger().warn("Waiting for critical services to become available...")
+    
+    def check_service_availability(self):
+        """Check if critical services are available"""
+        if self.map_swap_client.service_is_ready() and self.respawn_client.service_is_ready():
+            self.get_logger().info("All critical services are now available")
+            self.wait_for_services_timer.cancel()
+            
+            # If we're in INITIALIZING state, move to next state
+            if self.state == SimState.INITIALIZING:
+                self.state = SimState.MAP_LOADING
+                self.publish_state("Waiting for map to load")
 
 
     def handle_episode_complete(self, msg):
@@ -106,30 +130,43 @@ class SimulationCoordinator(Node):
             self.trigger_respawn(f"Collision: {msg.data}")
     
     def handle_map_state(self, msg):
-        """Handle map state updates from the map loader"""
-        state_message = msg.data
+        """Translate map state messages to simulation states"""
+        map_state = msg.data.split(':')[0] if ':' in msg.data else msg.data
         
-        if state_message == "MAP_READY":
-            if self.state == SimState.MAP_SWAPPING:
-                # Map is ready after a swap, now spawn a vehicle
+        if map_state in self.map_state_translation:
+            new_state = self.map_state_translation[map_state]
+            details = msg.data.split(':')[1] if ':' in msg.data else ""
+            
+            # Handle MAP_READY specially to trigger respawn after map load
+            if map_state == "MAP_READY":
                 self.state = SimState.VEHICLE_SPAWNING
-                self.publish_state('Map ready, waiting for vehicle spawn')
+                self.publish_state(details)
+                
+                # Trigger vehicle respawn now that map is ready
+                self.trigger_respawn("after_map_swap")
+            else:
+                if new_state != self.state:
+                    self.state = new_state
+                    self.publish_state(details)
     
     def handle_vehicle_ready_service(self, request, response):
         """Service handler for vehicle ready notifications"""
         vehicle_id = request.vehicle_id
         self.get_logger().info(f'Vehicle ready notification received for ID: {vehicle_id}')
         
-        if self.state in [SimState.VEHICLE_SPAWNING, SimState.RESPAWNING]:
-            self.vehicle_id = vehicle_id
+        self.vehicle_id = vehicle_id
+        
+        if self.state in [SimState.VEHICLE_SPAWNING, SimState.RESPAWNING, SimState.ERROR]:
             self.respawn_in_progress = False
             self.state = SimState.RUNNING
-            self.publish_state(f'Vehicle {vehicle_id} ready, simulation running')
+            self.publish_state(f'RUNNING:vehicle_{vehicle_id}_ready')
             
             response.success = True
             response.message = f"Simulation coordinator acknowledged vehicle {vehicle_id}"
         else:
-            response.success = True  # Still return success to avoid blocking the spawn process
+            # Even if already in RUNNING state, still publish the vehicle ready notification
+            self.publish_state(f'RUNNING:vehicle_{vehicle_id}_ready')
+            response.success = True
             response.message = f"Acknowledging vehicle {vehicle_id}"
             
         return response
@@ -204,9 +241,12 @@ class SimulationCoordinator(Node):
     def publish_state(self, details=""):
         """Publish current simulation state"""
         msg = String()
-        msg.data = f"{self.state.name}:{details}"
+        if ":" in details:
+            msg.data = details
+        else:
+            msg.data = f"{self.state.name}:{details}"
         self.state_pub.publish(msg)
-        self.get_logger().info(f'State: {self.state.name} - {details}')
+        self.get_logger().info(f'State: {msg.data}')
 
 def main(args=None):
     rclpy.init(args=args)

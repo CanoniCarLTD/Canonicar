@@ -53,10 +53,15 @@ class PPOModelNode(Node):
 
         self.train = TRAIN
 
-        self.db = mongo_connection.init_db()
-        self.get_logger().info(f"mongo DB is: {self.db}")
-        if self.db is None:
-            self.get_logger().error("Failed to connect to MongoDB1")
+        try:
+            self.db = mongo_connection.init_db()
+            if self.db:
+                self.get_logger().info("MongoDB connection established")
+            else:
+                self.get_logger().warn("MongoDB not available - metrics will not be stored")
+        except Exception as e:
+            self.get_logger().warn(f"Failed to connect to MongoDB: {e}")
+            self.db = None
 
         self.current_step_in_episode = 0
 
@@ -71,9 +76,6 @@ class PPOModelNode(Node):
             Float32MultiArray, "/carla/vehicle_control", 10
         )
 
-        self.vehicle_ready_server = self.create_service(
-            VehicleReady, "vehicle_ready", self.handle_vehicle_ready
-        )
 
         self.episode_metrics_pub = self.create_publisher(
             String, "/training/episode_metrics", 10
@@ -88,6 +90,9 @@ class PPOModelNode(Node):
         self.location_sub = self.create_subscription(
             Float32MultiArray, "/carla/vehicle/location", self.location_callback, 10
         )
+
+        self.waypoint_check_timer = self.create_timer(1.0, self.check_waypoint_needs)
+
 
         self.summary_writer = None
 
@@ -137,7 +142,7 @@ class PPOModelNode(Node):
         self.lap_end_time = None
         self.lap_time = None
         self.stagnation_counter = 0
-
+        self.needs_track_waypoints = False
         self.ready_to_collect = False
 
         self.episode_start_time = datetime.now()
@@ -233,6 +238,10 @@ class PPOModelNode(Node):
     ##################################################################################################
 
     def publish_action(self, action=None):
+        if self.current_sim_state in ["RESPAWNING", "MAP_SWAPPING"]:
+            self.get_logger().debug("Skipping action publishing during transition")
+            return
+        
         action_msg = Float32MultiArray()
         if action is None:
             action = self.action
@@ -295,7 +304,7 @@ class PPOModelNode(Node):
             return
 
         # Case 2: Moving forward significantly
-        elif progress_delta > 0.00001:
+        elif progress_delta > 0.001:
             # Reward directly proportional to progress made
             self.reward = progress_multiplier * progress_delta
             self.stagnation_counter = 0  # Reset counter
@@ -842,30 +851,47 @@ class PPOModelNode(Node):
 
         # Parse state
         if ":" in state_msg:
-            state_name, details = state_msg.split(":", 1)
+            state_name, details = state_msg.split(':', 1)
         else:
             state_name = state_msg
             details = ""
 
         self.current_sim_state = state_name
-
-        if state_name == "RESPAWNING":
-            self.get_logger().info(
-                f"State msg: {state_msg} state name: {state_name} details: {details}"
-            )
+        
+        # Reset model state on simulation reset events
+        if state_name == "RUNNING" and "vehicle_" in details and "ready" in details:
+            try:
+                # Extract vehicle_id from "vehicle_{id}_ready"
+                vehicle_id_str = details.split("vehicle_")[1].split("_ready")[0]
+                self.vehicle_id = int(vehicle_id_str)
+                
+                # Reset tracking variables for new episode
+                self.collision = False
+                self.ready_to_collect = True
+                self.track_progress = 0.0
+                self.prev_progress_distance = 0.0
+                self.closest_waypoint_idx = 0
+                self.start_point = None
+                self.lap_completed = False
+                self.lap_count = 0
+                
+                # Reset location tracking
+                self.vehicle_location = None
+                self.needs_progress_reset = True
+                
+                self.get_logger().info("PPO ready for new episode with vehicle ID: " + vehicle_id_str)
+            except Exception as e:
+                self.get_logger().error(f"Error handling vehicle ready state: {e}")
+        
+        # Handle state transitions
+        elif state_name == "RESPAWNING":
             self.ready_to_collect = False
-            # Check the reason for respawning
+            self.get_logger().info(f"Pausing PPO during respawn: {details}")
             if "collision" in details.lower():
                 # Only set collision flags if it's actually a collision
                 self.collision = True
                 self.done = True
                 self.termination_reason = "collision"
-
-                # if self.state is not None:
-                #     self.calculate_reward()
-                #     self.store_transition()
-
-                # new
                 if (
                     self.prev_state is not None
                     and self.prev_action is not None
@@ -873,50 +899,70 @@ class PPOModelNode(Node):
                 ):
                     self.calculate_reward()
                     self.store_transition(
-                        state=self.prev_state,
-                        action=self.prev_action,
-                        log_prob=self.prev_log_prob,
-                        reward=self.reward,
-                        done=True,
+                         state=self.prev_state,
+                         action=self.prev_action,
+                         log_prob=self.prev_log_prob,
+                         reward=self.reward,
+                         done=True,
                     )
-
-                self.get_logger().info(
-                    "RESPAWNING due to collision: Paused data collection"
-                )
-
             elif "episode_complete" in details.lower():
-                # Episode completed normally - don't apply collision penalty
-                self.collision = False
-                self.done = True
-                self.get_logger().info(
-                    "RESPAWNING due to episode completion: Paused data collection"
-                )
+                 # Episode completed normally - don't apply collision penalty
+                 self.collision = False
+                 self.done = True
+                 self.get_logger().info(
+                     "RESPAWNING due to episode completion: Paused data collection"
+                 )
             else:
-                self.get_logger().info(
-                    f"RESPAWNING for other reason: {details}: Paused data collection"
-                )
-
+                 self.get_logger().info(
+                     f"RESPAWNING for other reason: {details}: Paused data collection"
+                 )
+        
         elif state_name == "MAP_SWAPPING":
             self.ready_to_collect = False
+            self.collision = True
+            self.done = True
+            self.termination_reason = "collision"
+            if (
+                    self.prev_state is not None
+                    and self.prev_action is not None
+                    and self.prev_log_prob is not None
+            ):
+                self.calculate_reward()
+                self.store_transition(
+                    state=self.prev_state,
+                    action=self.prev_action,
+                    log_prob=self.prev_log_prob,
+                    reward=self.reward,
+                    done=True,
+            )
+            self.get_logger().info(f"Pausing PPO during map swap: {details}")
+            # Request fresh waypoints when the map changes
+            self.needs_track_waypoints = True
+            # Reset tracking variables for new map
             self.track_waypoints = []
-            self.needs_progress_reset = True
-            self.get_logger().info("MAP_SWAPPING: Paused data collection")
+            self.track_length = 0.0
+            self.vehicle_location = None  # Reset location too
+            self.get_logger().info("Reset track data, will request new waypoints after map swap")
 
-        elif state_name == "RUNNING":
-            # When state is RUNNING, we should be ready to collect data
-            self.ready_to_collect = True
-            self.get_logger().info("RUNNING: Resumed data collection")
+    def check_waypoint_needs(self):
+        """Check and process waypoint requests when needed"""
+        if hasattr(self, 'needs_track_waypoints') and self.needs_track_waypoints:
+            self.get_logger().info("Detected need for fresh track waypoints, requesting...")
+            self.needs_track_waypoints = False  # Reset flag
+            self.request_track_waypoints()
 
-            # Also ensure we have waypoints
-            if not self.track_waypoints:
-                self.request_track_waypoints()
 
     def request_track_waypoints(self):
         """Request track waypoints from the map loader service"""
-        if not self.waypoint_client.service_is_ready():
+        if not hasattr(self, 'waypoint_client') or not self.waypoint_client.service_is_ready():
+            self.get_logger().info("Waypoint service not ready, will retry later")
+            if hasattr(self, 'retry_timer') and self.retry_timer:
+                # Cancel any existing timer
+                self.retry_timer.cancel()
             self.retry_timer = self.create_timer(1.0, self.retry_request_waypoints)
             return
 
+        self.get_logger().info("Requesting track waypoints from map loader")
         request = GetTrackWaypoints.Request()
         future = self.waypoint_client.call_async(request)
         future.add_done_callback(self.handle_track_waypoints)
@@ -972,6 +1018,9 @@ class PPOModelNode(Node):
 
     def location_callback(self, msg):
         """Process vehicle location updates and calculate track progress"""
+        if not self.ready_to_collect or self.current_sim_state in ["RESPAWNING", "MAP_SWAPPING"]:
+            return
+    
         if len(self.track_waypoints) == 0:
             self.get_logger().warn(
                 "Track waypoints not available yet. Cannot calculate progress."
@@ -1228,32 +1277,6 @@ class PPOModelNode(Node):
             return float("inf")
         return math.sqrt(sum((p1 - p2) ** 2 for p1, p2 in zip(point1, point2)))
 
-    def handle_vehicle_ready(self, request, response):
-        """Service handler when spawn_vehicle_node notifies that a vehicle is ready"""
-        self.get_logger().info(
-            f"Received vehicle_ready notification: {request.vehicle_id}"
-        )
-        self.collision = False
-        self.ready_to_collect = True
-        self.track_progress = 0.0
-        self.prev_progress_distance = 0.0
-        self.closest_waypoint_idx = 0
-        self.start_point = None
-        self.lap_completed = False
-        self.lap_count = 0
-        self.lap_start_time = None
-        self.lap_end_time = None
-        self.lap_time = None
-
-        self.vehicle_location = None
-
-        self.needs_progress_reset = True
-
-        self.get_logger().info("Track progress variables fully reset for new vehicle")
-
-        response.success = True
-        response.message = "Vehicle control ready"
-        return response
 
     def set_global_seed_and_determinism(self, seed=42, deterministic_cudnn=True):
         """

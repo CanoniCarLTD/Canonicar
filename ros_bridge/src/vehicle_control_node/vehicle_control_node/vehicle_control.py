@@ -77,11 +77,10 @@ class VehicleControlNode(Node):
 
 
     def collision_callback(self, msg):
-        """Handle collision events"""
+        """Handle collision events - just log, let SimulationCoordinator manage response"""
         collision_info = msg.data
         self.get_logger().warn(f"Collision detected: {collision_info}")
         
-        # Temporarily stop the vehicle
         if self.vehicle:
             control = VehicleControl()
             control.steer = 0.0

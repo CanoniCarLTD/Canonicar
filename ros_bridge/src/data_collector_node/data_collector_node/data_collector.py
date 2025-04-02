@@ -29,7 +29,6 @@ class DataCollector(Node):
         self.ready_to_collect = False
         self.vehicle_id = None
         self.last_sensor_timestamp = time.time()
-        self.setup_done = False
         
         self.data_buffer = []  # List of dictionaries to store synchronized data
         
@@ -38,14 +37,6 @@ class DataCollector(Node):
             String,
             '/simulation/state',
             self.handle_system_state,
-            10
-        )
-        
-        # Vehicle ready subscription
-        self.vehicle_ready_subscription = self.create_subscription(
-            String,
-            '/vehicle_ready',
-            self.handle_vehicle_ready,
             10
         )
         
@@ -65,7 +56,9 @@ class DataCollector(Node):
 
     def setup_subscribers(self):
         """Set up subscribers once we verify the camera is publishing""" 
-
+        # Create health check timer
+        self.sensor_health_timer = self.create_timer(5.0, self.check_sensor_health)
+        
         # Create synchronizer with more relaxed settings
         self.ats = ApproximateTimeSynchronizer(
             [self.image_sub, self.lidar_sub, self.imu_sub],
@@ -76,6 +69,13 @@ class DataCollector(Node):
         # Register the callback immediately
         self.ats.registerCallback(self.sync_callback)
         self.ready_to_collect = True
+    
+    def check_sensor_health(self):
+        """Check if sensors are still active"""
+        current_time = time.time()
+        if self.ready_to_collect and current_time - self.last_sensor_timestamp > 2.0:
+            self.get_logger().warn("Sensors aren't sending data. Last update was " + 
+                                f"{current_time - self.last_sensor_timestamp:.1f}s ago")
         
     def handle_system_state(self, msg):
         """Handle changes in simulation state"""
@@ -90,29 +90,21 @@ class DataCollector(Node):
         # Handle different states
         if state_name in ["RESPAWNING", "MAP_SWAPPING"]:
             self.ready_to_collect = False
+            self.get_logger().info(f"Pausing data collection during {state_name}: {details}")
             
-            if state_name == "RESPAWNING":
-                if "collision" in details.lower():
-                    self.get_logger().info("Respawning due to collision")
-                elif "episode_complete" in details.lower():
-                    self.get_logger().info("Respawning due to episode completion")
-                else:
-                    self.get_logger().info(f"Respawning for other reason: {details}")
-        
         elif state_name == "RUNNING":
-            # Don't immediately set ready_to_collect to True
-            # We need to wait for vehicle_ready notification first
-            self.get_logger().info("System returned to RUNNING state, waiting for vehicle ready")
+            # Check if we have details about vehicle readiness
+            if "vehicle_" in details and "ready" in details:
+                try:
+                    # Extract vehicle_id from "vehicle_{id}_ready"
+                    vehicle_id_str = details.split("vehicle_")[1].split("_ready")[0]
+                    self.vehicle_id = int(vehicle_id_str)
+                    self.last_sensor_timestamp = time.time()
+                    self.setup_subscribers()
+                    self.get_logger().info(f"Data collection started for vehicle {self.vehicle_id}")
+                except Exception as e:
+                    self.get_logger().error(f"Error parsing vehicle ID from state: {e}")
     
-    def handle_vehicle_ready(self, msg):
-        """Handle notification that a vehicle is ready"""
-        try:
-            self.vehicle_id = int(msg.data)
-            self.last_sensor_timestamp = time.time()
-            self.setup_subscribers()
-        except Exception as e:
-            self.get_logger().error(f"Error handling vehicle ready: {e}")
-
     
     def sync_callback(self, image_msg, lidar_msg, imu_msg):
         """Process synchronized data"""

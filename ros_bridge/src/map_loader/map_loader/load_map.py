@@ -130,22 +130,34 @@ class LoadMapNode(Node):
             self.get_logger().info(f"Extracted {len(self.track_waypoints)} waypoints from track")
             self.get_logger().info(f"Track length: {self.track_length:.2f} meters")
 
-            self.publish_state("READY")
-
+            sleep(1.0)
+            self.publish_state("READY", f"Loaded {os.path.basename(self.TRACK_XODR)}")
         except Exception as e:
             self.publish_state("ERROR")
             self.get_logger().error(f"Error during map setup")
             self.destroy_node()
 
-    def publish_state(self, state):
-        """Publish the current state of the map"""
+    def publish_state(self, state, details=""):
         msg = String()
-        msg.data = f"MAP_{state.upper()}"
+        msg.data = f"MAP_{state.upper()}:{details}" if details else f"MAP_{state.upper()}"
         self.state_publisher.publish(msg)
 
+    # Handle multiple quick map changes better:
     def handle_map_swap(self, request, response):
         """Service handler for map swap requests"""
-        self.publish_state("SWAPPING")
+        self.publish_state("SWAPPING", "Preparing for map swap")
+        
+        # Add cleanup for existing map resources
+        try:
+            # Clean any existing visualizations
+            self.world.debug.draw_point(
+                carla.Location(0,0,0), size=0.1, 
+                color=carla.Color(0,0,0,0), life_time=0.0
+            )
+            self.get_logger().info("Cleaned up previous map visualizations")
+            self.world = self.client.reload_world()
+        except:
+            pass
         
         try:
             if request.map_file_path and os.path.exists(request.map_file_path):
@@ -162,14 +174,14 @@ class LoadMapNode(Node):
             
             self.extract_track_waypoints()
             
-            self.publish_state("READY")
+            self.publish_state("READY", f"Loaded {os.path.basename(new_map_path)}")
             
             response.success = True
             response.message = f"Successfully loaded map: {os.path.basename(new_map_path)}"
             return response
                 
         except Exception as e:
-            self.publish_state("ERROR")
+            self.publish_state("ERROR", f"Map swap failed: {str(e)}")
             response.success = False
             response.message = f"Failed to swap map: {str(e)}"
             return response
