@@ -296,17 +296,26 @@ class SpawnVehicleNode(Node):
 
     def _on_collision(self, event):
         """Callback for collision sensor"""
-        collision_type = event.other_actor.type_id if event.other_actor else "unknown"
-        collision_location = event.transform.location
+        try:
+            collision_type = "unknown"
+            try:
+                if event.other_actor and hasattr(event.other_actor, "type_id"):
+                    collision_type = event.other_actor.type_id
+            except (RuntimeError, AttributeError) as e:
+                pass
+            
+            collision_location = event.transform.location
 
-        self.get_logger().warn(
-            f"COLLISION: vehicle hit {collision_type} at "
-            f"({collision_location.x:.1f}, {collision_location.y:.1f}, {collision_location.z:.1f})"
-        )
+            self.get_logger().warn(
+                f"COLLISION: vehicle hit {collision_type} at "
+                f"({collision_location.x:.1f}, {collision_location.y:.1f}, {collision_location.z:.1f})"
+            )
 
-        collision_msg = String()
-        collision_msg.data = f"collision_with_{collision_type}"
-        self.collision_publisher.publish(collision_msg)
+            collision_msg = String()
+            collision_msg.data = f"collision_with_{collision_type}"
+            self.collision_publisher.publish(collision_msg)
+        except Exception as e:
+            self.get_logger().error(f"Error processing collision event: {str(e)}")
 
 
     def spawn_sensors(self, sensors):
