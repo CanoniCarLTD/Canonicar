@@ -458,7 +458,7 @@ class PPOAgent:
 
                 with torch.no_grad():
                     self.actor.log_std.clamp_(
-                        np.log(0.05), np.log(1.5)
+                        np.log(0.05), np.log(0.4)
                     )  # Prevent entropy from exploding
 
                 self.critic_optimizer.zero_grad()

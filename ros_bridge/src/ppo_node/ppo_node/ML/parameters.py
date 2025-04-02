@@ -2,13 +2,13 @@
 All the hyper-parameters needed for the PPO algorithm implementation.
 """
 
-MODEL_LOAD = False
+MODEL_LOAD = True
 
 # Directory to save model checkpoints - always stays the same
 PPO_CHECKPOINT_DIR = "/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models"
 
 # Set to None unless you're continuing an exact run (same version/run folder)
-CHECKPOINT_FILE = "/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models/v3.3.0/run_20250330_0001"
+CHECKPOINT_FILE = "/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models/v3.3.3/run_20250402_0002"
 
 VERSION = "v3.3.3"
 
@@ -16,8 +16,7 @@ VERSION = "v3.3.3"
 # Example: "/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models/v2.1.3/run_20250325_0001"
 LOAD_STATE_DICT_FROM_RUN = None #"/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models/v3.2.0/run_20250330_0001"
 
-DETERMINISTIC_CUDNN = True
-SEED = 42
+DETERMINISTIC_CUDNN = False
 
 # Training configuration
 TRAIN = True
