@@ -86,11 +86,16 @@ class DataCollector(Node):
             state_name, details = state_msg.split(':', 1)
         else:
             state_name = state_msg
+            details = ""
         
         # Handle different states
         if state_name in ["RESPAWNING", "MAP_SWAPPING"]:
-            self.ready_to_collect = False
-            self.get_logger().info(f"Pausing data collection during {state_name}: {details}")
+            if "vehicle_relocated" in details and self.ready_to_collect:
+                self.last_sensor_timestamp = time.time()
+                self.get_logger().info(f"Reset sensor timestamp after vehicle relocation")
+            else:
+                self.ready_to_collect = False
+                self.get_logger().info(f"Pausing data collection during {state_name}: {details}")
             
         elif state_name == "RUNNING":
             # Check if we have details about vehicle readiness
