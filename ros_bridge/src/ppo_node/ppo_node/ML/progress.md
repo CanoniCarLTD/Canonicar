@@ -116,5 +116,6 @@ Changed Hyperparameters:
 - Added potential fix for Carla's crash.
 - Canceled determinism
 - Added gas/brake ratio penalty
+- Changed respawn approach into relocating
 Changed Hyperparameters:
 - DETERMINISTIC_CUDNN = True -> **False**

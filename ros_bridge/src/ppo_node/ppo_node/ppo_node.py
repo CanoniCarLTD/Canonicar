@@ -303,6 +303,10 @@ class PPOModelNode(Node):
         # Calculate progress delta
         progress_delta = self.track_progress - self.prev_progress_distance
 
+        if self.current_step_in_episode <= 1 and abs(progress_delta) > 0.1:
+            self.get_logger().warn(f"Detected large progress delta {progress_delta:.6f} in first step - ignoring")
+            progress_delta = 0.0
+
         # Handle wrap-around at 1.0 (lap completion)
         if progress_delta < -0.5:
             progress_delta = (1.0 - self.prev_progress_distance) + self.track_progress
@@ -320,7 +324,7 @@ class PPOModelNode(Node):
             return
 
         # Case 2: Moving forward significantly
-        elif progress_delta > 0.001:
+        elif progress_delta > 0.0001:
             # Reward directly proportional to progress made
             self.reward = progress_multiplier * progress_delta
             self.stagnation_counter = 0  # Reset counter
@@ -397,6 +401,7 @@ class PPOModelNode(Node):
         self.collision = False
         self.lap_completed = False
         self.track_progress = 0.0
+        self.prev_progress_distance = 0.0
         self.termination_reason = "unknown"
         self.get_logger().info(f"Episode {self.episode_counter} finished. Resetting.")
 

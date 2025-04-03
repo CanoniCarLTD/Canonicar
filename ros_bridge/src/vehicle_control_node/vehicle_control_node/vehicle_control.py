@@ -70,8 +70,23 @@ class VehicleControlNode(Node):
             state_name, details = state_msg.split(':', 1)
         else:
             state_name = state_msg
+            details = ""
         
-        if state_name in ["RESPAWNING", "MAP_SWAPPING"]:
+        if state_name == "RESPAWNING":
+            if "Relocating" in details or "vehicle_relocated" in details:
+                # For relocation, we keep the vehicle reference but apply emergency brake
+                if self.vehicle and self.vehicle.is_alive:
+                    control = VehicleControl()
+                    control.steer = 0.0
+                    control.throttle = 0.0
+                    control.brake = 1.0
+                    self.vehicle.apply_control(control)
+                    self.get_logger().info("Applied emergency brake for vehicle relocation")
+            else:
+                self.vehicle = None
+                self.get_logger().info(f"Vehicle control suspended: {details}")
+        elif state_name == "MAP_SWAPPING":
+            # For map swapping, always clear the vehicle
             self.vehicle = None
             self.get_logger().info(f"Vehicle control suspended: {details}")
 

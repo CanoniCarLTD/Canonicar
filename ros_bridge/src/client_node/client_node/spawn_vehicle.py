@@ -61,6 +61,8 @@ class SpawnVehicleNode(Node):
         self.vehicle = None
         self.respawn_in_progress = False
         self.verify_sensor_timer = None
+        self.spawn_transform = None
+        self.ignore_collisions_until = 0.0
 
         self.collision_publisher = self.create_publisher(
             String,
@@ -92,6 +94,11 @@ class SpawnVehicleNode(Node):
             self.respawn_vehicle_callback
         )
 
+        self.relocate_service = self.create_service(
+            RespawnVehicle, 
+            'relocate_vehicle', 
+            self.relocate_vehicle_callback
+        )
 
         self.lap_subscription = self.create_subscription(
             String,
@@ -170,10 +177,10 @@ class SpawnVehicleNode(Node):
                 f"Using waypoint at s={spawn_waypoint.s:.1f} for spawn"
             )
 
-            spawn_transform = spawn_waypoint.transform
-            spawn_transform.location.z += 0.3
+            self.spawn_transform = spawn_waypoint.transform
+            self.spawn_transform.location.z += 0.3
 
-            self.vehicle = self.world.try_spawn_actor(vehicle_bp, spawn_transform)
+            self.vehicle = self.world.try_spawn_actor(vehicle_bp, self.spawn_transform)
             if not self.vehicle:
                 self.get_logger().error("Failed to spawn at waypoint")
                 return
@@ -244,6 +251,37 @@ class SpawnVehicleNode(Node):
             self.get_logger().info(f"Detected {state_name}: {details}")
             self.destroy_actors()  # Clean up actors during map swap
 
+
+    def relocate_vehicle_callback(self, request, response):
+        """Handle vehicle relocation service calls"""
+        self.get_logger().info(f"Vehicle relocation requested: {request.reason}")
+        
+        try:
+            if self.vehicle is None or not self.vehicle.is_alive:
+                response.success = False
+                response.message = "No vehicle available to relocate"
+                return response
+                
+            # Reset velocity and physics before relocation
+            self.vehicle.set_target_velocity(carla.Vector3D(0, 0, 0))
+            self.vehicle.set_target_angular_velocity(carla.Vector3D(0, 0, 0))
+            
+            old_loc = self.vehicle.get_transform().location
+            
+            self.vehicle.set_transform(self.spawn_transform)
+            self.ignore_collisions_until = time.time() + 0.5 
+            self.get_logger().info(f"Vehicle relocated from ({old_loc.x:.1f},{old_loc.y:.1f}) to spawn point")
+            
+            self.notify_vehicle_ready()
+            
+            response.success = True
+            response.message = f"Vehicle successfully relocated after: {request.reason}"
+            return response
+            
+        except Exception as e:
+            response.success = False
+            response.message = f"Relocation failed: {str(e)}"
+            return response
 
     def respawn_vehicle_callback(self, request, response):
         """Handle respawn vehicle service calls"""
@@ -321,6 +359,9 @@ class SpawnVehicleNode(Node):
     def _on_collision(self, event):
         """Callback for collision sensor"""
         try:
+            if time.time() < self.ignore_collisions_until:
+                # Silently ignore collisions during the grace period after relocation
+                return
             collision_type = "unknown"
             try:
                 if event.other_actor and hasattr(event.other_actor, "type_id"):
