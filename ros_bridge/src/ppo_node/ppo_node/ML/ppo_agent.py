@@ -18,12 +18,14 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 class ActorNetwork(nn.Module):
-    def __init__(self, input_dim, action_dim, action_std_init):
+    def __init__(self, input_dim, action_dim):
         super(ActorNetwork, self).__init__()
         self.action_dim = action_dim
-        self.log_std = nn.Parameter(
-            torch.ones(action_dim) * np.log(action_std_init)
-        )  # log_std is learnable
+        
+        # Steering ~0.2, throttle/brake slightly less to avoid overexploration
+        log_std_init = torch.tensor([np.log(0.2), np.log(0.2), np.log(0.2)], dtype=torch.float32)
+
+        self.log_std = nn.Parameter(log_std_init.clone())  # learnable per-dimension
 
         self.fc1 = nn.Linear(input_dim, 256)
         self.fc2 = nn.Linear(256, 128)
@@ -61,8 +63,8 @@ class ActorNetwork(nn.Module):
 
         # Split and squash
         steering_mean = torch.tanh(action_mean[:, 0:1])
-        throttle_mean = torch.sigmoid(action_mean[:, 1:2])
-        brake_mean = torch.sigmoid(action_mean[:, 2:3])
+        throttle_mean = 0.5 * (torch.tanh(action_mean[:, 1:2]) + 1.0)
+        brake_mean = 0.5 * (torch.tanh(action_mean[:, 2:3]) + 1.0)
         action_mean = torch.cat([steering_mean, throttle_mean, brake_mean], dim=1)
 
         if not torch.isfinite(action_mean).all():
@@ -76,12 +78,6 @@ class ActorNetwork(nn.Module):
         action_mean = self.forward(state)
         # Ensure log_std is on the same device as state
 
-        if self.log_std.device != state.device:
-            self.log_std = self.log_std.to(state.device)
-            self.logger.info(
-                f"Warning: log_std device moved from {self.log_std.device} to {state.device}"
-            )
-
         if not torch.isfinite(self.log_std).all():
             raise RuntimeError(f"NaN/Inf in log_std: {self.log_std}")
 
@@ -89,9 +85,6 @@ class ActorNetwork(nn.Module):
         log_std_cpu = self.log_std.detach().cpu()
         if not torch.isfinite(log_std_cpu).all():
             self.logger.info(f"Warning: Non-finite values in log_std: {log_std_cpu}")
-            # Clamp log_std values to a safe range if needed
-            with torch.no_grad():
-                self.log_std.data.clamp_(np.log(0.05), np.log(0.4))
 
         action_std = torch.exp(self.log_std)
 
@@ -196,11 +189,10 @@ class PPOAgent:
         self.logger.info(f"Action input dimension: {self.input_dim}")
         self.action_dim = action_dim
         self.logger.info(f"Action output dimension: {self.action_dim}")
-        self.action_std = ACTION_STD_INIT
 
         self.summary_writer = summary_writer
 
-        self.actor = ActorNetwork(self.input_dim, action_dim, self.action_std).to(
+        self.actor = ActorNetwork(self.input_dim, action_dim).to(
             device
         )
         self.critic = CriticNetwork(self.input_dim).to(device)
@@ -457,9 +449,8 @@ class PPOAgent:
                 self.actor_optimizer.step()
 
                 with torch.no_grad():
-                    self.actor.log_std.clamp_(
-                        np.log(0.05), np.log(0.4)
-                    )  # Prevent entropy from exploding
+                    self.actor.log_std.data[0].clamp_(np.log(0.05), np.log(0.4))
+                    self.actor.log_std.data[1:].clamp_(np.log(0.05), np.log(0.3))
 
                 self.critic_optimizer.zero_grad()
                 critic_loss.backward()

@@ -115,5 +115,6 @@ Changed Hyperparameters:
 - Fixed and improved pipeline's workflow.
 - Added potential fix for Carla's crash.
 - Canceled determinism
+- Added gas/brake ratio penalty
 Changed Hyperparameters:
 - DETERMINISTIC_CUDNN = True -> **False**
