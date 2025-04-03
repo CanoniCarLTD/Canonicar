@@ -29,6 +29,7 @@ class SimulationCoordinator(Node):
             
         self.map_swap_client = self.create_client(SwapMap, 'map_swap')
         self.respawn_client = self.create_client(RespawnVehicle, 'respawn_vehicle')
+        self.relocate_client = self.create_client(RespawnVehicle, 'relocate_vehicle')
         
         self.vehicle_ready_server = self.create_service(
             VehicleReady, 
@@ -113,7 +114,10 @@ class SimulationCoordinator(Node):
         # Only handle collisions in RUNNING state
         if self.state != SimState.RUNNING:
             return
-            
+        
+        if self.respawn_in_progress:
+            return
+        
         # Implement cooldown to prevent multiple rapid collisions
         current_time = time.time()
         if current_time - self.last_collision_time < self.collision_cooldown:
@@ -123,11 +127,10 @@ class SimulationCoordinator(Node):
         self.collision_count += 1
         self.get_logger().info(f'Processing collision: {self.collision_count}/{self.max_collisions}')
         
-        # Check if we need to swap maps
         if self.collision_count >= self.max_collisions:
             self.trigger_map_swap()
         else:
-            self.trigger_respawn(f"Collision: {msg.data}")
+            self.trigger_relocate(f"Collision: {msg.data}")
     
     def handle_map_state(self, msg):
         """Translate map state messages to simulation states"""
@@ -170,6 +173,47 @@ class SimulationCoordinator(Node):
             response.message = f"Acknowledging vehicle {vehicle_id}"
             
         return response
+
+    def trigger_relocate(self, reason):
+        """Trigger vehicle relocation instead of full respawn"""
+        if self.respawn_in_progress:
+            self.get_logger().info(f"Operation already in progress, ignoring relocation: {reason}")
+            return
+            
+        if not self.relocate_client.service_is_ready():
+            self.get_logger().error('Cannot relocate - service not available, falling back to respawn')
+            self.trigger_respawn(reason)
+            return
+                
+        self.respawn_in_progress = True
+        self.state = SimState.RESPAWNING
+        self.publish_state('Relocating vehicle after collision')
+        self.last_respawn_time = time.time()
+        
+        request = RespawnVehicle.Request()
+        request.reason = reason
+        
+        future = self.relocate_client.call_async(request)
+        future.add_done_callback(self.relocate_done)
+
+    def relocate_done(self, future):
+        """Handle relocation completion"""
+        try:
+            response = future.result()
+            if response.success:
+                self.get_logger().info(f"Relocation successful: {response.message}")
+                self.respawn_in_progress = False
+                self.state = SimState.RUNNING
+                self.publish_state('RUNNING:vehicle_relocated')
+            else:
+                # If relocation fails, fall back to regular respawn
+                self.get_logger().warn(f"Relocation failed: {response.message}, falling back to respawn")
+                self.respawn_in_progress = False
+                self.trigger_respawn("fallback_after_relocation_failure")
+        except Exception as e:
+            self.get_logger().error(f"Error in relocation: {e}")
+            self.respawn_in_progress = False
+            self.trigger_respawn("fallback_after_relocation_error")
     
     def trigger_respawn(self, reason):
         """Trigger vehicle respawn"""
