@@ -339,25 +339,28 @@ class PPOModelNode(Node):
         
         # === Gas-brake overlap penalty ===
         if hasattr(self, 'prev_action') and self.prev_action is not None:
-            gas   = self.prev_action[1]
+            throttle   = self.prev_action[1]
             brake = self.prev_action[2]
 
             # Threshold-based check: only consider meaningful signals
-            gas_brake_threshold = 0.2
+            throttle_brake_threshold = 0.2
             ratio_limit = 0.4
             max_penalty = -0.5
 
-            if gas > gas_brake_threshold and brake > gas_brake_threshold:
-                ratio = min(gas, brake) / max(gas, brake)
+            if throttle > throttle_brake_threshold and brake > throttle_brake_threshold:
+                ratio = min(throttle, brake) / max(throttle, brake)
 
                 if ratio > ratio_limit:
                     # Scaled penalty based on overlap intensity
-                    overlap_intensity = min(1.0, gas * brake * 2)
+                    overlap_intensity = min(1.0, throttle * brake * 2)
                     overlap_penalty = max_penalty * overlap_intensity
                     self.reward += overlap_penalty
 
                     self.get_logger().info(f"Gas-brake penalty applied: {overlap_penalty:.4f}")
-                    
+            if brake > 0.9 and throttle < 0.1:
+                self.reward -= 2.0  # or more if needed
+                self.get_logger().info("Brake-stall penalty applied")
+
     ##################################################################################################
     #                                       STORE TRANSITION
     ##################################################################################################

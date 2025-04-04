@@ -32,9 +32,6 @@ EPISODES = 1e8 # Not in use
 PPO_INPUT_DIM = 198 
 TOTAL_TIMESTEPS = 2e8  # Total number of timesteps for training
 
-# Discount Factor for future rewards
-GAMMA = 0.99
-
 # Exploration settings (action noise)
 ACTION_STD_INIT = 0.2
 ACTION_STD_DECAY_RATE = 0.05 # Not used as we are currently using learnable action std
@@ -47,6 +44,7 @@ POLICY_CLIP = 0.2
 ENTROPY_COEF = 0.01 # might wanna do 0.005 later
 LAMBDA_GAE = 0.95
 VF_COEF = 0.5  # Giving half the weight to critic loss relative to the summed losses
+GAMMA = 0.99 # Discount Factor for future rewards
 
 # Evaluation settings
 TEST_TIMESTEPS = 5e4

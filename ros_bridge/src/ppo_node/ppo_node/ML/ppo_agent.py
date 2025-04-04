@@ -76,7 +76,9 @@ class ActorNetwork(nn.Module):
 
     def get_dist(self, state):
         action_mean = self.forward(state)
-        # Ensure log_std is on the same device as state
+
+        print(f"[DEBUG] action_mean shape: {action_mean.shape}")  # Expect: (batch_size, action_dim)
+        print(f"[DEBUG] log_std shape: {self.log_std.shape}")     # Expect: (action_dim,)
 
         if not torch.isfinite(self.log_std).all():
             raise RuntimeError(f"NaN/Inf in log_std: {self.log_std}")
@@ -449,8 +451,8 @@ class PPOAgent:
                 self.actor_optimizer.step()
 
                 with torch.no_grad():
-                    self.actor.log_std.data[0].clamp_(np.log(0.05), np.log(0.4))
-                    self.actor.log_std.data[1:].clamp_(np.log(0.05), np.log(0.3))
+                    self.actor.log_std.data[0].clamp_(np.log(0.05), np.log(0.3))
+                    self.actor.log_std.data[1:].clamp_(np.log(0.02), np.log(0.25))
 
                 self.critic_optimizer.zero_grad()
                 critic_loss.backward()
