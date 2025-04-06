@@ -23,9 +23,9 @@ class ActorNetwork(nn.Module):
         self.action_dim = action_dim
         
         # Steering ~0.2, throttle/brake slightly less to avoid overexploration
-        log_std_init = torch.tensor([np.log(0.2), np.log(0.2), np.log(0.2)], dtype=torch.float32)
+        log_std_init = torch.tensor([np.log(1.0), np.log(1.0), np.log(1.0)], dtype=torch.float32)
 
-        self.log_std = nn.Parameter(log_std_init.clone())  # learnable per-dimension
+        self.log_std = nn.Parameter(log_std_init.clone())
 
         self.fc1 = nn.Linear(input_dim, 256)
         self.fc2 = nn.Linear(256, 128)
@@ -40,98 +40,76 @@ class ActorNetwork(nn.Module):
             nn.init.zeros_(layer.bias)
 
     def forward(self, state):
-        x = self.fc1(state)
-        x = torch.tanh(x)
+        x = torch.tanh(self.fc1(state))
         if not torch.isfinite(x).all():
             raise RuntimeError(f"NaN/Inf after fc1 → tanh: {x}")
-
-        x = self.fc2(x)
-        x = torch.tanh(x)
+        x = torch.tanh(self.fc2(x))
         if not torch.isfinite(x).all():
             raise RuntimeError(f"NaN/Inf after fc2 → tanh: {x}")
-
-        x = self.fc3(x)
-        x = torch.tanh(x)
+        x = torch.tanh(self.fc3(x))
         if not torch.isfinite(x).all():
             raise RuntimeError(f"NaN/Inf after fc3 → tanh: {x}")
-
-        action_mean = self.fc4(x)
-        if not torch.isfinite(action_mean).all():
-            raise RuntimeError(
-                f"NaN/Inf in action_mean (before squashing): {action_mean}"
-            )
-
-        # Split and squash
-        steering_mean = torch.tanh(action_mean[:, 0:1])
-        throttle_mean = 0.5 * (torch.tanh(action_mean[:, 1:2]) + 1.0)
-        brake_mean = 0.5 * (torch.tanh(action_mean[:, 2:3]) + 1.0)
-        action_mean = torch.cat([steering_mean, throttle_mean, brake_mean], dim=1)
-
-        if not torch.isfinite(action_mean).all():
-            raise RuntimeError(
-                f"NaN/Inf in action_mean (after squashing): {action_mean}"
-            )
-
-        return action_mean
+        raw_action_mean = self.fc4(x)
+        return raw_action_mean
 
     def get_dist(self, state):
-        action_mean = self.forward(state)
-
-        print(f"[DEBUG] action_mean shape: {action_mean.shape}")  # Expect: (batch_size, action_dim)
-        print(f"[DEBUG] log_std shape: {self.log_std.shape}")     # Expect: (action_dim,)
-
-        if not torch.isfinite(self.log_std).all():
-            raise RuntimeError(f"NaN/Inf in log_std: {self.log_std}")
-
-        # Check log_std with CPU operation first
-        log_std_cpu = self.log_std.detach().cpu()
-        if not torch.isfinite(log_std_cpu).all():
-            self.logger.info(f"Warning: Non-finite values in log_std: {log_std_cpu}")
-
+        raw_action_mean = self.forward(state)
         action_std = torch.exp(self.log_std)
-
-        if not torch.isfinite(action_std).all():
-            raise RuntimeError(f"NaN/Inf in exp(log_std): {action_std}")
-
-        if (action_std < 1e-6).any():
-            raise RuntimeError(f"Action std too small: {action_std}")
-
-        cov_mat = torch.diag_embed(action_std.expand_as(action_mean))
-
-        if not torch.isfinite(cov_mat).all():
-            raise RuntimeError(f"NaN/Inf in cov_mat: {cov_mat}")
-
-        dist = MultivariateNormal(action_mean, cov_mat)
+        cov_mat = torch.diag_embed(action_std.expand_as(raw_action_mean))
+        dist = MultivariateNormal(raw_action_mean, cov_mat)
         return dist
 
     def sample_action(self, state):
         dist = self.get_dist(state)
-        action = dist.sample()
+        raw_action = dist.rsample() # Reparameterization trick
+        squashed_action = torch.tanh(raw_action)
+    
+        log_prob = dist.log_prob(raw_action).unsqueeze(-1)
+        log_prob -= torch.log(1 - squashed_action.pow(2) + 1e-6).sum(dim=-1, keepdim=True)
 
-        if not torch.isfinite(action).all():
-            raise RuntimeError(f"NaN/Inf in sampled action: {action}")
+        if not torch.isfinite(log_prob).all():
+            raise RuntimeError(f"NaN/Inf in log_prob: {log_prob}")
 
-        action_logprob = dist.log_prob(action).sum(dim=-1, keepdim=True)
+        # Rescale to final control ranges
+        steer = squashed_action[:, 0:1]                   # [-1, 1]
+        throttle = 0.5 * (squashed_action[:, 1:2] + 1.0)  # [0, 1]
+        brake = 0.5 * (squashed_action[:, 2:3] + 1.0)     # [0, 1]
+        action = torch.cat([steer, throttle, brake], dim=1)
 
-        if not torch.isfinite(action_logprob).all():
-            raise RuntimeError(f"NaN/Inf in log_prob: {action_logprob}")
-
-        # Clamp and return
-        action[:, 0] = torch.clamp(action[:, 0], -1.0, 1.0)  # steering
-        action[:, 1] = torch.clamp(action[:, 1], 0.0, 1.0)  # throttle
-        action[:, 2] = torch.clamp(action[:, 2], 0.0, 1.0)  # brake
-
-        return (
-            action.detach(),
-            action_logprob,
-        )  # detach if you're not backproping through
+        return action.detach(), log_prob  # detach if you're not backproping through
 
     def evaluate_actions(self, state, action):
+        steer, throttle, brake = action[:, 0:1], action[:, 1:2], action[:, 2:3]
+        raw_action = torch.cat([
+            torch.atanh(steer.clamp(-0.999, 0.999)),
+            torch.atanh((throttle * 2 - 1).clamp(-0.999, 0.999)),
+            torch.atanh((brake * 2 - 1).clamp(-0.999, 0.999))
+        ], dim=1)
         dist = self.get_dist(state)
-        action_logprobs = dist.log_prob(action).sum(dim=-1, keepdim=True)
-        dist_entropy = dist.entropy().sum(dim=-1, keepdim=True)
-        return action_logprobs, dist_entropy
+        log_prob = dist.log_prob(raw_action)
+        log_prob -= torch.log(1 - torch.tanh(raw_action).pow(2) + 1e-6).sum(dim=-1, keepdim=True)
+        entropy = dist.entropy().sum(dim=-1, keepdim=True)
 
+        return log_prob, entropy
+
+
+    def test_action_distribution(self, state, num_samples=10000):
+        with torch.no_grad():
+            state = state.repeat(num_samples, 1)  # Repeat same state for batch sampling
+            dist = self.get_dist(state)           # state: [num_samples, input_dim]
+            raw_samples = dist.sample()
+            squashed = torch.tanh(raw_samples)
+
+            steer = squashed[:, 0]
+            throttle = 0.5 * (squashed[:, 1] + 1.0)
+            brake = 0.5 * (squashed[:, 2] + 1.0)
+
+            print(f"[TEST] Raw Action Mean: {raw_samples.mean(dim=0)}")
+            print(f"[TEST] Raw Action Std:  {raw_samples.std(dim=0)}")
+
+            print(f"[TEST] Steer range:    [{steer.min().item():.3f}, {steer.max().item():.3f}]")
+            print(f"[TEST] Throttle range: [{throttle.min().item():.3f}, {throttle.max().item():.3f}]")
+            print(f"[TEST] Brake range:    [{brake.min().item():.3f}, {brake.max().item():.3f}]")
 
 class CriticNetwork(nn.Module):
     def __init__(self, input_dim):
@@ -150,28 +128,16 @@ class CriticNetwork(nn.Module):
             nn.init.zeros_(layer.bias)
 
     def forward(self, state):
-        x = self.fc1(state)
-        x = torch.tanh(x)
-
+        x = torch.tanh(self.fc1(state))
         if not torch.isfinite(x).all():
             raise RuntimeError("NaN/Inf after critic fc1")
-
-        x = self.fc2(x)
-        x = torch.tanh(x)
-
+        x = torch.tanh(self.fc2(x))
         if not torch.isfinite(x).all():
             raise RuntimeError("NaN/Inf after critic fc2")
-
-        x = self.fc3(x)
-        x = torch.tanh(x)
-
+        x = torch.tanh(self.fc3(x))
         if not torch.isfinite(x).all():
             raise RuntimeError("NaN/Inf after critic fc3")
-
         value = self.fc4(x)
-
-        if not torch.isfinite(value).all():
-            raise RuntimeError("NaN/Inf in critic output")
         return value
 
 
@@ -205,7 +171,12 @@ class PPOAgent:
         self.critic_optimizer = optim.Adam(
             self.critic.parameters(), lr=CRITIC_LEARNING_RATE
         )
-
+        
+        ######################################################################
+        dummy_state = torch.randn((1, self.input_dim)).to(device)
+        self.actor.test_action_distribution(dummy_state, num_samples=10000)
+        ######################################################################
+        
         # Experience storage
         (
             self.states,
@@ -451,8 +422,8 @@ class PPOAgent:
                 self.actor_optimizer.step()
 
                 with torch.no_grad():
-                    self.actor.log_std.data[0].clamp_(np.log(0.05), np.log(0.3))
-                    self.actor.log_std.data[1:].clamp_(np.log(0.02), np.log(0.25))
+                    self.actor.log_std.data[0].clamp_(np.log(0.1), np.log(1.05))
+                    self.actor.log_std.data[1:].clamp_(np.log(0.1), np.log(1.05))
 
                 self.critic_optimizer.zero_grad()
                 critic_loss.backward()

@@ -358,8 +358,8 @@ class PPOModelNode(Node):
 
                     self.get_logger().info(f"Gas-brake penalty applied: {overlap_penalty:.4f}")
             if brake > 0.9 and throttle < 0.1:
-                self.reward -= 2.0  # or more if needed
-                self.get_logger().info("Brake-stall penalty applied")
+                self.reward -= 0.5  # or more if needed
+                self.get_logger().info("Brake-stall penalty applied (-2.0)")
 
     ##################################################################################################
     #                                       STORE TRANSITION
@@ -739,7 +739,6 @@ class PPOModelNode(Node):
                     float(self.critic_loss) if self.critic_loss is not None else None
                 ),
                 "entropy": float(self.entropy) if self.entropy is not None else None,
-                "action_std": float(self.ppo_agent.action_std),
                 "step_reward": float(
                     self.current_ep_reward / max(1, self.current_step_in_episode)
                 ),

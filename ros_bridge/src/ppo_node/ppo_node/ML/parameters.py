@@ -2,15 +2,15 @@
 All the hyper-parameters needed for the PPO algorithm implementation.
 """
 
-MODEL_LOAD = True
+MODEL_LOAD = False
 
 # Directory to save model checkpoints - always stays the same
 PPO_CHECKPOINT_DIR = "/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models"
 
 # Set to None unless you're continuing an exact run (same version/run folder)
-CHECKPOINT_FILE = "/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models/v3.3.3/run_20250403_0008"
+CHECKPOINT_FILE = "/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models/v3.3.4/run_20250406_0001"
 
-VERSION = "v3.3.3"
+VERSION = "v3.3.4"
 
 # Point this to a full run directory from any version (must contain actor.pth etc.)
 # Example: "/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models/v2.1.3/run_20250325_0001"
@@ -33,7 +33,7 @@ PPO_INPUT_DIM = 198
 TOTAL_TIMESTEPS = 2e8  # Total number of timesteps for training
 
 # Exploration settings (action noise)
-ACTION_STD_INIT = 0.2
+ACTION_STD_INIT = 0.15
 ACTION_STD_DECAY_RATE = 0.05 # Not used as we are currently using learnable action std
 MIN_ACTION_STD = 0.05
 

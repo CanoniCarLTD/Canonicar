@@ -121,3 +121,7 @@ Changed Hyperparameters:
 
 Changed Hyperparameters:
 - DETERMINISTIC_CUDNN = True -> **False**
+
+### v3.3.4
+
+- Changed to raw values sample with reparameterized tanh-squashed actions
