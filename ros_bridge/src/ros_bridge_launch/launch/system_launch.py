@@ -51,7 +51,7 @@ def generate_launch_description():
         name='simulation_coordinator',
         output='screen',
         parameters=[
-            {'max_collisions': 10}
+            {'max_collisions': 20}
         ]
     )
 

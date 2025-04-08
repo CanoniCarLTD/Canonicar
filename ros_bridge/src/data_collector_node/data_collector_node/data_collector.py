@@ -50,7 +50,7 @@ class DataCollector(Node):
         
         self.image_sub = Subscriber(self, Image, "/carla/rgb_front/image_raw")
         self.lidar_sub = Subscriber(self, PointCloud2, "/carla/lidar/points")
-        self.imu_sub = Subscriber(self, Imu, "/carla/imu/imu")
+        # self.imu_sub = Subscriber(self, Imu, "/carla/imu/imu")
         
         self.get_logger().info("DataCollector Node initialized. Waiting for vehicle...")
 
@@ -61,7 +61,7 @@ class DataCollector(Node):
         
         # Create synchronizer with more relaxed settings
         self.ats = ApproximateTimeSynchronizer(
-            [self.image_sub, self.lidar_sub, self.imu_sub],
+            [self.image_sub, self.lidar_sub],
             queue_size=60,
             slop=0.2,  # More relaxed time synchronization
         )
@@ -111,7 +111,7 @@ class DataCollector(Node):
                     self.get_logger().error(f"Error parsing vehicle ID from state: {e}")
     
     
-    def sync_callback(self, image_msg, lidar_msg, imu_msg):
+    def sync_callback(self, image_msg, lidar_msg):
         """Process synchronized data"""
         if not self.ready_to_collect:
             return
@@ -121,7 +121,7 @@ class DataCollector(Node):
             # Update timestamp to know sensors are active
             self.last_sensor_timestamp = time.time()
             
-            processed_data = self.process_data(image_msg, lidar_msg, imu_msg)
+            processed_data = self.process_data(image_msg, lidar_msg)
             
             # Publish to PPO node for training/inference
             response = Float32MultiArray()
@@ -137,15 +137,14 @@ class DataCollector(Node):
         except Exception as e:
             self.get_logger().error(f"Error in sync callback: {e}")
 
-    def process_data(self, image_msg, lidar_msg, imu_msg):
+    def process_data(self, image_msg, lidar_msg):
         """Process sensor data into state vector"""
         # start_time = time.time()
         vision_features = self.process_vision_data(image_msg, lidar_msg)
         # end_time = time.time()
         # self.get_logger().info(f"Vision processing time: {end_time - start_time:.4f} seconds")
         return self.aggregate_state_vector(
-            vision_features,
-            self.process_imu(imu_msg)
+            vision_features
         )
 
     def process_vision_data(self, image_msg, lidar_msg):
@@ -167,28 +166,28 @@ class DataCollector(Node):
         fused_features = self.vision_processor.process_sensor_data(raw_image, points)
         return fused_features
 
-    def process_imu(self, imu_msg):
-        """Process IMU data."""
-        imu_data = [
-            imu_msg.linear_acceleration.x,
-            imu_msg.linear_acceleration.y,
-            imu_msg.linear_acceleration.z,
-            imu_msg.angular_velocity.x,
-            imu_msg.angular_velocity.y,
-            imu_msg.angular_velocity.z,
-        ]
-        return imu_data
+    # def process_imu(self, imu_msg):
+    #     """Process IMU data."""
+    #     imu_data = [
+    #         imu_msg.linear_acceleration.x,
+    #         imu_msg.linear_acceleration.y,
+    #         imu_msg.linear_acceleration.z,
+    #         imu_msg.angular_velocity.x,
+    #         imu_msg.angular_velocity.y,
+    #         imu_msg.angular_velocity.z,
+    #     ]
+    #     return imu_data
 
-    def aggregate_state_vector(self, vision_features, imu_features):
+    def aggregate_state_vector(self, vision_features):
         """Aggregate features into a single state vector.""" 
         # Total vector size: 192 (vision) + 6 (IMU) = 198
-        state_vector = np.zeros(198, dtype=np.float32)
+        state_vector = np.zeros(192, dtype=np.float32)
         
         # Fill with vision features (fused RGB + LiDAR)
         state_vector[:192] = vision_features
 
         # # Add IMU data
-        state_vector[192:198] = imu_features
+        # state_vector[192:198] = imu_features
         
         return state_vector
 

@@ -4,7 +4,7 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 import numpy as np
-from torch.distributions import MultivariateNormal
+from torch.distributions import MultivariateNormal, Normal
 from .parameters import *
 
 # os.environ["CUDA_LAUNCH_BLOCKING"] = "1"  # might reduce performance time! Uncomment for debugging CUDA errors
@@ -23,7 +23,7 @@ class ActorNetwork(nn.Module):
         self.action_dim = action_dim
         
         # Steering ~0.2, throttle/brake slightly less to avoid overexploration
-        log_std_init = torch.tensor([np.log(1.0), np.log(1.0), np.log(1.0)], dtype=torch.float32)
+        log_std_init = torch.tensor([np.log(0.2), np.log(0.2), np.log(0.2)], dtype=torch.float32)
 
         self.log_std = nn.Parameter(log_std_init.clone())
 
@@ -36,17 +36,17 @@ class ActorNetwork(nn.Module):
 
     def init_weights(self):
         for layer in [self.fc1, self.fc2, self.fc3, self.fc4]:
-            nn.init.xavier_uniform_(layer.weight, gain=nn.init.calculate_gain("tanh"))
+            nn.init.kaiming_uniform_(layer.weight, nonlinearity="leaky_relu")
             nn.init.zeros_(layer.bias)
 
     def forward(self, state):
-        x = torch.tanh(self.fc1(state))
+        x = F.leaky_relu(self.fc1(state), negative_slope=0.2)
         if not torch.isfinite(x).all():
             raise RuntimeError(f"NaN/Inf after fc1 → tanh: {x}")
-        x = torch.tanh(self.fc2(x))
+        x = F.leaky_relu(self.fc2(x), negative_slope=0.2)
         if not torch.isfinite(x).all():
             raise RuntimeError(f"NaN/Inf after fc2 → tanh: {x}")
-        x = torch.tanh(self.fc3(x))
+        x = F.leaky_relu(self.fc3(x), negative_slope=0.2)
         if not torch.isfinite(x).all():
             raise RuntimeError(f"NaN/Inf after fc3 → tanh: {x}")
         raw_action_mean = self.fc4(x)
@@ -62,55 +62,40 @@ class ActorNetwork(nn.Module):
     def sample_action(self, state):
         dist = self.get_dist(state)
         raw_action = dist.rsample() # Reparameterization trick
-        squashed_action = torch.tanh(raw_action)
+        
+        normal = Normal(0, 1)
+        cdf_action = normal.cdf(raw_action)  # (batch_size, 3)
     
-        log_prob = dist.log_prob(raw_action).unsqueeze(-1)
-        log_prob -= torch.log(1 - squashed_action.pow(2) + 1e-6).sum(dim=-1, keepdim=True)
-
+        log_prob = dist.log_prob(raw_action).unsqueeze(-1)        
+        # log_prob -= torch.log(1 - torch.tanh(raw_action).pow(2) + 1e-6).sum(dim=-1, keepdim=True)
         if not torch.isfinite(log_prob).all():
             raise RuntimeError(f"NaN/Inf in log_prob: {log_prob}")
 
-        # Rescale to final control ranges
-        steer = squashed_action[:, 0:1]                   # [-1, 1]
-        throttle = 0.5 * (squashed_action[:, 1:2] + 1.0)  # [0, 1]
-        brake = 0.5 * (squashed_action[:, 2:3] + 1.0)     # [0, 1]
+        steer = 2.0 * cdf_action[:, 0:1] - 1.0      # [-1, 1]
+        throttle = cdf_action[:, 1:2]              # [0, 1]
+        brake = 0.5 * cdf_action[:, 2:3]           # [0, 0.5]
+        brake[brake < 0.2] = 0.0
         action = torch.cat([steer, throttle, brake], dim=1)
 
         return action.detach(), log_prob  # detach if you're not backproping through
 
     def evaluate_actions(self, state, action):
+        normal = Normal(0, 1)
+        
         steer, throttle, brake = action[:, 0:1], action[:, 1:2], action[:, 2:3]
-        raw_action = torch.cat([
-            torch.atanh(steer.clamp(-0.999, 0.999)),
-            torch.atanh((throttle * 2 - 1).clamp(-0.999, 0.999)),
-            torch.atanh((brake * 2 - 1).clamp(-0.999, 0.999))
-        ], dim=1)
+        
+        steer_raw = normal.icdf(((steer + 1.0) / 2.0).clamp(1e-6, 1 - 1e-6))     # map [-1, 1] → [0, 1] → raw
+        throttle_raw = normal.icdf(throttle.clamp(1e-6, 1 - 1e-6))               # already [0, 1]
+        brake_raw = normal.icdf((brake * 2.0).clamp(1e-6, 1 - 1e-6))             # [0, 0.5] → [0, 1]
+        
+        raw_action = torch.cat([steer_raw, throttle_raw, brake_raw], dim=1)
+        
         dist = self.get_dist(state)
         log_prob = dist.log_prob(raw_action)
-        log_prob -= torch.log(1 - torch.tanh(raw_action).pow(2) + 1e-6).sum(dim=-1, keepdim=True)
-        entropy = dist.entropy().sum(dim=-1, keepdim=True)
-
-        return log_prob, entropy
-
-
-    def test_action_distribution(self, state, num_samples=10000):
-        with torch.no_grad():
-            state = state.repeat(num_samples, 1)  # Repeat same state for batch sampling
-            dist = self.get_dist(state)           # state: [num_samples, input_dim]
-            raw_samples = dist.sample()
-            squashed = torch.tanh(raw_samples)
-
-            steer = squashed[:, 0]
-            throttle = 0.5 * (squashed[:, 1] + 1.0)
-            brake = 0.5 * (squashed[:, 2] + 1.0)
-
-            print(f"[TEST] Raw Action Mean: {raw_samples.mean(dim=0)}")
-            print(f"[TEST] Raw Action Std:  {raw_samples.std(dim=0)}")
-
-            print(f"[TEST] Steer range:    [{steer.min().item():.3f}, {steer.max().item():.3f}]")
-            print(f"[TEST] Throttle range: [{throttle.min().item():.3f}, {throttle.max().item():.3f}]")
-            print(f"[TEST] Brake range:    [{brake.min().item():.3f}, {brake.max().item():.3f}]")
-
+        total_entropy = dist.entropy().sum(dim=-1, keepdim=True)
+        
+        return log_prob, total_entropy
+    
 class CriticNetwork(nn.Module):
     def __init__(self, input_dim):
         super(CriticNetwork, self).__init__()
@@ -124,17 +109,17 @@ class CriticNetwork(nn.Module):
 
     def init_weights(self):
         for layer in [self.fc1, self.fc2, self.fc3, self.fc4]:
-            nn.init.xavier_uniform_(layer.weight, gain=nn.init.calculate_gain("tanh"))
+            nn.init.kaiming_uniform_(layer.weight, nonlinearity="leaky_relu")
             nn.init.zeros_(layer.bias)
 
     def forward(self, state):
-        x = torch.tanh(self.fc1(state))
+        x = F.leaky_relu(self.fc1(state), negative_slope=0.2)
         if not torch.isfinite(x).all():
             raise RuntimeError("NaN/Inf after critic fc1")
-        x = torch.tanh(self.fc2(x))
+        x = F.leaky_relu(self.fc2(x), negative_slope=0.2)
         if not torch.isfinite(x).all():
             raise RuntimeError("NaN/Inf after critic fc2")
-        x = torch.tanh(self.fc3(x))
+        x = F.leaky_relu(self.fc3(x), negative_slope=0.2)
         if not torch.isfinite(x).all():
             raise RuntimeError("NaN/Inf after critic fc3")
         value = self.fc4(x)
@@ -147,7 +132,7 @@ class CriticNetwork(nn.Module):
 
 
 class PPOAgent:
-    def __init__(self, input_dim=198, action_dim=3, summary_writer=None, logger=None):
+    def __init__(self, input_dim=192, action_dim=3, summary_writer=None, logger=None):
         self.logger = logger
         if self.logger is None:
             raise ValueError("Logger not provided. Please provide a logger instance.")
@@ -159,7 +144,9 @@ class PPOAgent:
         self.logger.info(f"Action output dimension: {self.action_dim}")
 
         self.summary_writer = summary_writer
-
+        
+        self.entropy_coef = ENTROPY_COEF
+        
         self.actor = ActorNetwork(self.input_dim, action_dim).to(
             device
         )
@@ -171,11 +158,6 @@ class PPOAgent:
         self.critic_optimizer = optim.Adam(
             self.critic.parameters(), lr=CRITIC_LEARNING_RATE
         )
-        
-        ######################################################################
-        dummy_state = torch.randn((1, self.input_dim)).to(device)
-        self.actor.test_action_distribution(dummy_state, num_samples=10000)
-        ######################################################################
         
         # Experience storage
         (
@@ -346,44 +328,55 @@ class PPOAgent:
         # Convert lists to tensors
         states = torch.tensor(states).to(device)
         actions = torch.tensor(actions).to(device)
-        # old_log_probs = torch.tensor(old_log_probs).to(device).detach()
         old_log_probs = (
             torch.tensor(np.array(self.log_probs), dtype=torch.float32)
             .to(device)
             .detach()
             .unsqueeze(1)
-        )  # To match the shape of new_probs
+        )
         values = torch.tensor(values).to(device).detach()
         rewards = torch.tensor(rewards).to(device)
         dones = torch.tensor(dones).to(device)
-
+                
         rewards = self.normalize_rewards(rewards)
 
         advantages = self.compute_gae(values, rewards, dones)
-
+        
         total_actor_loss = 0.0
         total_critic_loss = 0.0
         total_entropy = 0.0
         num_batches = 0
+        
+        decay_base = 0.99995
+        initial_entropy_coef = 0.01
+        min_entropy_coef = 0.001
+        self.entropy_coef = max(initial_entropy_coef * (decay_base ** self.learn_step_counter), min_entropy_coef)
+
+        
         # Perform PPO optimization steps
         for _ in range(NUM_EPOCHS):
             indices = np.arange(len(states))
-            np.random.shuffle(indices)  # Shuffle indices for mini-batch sampling
+            np.random.shuffle(indices)
             for start in range(0, len(indices), MINIBATCH_SIZE):
                 batch = indices[start : start + MINIBATCH_SIZE]
 
                 batch_states = states[batch]
                 batch_actions = actions[batch]
                 batch_old_log_probs = old_log_probs[batch]
-                batch_advantages = advantages[batch]
-                batch_returns = batch_advantages + values[batch]  # Proper critic target
+                batch_advantages = advantages[batch].unsqueeze(1)
+                batch_values = values[batch].unsqueeze(1)
+                batch_returns = batch_advantages + batch_values
 
                 # Get new action probabilities and entropy
                 new_log_probs, entropy = self.actor.evaluate_actions(
                     batch_states, batch_actions
                 )
                 state_values = self.critic(batch_states).squeeze()
-
+                
+                new_log_probs = new_log_probs.unsqueeze(-1) if new_log_probs.dim() == 1 else new_log_probs
+                                
+                kl = (batch_old_log_probs - new_log_probs).mean()
+                
                 # PPO ratio
                 ratio = torch.exp(new_log_probs - batch_old_log_probs)
 
@@ -393,14 +386,14 @@ class PPOAgent:
                     torch.clamp(ratio, 1 - POLICY_CLIP, 1 + POLICY_CLIP)
                     * batch_advantages
                 )
-
+                
                 # Actor loss
                 actor_loss = (
-                    -torch.min(surr1, surr2).mean() - ENTROPY_COEF * entropy.mean()
+                    -torch.min(surr1, surr2).mean() - self.entropy_coef * entropy.mean()
                 )
 
                 # A new suggestion to calculate the critic loss
-                old_values_batch = values[batch].detach().view(-1)  # use stored values
+                old_values_batch = batch_values.detach().view(-1)  # use stored values
                 new_values = state_values.view(-1)
                 clipped_values = old_values_batch + (
                     new_values - old_values_batch
@@ -422,8 +415,7 @@ class PPOAgent:
                 self.actor_optimizer.step()
 
                 with torch.no_grad():
-                    self.actor.log_std.data[0].clamp_(np.log(0.1), np.log(1.05))
-                    self.actor.log_std.data[1:].clamp_(np.log(0.1), np.log(1.05))
+                    self.actor.log_std.data.clamp_(np.log(0.05), np.log(0.4))
 
                 self.critic_optimizer.zero_grad()
                 critic_loss.backward()
@@ -438,23 +430,23 @@ class PPOAgent:
         self.learn_step_counter += 1
 
         if self.summary_writer is not None:
-            current_action_std = torch.exp(self.actor.log_std).mean().item()
-            current_log_std = self.actor.log_std.data.cpu().numpy()
+            with torch.no_grad():
+                current_log_std = self.actor.log_std.detach().cpu().numpy()
+                current_action_std = torch.exp(self.actor.log_std.detach()).cpu().numpy()
 
-            self.logger.info(
-                f"[Learn Step {self.learn_step_counter}] log_std: {current_log_std}, action_std: {current_action_std}"
-            )
+                self.logger.info(
+                    f"[Learn Step {self.learn_step_counter}] log_std: {current_log_std}, action_std: {current_action_std}"
+                )
+                # Per-dimension logging
+                for i, (ls, std) in enumerate(zip(current_log_std, current_action_std)):
+                    self.summary_writer.add_scalar(f"Exploration/log_std_dim_{i}", ls, self.learn_step_counter)
+                    self.summary_writer.add_scalar(f"Exploration/std_dim_{i}", std, self.learn_step_counter)
+                # Overall logging
+                self.summary_writer.add_scalar("Exploration/mean log std", current_log_std.mean(), self.learn_step_counter)
+                self.summary_writer.add_scalar("Exploration/mean std", current_action_std.mean(), self.learn_step_counter)
+                self.summary_writer.add_scalar("KL/mean_kl_div", kl.item(), self.learn_step_counter)
+                self.summary_writer.add_scalar("Exploration/entropy_coef", self.entropy_coef, self.learn_step_counter)
 
-            self.summary_writer.add_scalar(
-                "Exploration/learned action std",
-                current_action_std,
-                self.learn_step_counter,
-            )
-            self.summary_writer.add_scalar(
-                "Exploration/mean log std",
-                current_log_std.mean().item(),
-                self.learn_step_counter,
-            )
 
         # Clear stored experiences
         (

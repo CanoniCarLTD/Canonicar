@@ -125,3 +125,19 @@ Changed Hyperparameters:
 ### v3.3.4
 
 - Changed to raw values sample with reparameterized tanh-squashed actions
+
+### v3.4.0
+
+- Changed activations from tanh to leaky_relu
+- Changed weights initialization to kaiming_uniform
+- Removed IMU **FOR NOW** until sensor delay fix
+- Therefore - **ACTION_DIM = 192**
+
+Changed Hyperparameters:
+- ACTOR_LEARNING_RATE = 2.5e-4 -> **2e-4**
+
+### v3.4.1
+
+Changed Hyperparameters:
+- LEARN_EVERY_N_STEPS = 1024 -> **2048**
+- MINIBATCH_SIZE = 64 -> **128**

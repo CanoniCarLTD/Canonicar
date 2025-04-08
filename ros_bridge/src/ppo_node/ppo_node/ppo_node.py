@@ -242,13 +242,19 @@ class PPOModelNode(Node):
             self.get_logger().debug("Skipping action publishing during transition")
             return
         
-        action_msg = Float32MultiArray()
         if action is None:
             action = self.action
-        action_msg.data = action.tolist()
+        
+        # Enforce mutual exclusivity: throttle OR brake
+        steer, throttle, brake = action.tolist()
+
+        action_msg = Float32MultiArray()
+        action_msg.data = [steer, throttle, brake]
+        
         self.get_logger().info(
-            f"Publishing | Steer: {action[0]} | Throttle: {action[1]} | Brake: {action[2]}"
+            f"Publishing | Steer: {steer} | Throttle: {throttle} | Brake: {brake}"
         )
+        
         self.action_publisher.publish(action_msg)
 
     ##################################################################################################
@@ -337,30 +343,31 @@ class PPOModelNode(Node):
                 f"Lap completion bonus applied: +{lap_completion_bonus}"
             )
         
-        # === Gas-brake overlap penalty ===
+        # === Gas-brake overlap penalty (stricter enforcement) ===
         if hasattr(self, 'prev_action') and self.prev_action is not None:
-            throttle   = self.prev_action[1]
+            throttle = self.prev_action[1]
             brake = self.prev_action[2]
 
-            # Threshold-based check: only consider meaningful signals
-            throttle_brake_threshold = 0.2
-            ratio_limit = 0.4
-            max_penalty = -0.5
+            # Apply *hard penalty* if both are > threshold
+            throttle_threshold = 0.1
+            brake_threshold = 0.1
 
-            if throttle > throttle_brake_threshold and brake > throttle_brake_threshold:
-                ratio = min(throttle, brake) / max(throttle, brake)
+            if throttle > throttle_threshold and brake > brake_threshold:
+                penalty = -1.0  # Much harsher
+                self.reward += penalty
+                self.get_logger().info(f"Strong gas-brake overlap penalty applied: {penalty:.2f}")
 
-                if ratio > ratio_limit:
-                    # Scaled penalty based on overlap intensity
-                    overlap_intensity = min(1.0, throttle * brake * 2)
-                    overlap_penalty = max_penalty * overlap_intensity
-                    self.reward += overlap_penalty
+            # Optionally keep brake-stall penalty too
+            high_brake_threshold = 0.4
+            low_throttle_threshold = 0.05
 
-                    self.get_logger().info(f"Gas-brake penalty applied: {overlap_penalty:.4f}")
-            if brake > 0.9 and throttle < 0.1:
-                self.reward -= 0.5  # or more if needed
-                self.get_logger().info("Brake-stall penalty applied (-2.0)")
-
+            if brake > high_brake_threshold and throttle < low_throttle_threshold:
+                penalty = -0.5  # Stronger stall penalty
+                self.reward += penalty
+                self.get_logger().info(f"Brake-stall penalty applied: {penalty:.2f}")
+            
+            self.reward*=0.05
+                
     ##################################################################################################
     #                                       STORE TRANSITION
     ##################################################################################################
@@ -515,9 +522,7 @@ class PPOModelNode(Node):
                         stop_action = np.array([0.0, 0.0, 1.0], dtype=np.float32)
                         self.publish_action(stop_action)
                         learn_start_time = time.time()
-                        self.actor_loss, self.critic_loss, self.entropy = (
-                            self.ppo_agent.learn()
-                        )
+                        self.actor_loss, self.critic_loss, self.entropy = self.ppo_agent.learn()
                         learn_duration = time.time() - learn_start_time
                         self.get_logger().info(
                             "Learn duration: {:.4f}s".format(learn_duration)
@@ -637,6 +642,7 @@ class PPOModelNode(Node):
             "current_ep_reward": self.current_ep_reward,
             "current_step_in_episode": self.current_step_in_episode,
             "learn_step_counter": self.ppo_agent.learn_step_counter,
+            "entropy_coef": self.ppo_agent.entropy_coef,
         }
         # self.save_to_mongodb(meta)
         try:
@@ -658,6 +664,7 @@ class PPOModelNode(Node):
                 self.current_ep_reward = meta.get("current_ep_reward", 0)
                 self.current_step_in_episode = meta.get("current_step_in_episode", 0)
                 self.ppo_agent.learn_step_counter = meta.get("learn_step_counter", 0)
+                self.ppo_agent.entropy_coef = meta.get("entropy_coef", ENTROPY_COEF)
                 log_std_list = meta.get("log_std")
                 if log_std_list is not None:
                     log_std_tensor = torch.tensor(

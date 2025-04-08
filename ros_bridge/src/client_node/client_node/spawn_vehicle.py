@@ -1,19 +1,19 @@
-import rclpy
-from rclpy.node import Node
+import rclpy #type: ignore
+from rclpy.node import Node #type: ignore
 import carla
 from carla import Client, Transform, Location, Rotation, TrafficManager
 import json
 import os
-from std_msgs.msg import Float32MultiArray
-from ament_index_python.packages import get_package_share_directory
+from std_msgs.msg import Float32MultiArray #type: ignore
+from ament_index_python.packages import get_package_share_directory #type: ignore
 import time, random
-from std_msgs.msg import String
-from rclpy.qos import QoSProfile, ReliabilityPolicy
+from std_msgs.msg import String #type: ignore
+from rclpy.qos import QoSProfile, ReliabilityPolicy #type: ignore
 from  ros_interfaces.srv import VehicleReady, RespawnVehicle, SwapMap
 
 # For ROS2 messages
-from sensor_msgs.msg import Image, PointCloud2, Imu, NavSatFix
-from std_msgs.msg import Header
+from sensor_msgs.msg import Image, PointCloud2, Imu, NavSatFix #type: ignore
+from std_msgs.msg import Header #type: ignore
 
 # Import conversion functions from sensors_data
 from sensors_data import (
@@ -178,7 +178,7 @@ class SpawnVehicleNode(Node):
             )
 
             self.spawn_transform = spawn_waypoint.transform
-            self.spawn_transform.location.z += 0.3
+            self.spawn_transform.location.z += 0.2
 
             self.vehicle = self.world.try_spawn_actor(vehicle_bp, self.spawn_transform)
             if not self.vehicle:
@@ -269,7 +269,7 @@ class SpawnVehicleNode(Node):
             old_loc = self.vehicle.get_transform().location
             
             self.vehicle.set_transform(self.spawn_transform)
-            self.ignore_collisions_until = time.time() + 0.5 
+            self.ignore_collisions_until = time.time() + 0.8 # changerd to 0.8 Grace period to ignore collisions
             self.get_logger().info(f"Vehicle relocated from ({old_loc.x:.1f},{old_loc.y:.1f}) to spawn point")
             
             self.notify_vehicle_ready()
@@ -490,8 +490,8 @@ class SpawnVehicleNode(Node):
             return (f"/carla/{sensor_id}/image_raw", Image)
         elif sensor_type.startswith("sensor.lidar"):
             return (f"/carla/{sensor_id}/points", PointCloud2)
-        elif sensor_type.startswith("sensor.other.imu"):
-            return (f"/carla/{sensor_id}/imu", Imu)
+        # elif sensor_type.startswith("sensor.other.imu"):
+        #     return (f"/carla/{sensor_id}/imu", Imu)
         else:
             return (None, None)
 
@@ -525,8 +525,8 @@ class SpawnVehicleNode(Node):
                     message = carla_image_to_ros_image(data, header)
                 elif sensor_type.startswith('sensor.lidar'):
                     message = carla_lidar_to_ros_pointcloud2(data, header)
-                elif sensor_type.startswith("sensor.other.imu"):
-                    message = carla_imu_to_ros_imu(data, header)
+                # elif sensor_type.startswith("sensor.other.imu"):
+                #     message = carla_imu_to_ros_imu(data, header)
                 else:
                     message = None
                     
