@@ -275,7 +275,7 @@ class PPOModelNode(Node):
         base_time_penalty = -0.05  # Base penalty when not moving
         stagnation_factor = 0.05  # Increases penalty over time
         backwards_penalty = -5.0  # Penalty for going backwards
-        collision_penalty = -10.0  # Stronger collision penalty
+        collision_penalty = -20.0  # Stronger collision penalty
         lap_completion_bonus = 50.0  # Lap completion bonus
         
         # Initialize stagnation counter if not exists

@@ -347,7 +347,7 @@ class PPOAgent:
         total_entropy = 0.0
         num_batches = 0
         
-        decay_base = 0.99995
+        decay_base = 0.999
         initial_entropy_coef = 0.01
         min_entropy_coef = 0.001
         self.entropy_coef = max(initial_entropy_coef * (decay_base ** self.learn_step_counter), min_entropy_coef)
@@ -415,7 +415,7 @@ class PPOAgent:
                 self.actor_optimizer.step()
 
                 with torch.no_grad():
-                    self.actor.log_std.data.clamp_(np.log(0.05), np.log(0.4))
+                    self.actor.log_std.data.clamp_(np.log(0.05), np.log(0.35))
 
                 self.critic_optimizer.zero_grad()
                 critic_loss.backward()
