@@ -298,7 +298,7 @@ class SpawnVehicleNode(Node):
                     break
             except:
                 pass
-            
+
         if self.vehicle and self.vehicle.is_alive:
             try:
                 blueprint_library = self.world.get_blueprint_library()
@@ -520,8 +520,8 @@ class SpawnVehicleNode(Node):
             return (f"/carla/{sensor_id}/image_raw", Image)
         elif sensor_type.startswith("sensor.lidar"):
             return (f"/carla/{sensor_id}/points", PointCloud2)
-        # elif sensor_type.startswith("sensor.other.imu"):
-        #     return (f"/carla/{sensor_id}/imu", Imu)
+        elif sensor_type.startswith("sensor.other.imu"):
+            return (f"/carla/{sensor_id}/imu", Imu)
         else:
             return (None, None)
 
@@ -555,8 +555,8 @@ class SpawnVehicleNode(Node):
                     message = carla_image_to_ros_image(data, header)
                 elif sensor_type.startswith('sensor.lidar'):
                     message = carla_lidar_to_ros_pointcloud2(data, header)
-                # elif sensor_type.startswith("sensor.other.imu"):
-                #     message = carla_imu_to_ros_imu(data, header)
+                elif sensor_type.startswith("sensor.other.imu"):
+                    message = carla_imu_to_ros_imu(data, header)
                 else:
                     message = None
                     

@@ -132,7 +132,7 @@ class CriticNetwork(nn.Module):
 
 
 class PPOAgent:
-    def __init__(self, input_dim=192, action_dim=3, summary_writer=None, logger=None):
+    def __init__(self, input_dim=197, action_dim=3, summary_writer=None, logger=None):
         self.logger = logger
         if self.logger is None:
             raise ValueError("Logger not provided. Please provide a logger instance.")
