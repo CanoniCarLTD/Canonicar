@@ -144,8 +144,7 @@ class DataCollector(Node):
         # end_time = time.time()
         # self.get_logger().info(f"Vision processing time: {end_time - start_time:.4f} seconds")
         return self.aggregate_state_vector(
-            vision_features,
-            self.process_imu(imu_msg)
+            vision_features, self.process_imu(imu_msg)
         )
 
     def process_vision_data(self, image_msg, lidar_msg):
@@ -175,20 +174,20 @@ class DataCollector(Node):
             imu_msg.linear_acceleration.z,
             imu_msg.angular_velocity.x,
             imu_msg.angular_velocity.y,
-            imu_msg.angular_velocity.z,
+            # imu_msg.angular_velocity.z,
         ]
         return imu_data
 
     def aggregate_state_vector(self, vision_features, imu_features):
         """Aggregate features into a single state vector.""" 
-        # Total vector size: 192 (vision) + 6 (IMU) = 198
-        state_vector = np.zeros(198, dtype=np.float32)
+        # Total vector size: 192 (vision) + 5 (IMU) = 197
+        state_vector = np.zeros(197, dtype=np.float32)
         
         # Fill with vision features (fused RGB + LiDAR)
         state_vector[:192] = vision_features
 
         # # Add IMU data
-        state_vector[192:198] = imu_features
+        state_vector[192:197] = imu_features
         
         return state_vector
 

@@ -1,19 +1,19 @@
-import rclpy
-from rclpy.node import Node
+import rclpy #type: ignore
+from rclpy.node import Node #type: ignore
 import carla
 from carla import Client, Transform, Location, Rotation, TrafficManager
 import json
 import os
-from std_msgs.msg import Float32MultiArray
-from ament_index_python.packages import get_package_share_directory
+from std_msgs.msg import Float32MultiArray #type: ignore
+from ament_index_python.packages import get_package_share_directory #type: ignore
 import time, random
-from std_msgs.msg import String
-from rclpy.qos import QoSProfile, ReliabilityPolicy
+from std_msgs.msg import String #type: ignore
+from rclpy.qos import QoSProfile, ReliabilityPolicy #type: ignore
 from  ros_interfaces.srv import VehicleReady, RespawnVehicle, SwapMap
 
 # For ROS2 messages
-from sensor_msgs.msg import Image, PointCloud2, Imu, NavSatFix
-from std_msgs.msg import Header
+from sensor_msgs.msg import Image, PointCloud2, Imu, NavSatFix #type: ignore
+from std_msgs.msg import Header #type: ignore
 
 # Import conversion functions from sensors_data
 from sensors_data import (
@@ -178,7 +178,7 @@ class SpawnVehicleNode(Node):
             )
 
             self.spawn_transform = spawn_waypoint.transform
-            self.spawn_transform.location.z += 0.3
+            self.spawn_transform.location.z += 0.2
 
             self.vehicle = self.world.try_spawn_actor(vehicle_bp, self.spawn_transform)
             if not self.vehicle:
@@ -267,9 +267,9 @@ class SpawnVehicleNode(Node):
             self.vehicle.set_target_angular_velocity(carla.Vector3D(0, 0, 0))
             
             old_loc = self.vehicle.get_transform().location
-            
+            self._reset_collision_sensor()
             self.vehicle.set_transform(self.spawn_transform)
-            self.ignore_collisions_until = time.time() + 0.5 
+            self.ignore_collisions_until = time.time() + 0.8 # changerd to 0.8 Grace period to ignore collisions
             self.get_logger().info(f"Vehicle relocated from ({old_loc.x:.1f},{old_loc.y:.1f}) to spawn point")
             
             self.notify_vehicle_ready()
@@ -283,6 +283,36 @@ class SpawnVehicleNode(Node):
             response.message = f"Relocation failed: {str(e)}"
             return response
 
+    def _reset_collision_sensor(self):
+        """Destroy and recreate the collision sensor"""
+        # Find and destroy the existing collision sensor
+        collision_sensor = None
+        for i, sensor in enumerate(self.spawned_sensors):
+            try:
+                if sensor.type_id.startswith("sensor.other.collision"):
+                    collision_sensor = sensor
+                    sensor.stop()
+                    sensor.destroy()
+                    del self.spawned_sensors[i]
+                    self.get_logger().info("Destroyed old collision sensor")
+                    break
+            except:
+                pass
+
+        if self.vehicle and self.vehicle.is_alive:
+            try:
+                blueprint_library = self.world.get_blueprint_library()
+                collision_bp = blueprint_library.find("sensor.other.collision")
+                if collision_bp:
+                    new_collision_sensor = self.world.spawn_actor(
+                        collision_bp, carla.Transform(), attach_to=self.vehicle
+                    )
+                    new_collision_sensor.listen(lambda event: self._on_collision(event))
+                    self.spawned_sensors.append(new_collision_sensor)
+                    self.get_logger().info("Created new collision sensor")
+            except Exception as e:
+                self.get_logger().error(f"Error recreating collision sensor: {e}")
+            
     def respawn_vehicle_callback(self, request, response):
         """Handle respawn vehicle service calls"""
         self.get_logger().info(f"Respawn vehicle requested: {request.reason}")
