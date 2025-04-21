@@ -141,3 +141,9 @@ Changed Hyperparameters:
 Changed Hyperparameters:
 - LEARN_EVERY_N_STEPS = 1024 -> **2048**
 - MINIBATCH_SIZE = 64 -> **128**
+
+### v3.4.2
+
+- Brought back IMU
+- Removed brake
+- Fixed collision spawn bug
