@@ -267,7 +267,7 @@ class SpawnVehicleNode(Node):
             self.vehicle.set_target_angular_velocity(carla.Vector3D(0, 0, 0))
             
             old_loc = self.vehicle.get_transform().location
-            
+            self._reset_collision_sensor()
             self.vehicle.set_transform(self.spawn_transform)
             self.ignore_collisions_until = time.time() + 0.8 # changerd to 0.8 Grace period to ignore collisions
             self.get_logger().info(f"Vehicle relocated from ({old_loc.x:.1f},{old_loc.y:.1f}) to spawn point")
@@ -283,6 +283,36 @@ class SpawnVehicleNode(Node):
             response.message = f"Relocation failed: {str(e)}"
             return response
 
+    def _reset_collision_sensor(self):
+        """Destroy and recreate the collision sensor"""
+        # Find and destroy the existing collision sensor
+        collision_sensor = None
+        for i, sensor in enumerate(self.spawned_sensors):
+            try:
+                if sensor.type_id.startswith("sensor.other.collision"):
+                    collision_sensor = sensor
+                    sensor.stop()
+                    sensor.destroy()
+                    del self.spawned_sensors[i]
+                    self.get_logger().info("Destroyed old collision sensor")
+                    break
+            except:
+                pass
+            
+        if self.vehicle and self.vehicle.is_alive:
+            try:
+                blueprint_library = self.world.get_blueprint_library()
+                collision_bp = blueprint_library.find("sensor.other.collision")
+                if collision_bp:
+                    new_collision_sensor = self.world.spawn_actor(
+                        collision_bp, carla.Transform(), attach_to=self.vehicle
+                    )
+                    new_collision_sensor.listen(lambda event: self._on_collision(event))
+                    self.spawned_sensors.append(new_collision_sensor)
+                    self.get_logger().info("Created new collision sensor")
+            except Exception as e:
+                self.get_logger().error(f"Error recreating collision sensor: {e}")
+            
     def respawn_vehicle_callback(self, request, response):
         """Handle respawn vehicle service calls"""
         self.get_logger().info(f"Respawn vehicle requested: {request.reason}")
