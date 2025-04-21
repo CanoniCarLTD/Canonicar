@@ -147,3 +147,4 @@ Changed Hyperparameters:
 - Brought back IMU
 - Removed brake
 - Fixed collision spawn bug
+- Added vehicle deviation penalty
