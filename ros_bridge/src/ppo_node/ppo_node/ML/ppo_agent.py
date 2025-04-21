@@ -22,7 +22,7 @@ class ActorNetwork(nn.Module):
         super(ActorNetwork, self).__init__()
         self.action_dim = action_dim
         
-        log_std_init = torch.tensor([np.log(0.2), np.log(0.2)], dtype=torch.float32)
+        log_std_init = torch.tensor([np.log(0.3), np.log(0.8)], dtype=torch.float32)
 
         self.log_std = nn.Parameter(log_std_init.clone())
 
@@ -63,10 +63,9 @@ class ActorNetwork(nn.Module):
         raw_action = dist.rsample() # Reparameterization trick
         
         normal = Normal(0, 1)
-        cdf_action = normal.cdf(raw_action)  # (batch_size, 3)
+        cdf_action = normal.cdf(raw_action)  # (batch_size, 2)
     
         log_prob = dist.log_prob(raw_action).unsqueeze(-1)        
-        # log_prob -= torch.log(1 - torch.tanh(raw_action).pow(2) + 1e-6).sum(dim=-1, keepdim=True)
         if not torch.isfinite(log_prob).all():
             raise RuntimeError(f"NaN/Inf in log_prob: {log_prob}")
 
@@ -344,7 +343,7 @@ class PPOAgent:
         num_batches = 0
         
         decay_base = 0.999
-        initial_entropy_coef = 0.01
+        initial_entropy_coef = 0.05
         min_entropy_coef = 0.001
         self.entropy_coef = max(initial_entropy_coef * (decay_base ** self.learn_step_counter), min_entropy_coef)
 
@@ -375,6 +374,8 @@ class PPOAgent:
                 
                 # PPO ratio
                 ratio = torch.exp(new_log_probs - batch_old_log_probs)
+                
+                print("PPO ratio:", ratio.mean().item(), "std:", ratio.std().item())
 
                 # PPO loss terms
                 surr1 = ratio * batch_advantages
@@ -411,7 +412,10 @@ class PPOAgent:
                 self.actor_optimizer.step()
 
                 with torch.no_grad():
-                    self.actor.log_std.data.clamp_(np.log(0.05), np.log(0.35))
+                    # steer  std ∈ [0.05, 0.6]
+                    self.actor.log_std.data[0].clamp_(np.log(0.05), np.log(0.6))
+                    # throttle std ∈ [0.05, 1.0]
+                    self.actor.log_std.data[1].clamp_(np.log(0.05), np.log(0.8))
 
                 self.critic_optimizer.zero_grad()
                 critic_loss.backward()

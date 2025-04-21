@@ -2,13 +2,13 @@
 All the hyper-parameters needed for the PPO algorithm implementation.
 """
 
-MODEL_LOAD = False
+MODEL_LOAD = True
 
 # Directory to save model checkpoints - always stays the same
 PPO_CHECKPOINT_DIR = "/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models"
 
 # Set to None unless you're continuing an exact run (same version/run folder)
-CHECKPOINT_FILE = "/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models/v3.4.1/run_20250408_0002"
+CHECKPOINT_FILE = "/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models/v3.4.2/run_20250421_0007"
 
 VERSION = "v3.4.2"
 
@@ -20,7 +20,7 @@ DETERMINISTIC_CUDNN = False
 
 # Training configuration
 TRAIN = True
-EPISODE_LENGTH = 3000  # Maximum timesteps per episode
+EPISODE_LENGTH = 7000  # Maximum timesteps per episode
 LEARN_EVERY_N_STEPS = 2048 # Number of timesteps collected before a policy update
 MINIBATCH_SIZE = 128  # Each PPO update uses mini-batches of MINIBATCH_SIZE
 NUM_EPOCHS = 3  # Each mini-batch is seen 3 times (full data 3×) in PPO update (Best practice: 3-10)
