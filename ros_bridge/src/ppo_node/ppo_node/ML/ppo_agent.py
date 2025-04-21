@@ -22,8 +22,7 @@ class ActorNetwork(nn.Module):
         super(ActorNetwork, self).__init__()
         self.action_dim = action_dim
         
-        # Steering ~0.2, throttle/brake slightly less to avoid overexploration
-        log_std_init = torch.tensor([np.log(0.2), np.log(0.2), np.log(0.2)], dtype=torch.float32)
+        log_std_init = torch.tensor([np.log(0.2), np.log(0.2)], dtype=torch.float32)
 
         self.log_std = nn.Parameter(log_std_init.clone())
 
@@ -73,22 +72,19 @@ class ActorNetwork(nn.Module):
 
         steer = 2.0 * cdf_action[:, 0:1] - 1.0      # [-1, 1]
         throttle = cdf_action[:, 1:2]              # [0, 1]
-        brake = 0.5 * cdf_action[:, 2:3]           # [0, 0.5]
-        brake[brake < 0.2] = 0.0
-        action = torch.cat([steer, throttle, brake], dim=1)
+        action = torch.cat([steer, throttle], dim=1)
 
         return action.detach(), log_prob  # detach if you're not backproping through
 
     def evaluate_actions(self, state, action):
         normal = Normal(0, 1)
         
-        steer, throttle, brake = action[:, 0:1], action[:, 1:2], action[:, 2:3]
+        steer, throttle = action[:, 0:1], action[:, 1:2]
         
         steer_raw = normal.icdf(((steer + 1.0) / 2.0).clamp(1e-6, 1 - 1e-6))     # map [-1, 1] → [0, 1] → raw
         throttle_raw = normal.icdf(throttle.clamp(1e-6, 1 - 1e-6))               # already [0, 1]
-        brake_raw = normal.icdf((brake * 2.0).clamp(1e-6, 1 - 1e-6))             # [0, 0.5] → [0, 1]
         
-        raw_action = torch.cat([steer_raw, throttle_raw, brake_raw], dim=1)
+        raw_action = torch.cat([steer_raw, throttle_raw], dim=1)
         
         dist = self.get_dist(state)
         log_prob = dist.log_prob(raw_action)
@@ -132,7 +128,7 @@ class CriticNetwork(nn.Module):
 
 
 class PPOAgent:
-    def __init__(self, input_dim=197, action_dim=3, summary_writer=None, logger=None):
+    def __init__(self, input_dim=197, action_dim=2, summary_writer=None, logger=None):
         self.logger = logger
         if self.logger is None:
             raise ValueError("Logger not provided. Please provide a logger instance.")

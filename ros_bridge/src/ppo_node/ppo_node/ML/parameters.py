@@ -10,7 +10,7 @@ PPO_CHECKPOINT_DIR = "/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models
 # Set to None unless you're continuing an exact run (same version/run folder)
 CHECKPOINT_FILE = "/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models/v3.4.1/run_20250408_0002"
 
-VERSION = "v3.4.1" #v3.4.1 is a change to parameters - learn every n steps, minibatch size, epochs
+VERSION = "v3.4.2"
 
 # Point this to a full run directory from any version (must contain actor.pth etc.)
 # Example: "/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models/v2.1.3/run_20250325_0001"

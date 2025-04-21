@@ -71,7 +71,7 @@ class PPOModelNode(Node):
             self.training if self.train else self.testing,
             10,
         )
-        # Action publisher (Steering, Throttle, Brake)
+        # Action publisher (Steering, Throttle)
         self.action_publisher = self.create_publisher(
             Float32MultiArray, "/carla/vehicle_control", 10
         )
@@ -245,14 +245,13 @@ class PPOModelNode(Node):
         if action is None:
             action = self.action
         
-        # Enforce mutual exclusivity: throttle OR brake
-        steer, throttle, brake = action.tolist()
+        steer, throttle = action.tolist()
 
         action_msg = Float32MultiArray()
-        action_msg.data = [steer, throttle, brake]
+        action_msg.data = [steer, throttle, 0.0]  # Brake is always 0.0
         
         self.get_logger().info(
-            f"Publishing | Steer: {steer} | Throttle: {throttle} | Brake: {brake}"
+            f"Publishing | Steer: {steer} | Throttle: {throttle}"
         )
         
         self.action_publisher.publish(action_msg)
@@ -271,7 +270,7 @@ class PPOModelNode(Node):
         - Lap completion bonus
         """
         # Core reward parameters
-        progress_multiplier = 3000.0  # More balanced multiplier for progress
+        progress_multiplier = 30.0  # More balanced multiplier for progress
         base_time_penalty = -0.05  # Base penalty when not moving
         stagnation_factor = 0.05  # Increases penalty over time
         backwards_penalty = -5.0  # Penalty for going backwards
@@ -343,30 +342,30 @@ class PPOModelNode(Node):
                 f"Lap completion bonus applied: +{lap_completion_bonus}"
             )
         
-        # === Gas-brake overlap penalty (stricter enforcement) ===
-        if hasattr(self, 'prev_action') and self.prev_action is not None:
-            throttle = self.prev_action[1]
-            brake = self.prev_action[2]
+        # # === Gas-brake overlap penalty (stricter enforcement) ===
+        # if hasattr(self, 'prev_action') and self.prev_action is not None:
+        #     throttle = self.prev_action[1]
+        #     brake = self.prev_action[2]
 
-            # Apply *hard penalty* if both are > threshold
-            throttle_threshold = 0.1
-            brake_threshold = 0.1
+        #     # Apply *hard penalty* if both are > threshold
+        #     throttle_threshold = 0.1
+        #     brake_threshold = 0.1
 
-            if throttle > throttle_threshold and brake > brake_threshold:
-                penalty = -1.0  # Much harsher
-                self.reward += penalty
-                self.get_logger().info(f"Strong gas-brake overlap penalty applied: {penalty:.2f}")
+        #     if throttle > throttle_threshold and brake > brake_threshold:
+        #         penalty = -1.0  # Much harsher
+        #         self.reward += penalty
+        #         self.get_logger().info(f"Strong gas-brake overlap penalty applied: {penalty:.2f}")
 
-            # Optionally keep brake-stall penalty too
-            high_brake_threshold = 0.4
-            low_throttle_threshold = 0.05
+        #     # Optionally keep brake-stall penalty too
+        #     high_brake_threshold = 0.4
+        #     low_throttle_threshold = 0.05
 
-            if brake > high_brake_threshold and throttle < low_throttle_threshold:
-                penalty = -0.5  # Stronger stall penalty
-                self.reward += penalty
-                self.get_logger().info(f"Brake-stall penalty applied: {penalty:.2f}")
+        #     if brake > high_brake_threshold and throttle < low_throttle_threshold:
+        #         penalty = -0.5  # Stronger stall penalty
+        #         self.reward += penalty
+        #         self.get_logger().info(f"Brake-stall penalty applied: {penalty:.2f}")
             
-            self.reward*=0.05
+            # self.reward*=0.05
                 
     ##################################################################################################
     #                                       STORE TRANSITION
