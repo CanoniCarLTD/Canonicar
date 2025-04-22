@@ -8,7 +8,7 @@ MODEL_LOAD = False
 PPO_CHECKPOINT_DIR = "/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models"
 
 # Set to None unless you're continuing an exact run (same version/run folder)
-CHECKPOINT_FILE = "/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models/v3.4.2/run_20250422_0005"
+CHECKPOINT_FILE = "/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models/v3.4.2/run_20250422_0012"
 
 VERSION = "v3.4.2"
 
