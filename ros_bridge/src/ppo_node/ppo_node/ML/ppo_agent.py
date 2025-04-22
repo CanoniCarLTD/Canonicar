@@ -374,12 +374,6 @@ class PPOAgent:
                 if new_log_probs.dim() == 1:
                     new_log_probs = new_log_probs.unsqueeze(1)
                     
-                print("→ SHAPES:")
-                print("   old_log_probs:", batch_old_log_probs.shape)
-                print("   new_log_probs:", new_log_probs.shape)
-                print("   advantages:", batch_advantages.shape)
-                print("   entropy:", entropy.shape)
-                
                 kl = (batch_old_log_probs - new_log_probs).mean()
                 
                 # PPO ratio
