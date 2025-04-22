@@ -335,6 +335,10 @@ class PPOAgent:
         if old_log_probs.dim() == 1:
             old_log_probs = old_log_probs.unsqueeze(1)
         
+        assert torch.isfinite(advantages).all(), "\nNon-finite advantages!\n"
+        assert torch.isfinite(values).all(), "\nNon-finite values!\n"
+        assert torch.isfinite(rewards).all(), "\nNon-finite rewards!\n"
+
         rewards = self.normalize_rewards(rewards)
 
         advantages = self.compute_gae(values, rewards, dones)
@@ -379,8 +383,8 @@ class PPOAgent:
                 # PPO ratio
                 ratio = torch.exp(new_log_probs - batch_old_log_probs)
                 
-                print("PPO ratio:", ratio.mean().item(), "std:", ratio.std().item())
-                print("   ratio:", ratio.shape)
+                print("PPO ratio mean:", ratio.mean().item(), "ratio std:", ratio.std().item())
+                print("ratio:", ratio.shape)
 
                 # PPO loss terms
                 surr1 = ratio * batch_advantages

@@ -5,7 +5,6 @@ from std_msgs.msg import Float32MultiArray, String  # type: ignore
 from ros_interfaces.srv import VehicleReady, GetTrackWaypoints
 import torch
 import numpy as np
-import sys
 import os
 import json
 from datetime import datetime, time
@@ -109,9 +108,9 @@ class PPOModelNode(Node):
         self.reward = 0.0
         self.done = False
 
-        self.prev_state = None  # new
-        self.prev_action = None  # new
-        self.prev_log_prob = None  # new
+        self.prev_state = None
+        self.prev_action = None
+        self.prev_log_prob = None
 
         self.t2 = None
         self.t1 = None
@@ -351,30 +350,6 @@ class PPOModelNode(Node):
             self.stagnation_counter = 0  # Reset counter
             self.get_logger().info(f"Lap completion bonus applied: +{lap_completion_bonus}")
         
-        # # === Gas-brake overlap penalty (stricter enforcement) ===
-        # if hasattr(self, 'prev_action') and self.prev_action is not None:
-        #     throttle = self.prev_action[1]
-        #     brake = self.prev_action[2]
-
-        #     # Apply *hard penalty* if both are > threshold
-        #     throttle_threshold = 0.1
-        #     brake_threshold = 0.1
-
-        #     if throttle > throttle_threshold and brake > brake_threshold:
-        #         penalty = -1.0  # Much harsher
-        #         self.reward += penalty
-        #         self.get_logger().info(f"Strong gas-brake overlap penalty applied: {penalty:.2f}")
-
-        #     # Optionally keep brake-stall penalty too
-        #     high_brake_threshold = 0.4
-        #     low_throttle_threshold = 0.05
-
-        #     if brake > high_brake_threshold and throttle < low_throttle_threshold:
-        #         penalty = -0.5  # Stronger stall penalty
-        #         self.reward += penalty
-        #         self.get_logger().info(f"Brake-stall penalty applied: {penalty:.2f}")
-            
-            # self.reward*=0.05
                 
     ##################################################################################################
     #                                       STORE TRANSITION
@@ -508,11 +483,9 @@ class PPOModelNode(Node):
                 self.get_action(self.state)
                 self.publish_action()
 
-                self.prev_state = self.state  # new
-                self.prev_action = self.action  # new
-                self.prev_log_prob = self.log_prob  # new
-
-                # self.calculate_reward() # moved up to compute reward for previous transition
+                self.prev_state = self.state
+                self.prev_action = self.action
+                self.prev_log_prob = self.log_prob
 
                 # Mark episode as done if episode_length reached
                 if self.current_step_in_episode >= self.episode_length:
@@ -523,7 +496,6 @@ class PPOModelNode(Node):
                     self.episode_complete_pub.publish(completion_msg)
                     self.get_logger().info("Published episode completion notification")
 
-                # self.store_transition()
                 self.timestep_counter += 1
                 self.current_ep_reward += self.reward
 
