@@ -80,8 +80,8 @@ class ActorNetwork(nn.Module):
         
         steer, throttle = action[:, 0:1], action[:, 1:2]
         
-        steer_raw = normal.icdf(((steer + 1.0) / 2.0).clamp(1e-6, 1 - 1e-6))     # map [-1, 1] → [0, 1] → raw
-        throttle_raw = normal.icdf(throttle.clamp(1e-6, 1 - 1e-6))               # already [0, 1]
+        steer_raw = normal.icdf(((steer + 1.0) / 2.0).clamp(1e-4, 1 - 1e-4))     # map [-1, 1] → [0, 1] → raw
+        throttle_raw = normal.icdf(throttle.clamp(1e-4, 1 - 1e-4))               # already [0, 1]
         
         raw_action = torch.cat([steer_raw, throttle_raw], dim=1)
         
@@ -207,7 +207,11 @@ class PPOAgent:
         """Store experience for PPO updates. (every stored data will be used in the next update)"""
         self.states.append(state)
         self.actions.append(action)
-        self.log_probs.append(log_prob)
+        if not isinstance(log_prob, torch.Tensor):
+            lp = torch.tensor([log_prob], dtype=torch.float32, device=device)
+        else:
+            lp = log_prob.detach()   # shape [1]
+        self.log_probs.append(lp)
         self.vals.append(val)
         self.rewards.append(reward)
         self.dones.append(done)
@@ -315,7 +319,6 @@ class PPOAgent:
         # Convert lists to numpy arrays first
         states = np.array(self.states, dtype=np.float32)
         actions = np.array(self.actions, dtype=np.float32)
-        old_log_probs = np.array(self.log_probs, dtype=np.float32)
         values = np.array(self.vals, dtype=np.float32)
         rewards = np.array(self.rewards, dtype=np.float32)
         dones = np.array(self.dones, dtype=np.float32)
@@ -323,16 +326,15 @@ class PPOAgent:
         # Convert lists to tensors
         states = torch.tensor(states).to(device)
         actions = torch.tensor(actions).to(device)
-        old_log_probs = (
-            torch.tensor(np.array(self.log_probs), dtype=torch.float32)
-            .to(device)
-            .detach()
-            .unsqueeze(1)
-        )
         values = torch.tensor(values).to(device).detach()
         rewards = torch.tensor(rewards).to(device)
         dones = torch.tensor(dones).to(device)
-                
+        old_log_probs = torch.cat(self.log_probs, dim=0).detach()
+        if old_log_probs.device != device:
+            old_log_probs = old_log_probs.to(device)
+        if old_log_probs.dim() == 1:
+            old_log_probs = old_log_probs.unsqueeze(1)
+        
         rewards = self.normalize_rewards(rewards)
 
         advantages = self.compute_gae(values, rewards, dones)
@@ -368,14 +370,23 @@ class PPOAgent:
                 )
                 state_values = self.critic(batch_states).squeeze()
                 
-                new_log_probs = new_log_probs.unsqueeze(-1) if new_log_probs.dim() == 1 else new_log_probs
-                                
+                new_log_probs = new_log_probs.squeeze()
+                if new_log_probs.dim() == 1:
+                    new_log_probs = new_log_probs.unsqueeze(1)
+                    
+                print("→ SHAPES:")
+                print("   old_log_probs:", batch_old_log_probs.shape)
+                print("   new_log_probs:", new_log_probs.shape)
+                print("   advantages:", batch_advantages.shape)
+                print("   entropy:", entropy.shape)
+                
                 kl = (batch_old_log_probs - new_log_probs).mean()
                 
                 # PPO ratio
                 ratio = torch.exp(new_log_probs - batch_old_log_probs)
                 
                 print("PPO ratio:", ratio.mean().item(), "std:", ratio.std().item())
+                print("   ratio:", ratio.shape)
 
                 # PPO loss terms
                 surr1 = ratio * batch_advantages
