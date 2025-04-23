@@ -94,7 +94,8 @@ class PPOModelNode(Node):
 
         self.summary_writer = None
         
-        seed = int(time.time()) % (2**32 - 1)
+        # seed = int(time.time()) % (2**32 - 1)
+        seed = 42  # Fixed seed for reproducibility
         self.set_global_seed(seed)
         self.set_deterministic_cudnn(deterministic_cudnn=DETERMINISTIC_CUDNN)
         

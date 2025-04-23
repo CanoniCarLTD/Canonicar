@@ -54,7 +54,8 @@ class ActorNetwork(nn.Module):
     def get_dist(self, state):
         raw_action_mean = self.forward(state)
         action_std = torch.exp(self.log_std)
-        cov_mat = torch.diag_embed(action_std.expand_as(raw_action_mean))
+        action_var = action_std.pow(2)
+        cov_mat = torch.diag_embed(action_var.expand_as(raw_action_mean))
         dist = MultivariateNormal(raw_action_mean, cov_mat)
         return dist
 
@@ -305,7 +306,7 @@ class PPOAgent:
 
     def normalize_rewards(self, rewards):
         """Normalize rewards before training."""
-        return (rewards - rewards.mean()) / (rewards.std() + 1e-8)
+        return (rewards - rewards.mean()) / (rewards.std() + 1e-7)
 
     ##################################################################################################
     #                                       MAIN PPO ALGORITHM
@@ -335,13 +336,25 @@ class PPOAgent:
         if old_log_probs.dim() == 1:
             old_log_probs = old_log_probs.unsqueeze(1)
         
+
+        # rewards = self.normalize_rewards(rewards) # ← remove per-batch reward norm
+
+        advantages = self.compute_gae(values, rewards, dones) # still normalizes advantages
+        
+        # Step 1: Compute true discounted returns (R_t)
+        returns = []
+        R = 0.0
+        for r, d in zip(reversed(self.rewards), reversed(self.dones)):
+            R = r + GAMMA * R * (1 - d)
+            returns.append(R)
+        returns = torch.tensor(returns[::-1], dtype=torch.float32, device=device).unsqueeze(1)
+        
+        
+        
+        
         assert torch.isfinite(advantages).all(), "\nNon-finite advantages!\n"
         assert torch.isfinite(values).all(), "\nNon-finite values!\n"
         assert torch.isfinite(rewards).all(), "\nNon-finite rewards!\n"
-
-        rewards = self.normalize_rewards(rewards)
-
-        advantages = self.compute_gae(values, rewards, dones)
         
         total_actor_loss = 0.0
         total_critic_loss = 0.0
@@ -349,7 +362,7 @@ class PPOAgent:
         num_batches = 0
         
         decay_base = 0.999
-        initial_entropy_coef = 0.05
+        initial_entropy_coef = 0.02
         min_entropy_coef = 0.001
         self.entropy_coef = max(initial_entropy_coef * (decay_base ** self.learn_step_counter), min_entropy_coef)
 
@@ -366,8 +379,10 @@ class PPOAgent:
                 batch_old_log_probs = old_log_probs[batch]
                 batch_advantages = advantages[batch].unsqueeze(1)
                 batch_values = values[batch].unsqueeze(1)
-                batch_returns = batch_advantages + batch_values
-
+                
+                # batch_returns = batch_advantages + batch_values
+                batch_returns = returns[batch]  # true discounted return (critic target)
+                
                 # Get new action probabilities and entropy
                 new_log_probs, entropy = self.actor.evaluate_actions(
                     batch_states, batch_actions
