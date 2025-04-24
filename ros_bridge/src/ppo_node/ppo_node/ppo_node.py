@@ -300,7 +300,7 @@ class PPOModelNode(Node):
             self.get_logger().info(f"Applied collision penalty: {collision_penalty}")
             self.reward = collision_penalty
             self.done = True
-            self.stagnation_counter = 0  # Reset counter
+            self.stagnation_counter = 0
             return
 
         # Calculate progress delta
@@ -347,8 +347,8 @@ class PPOModelNode(Node):
         # Add lap completion bonus if detected
         if self.lap_completed:
             self.reward += lap_completion_bonus
-            self.lap_completed = False  # Reset flag
-            self.stagnation_counter = 0  # Reset counter
+            self.lap_completed = False
+            self.stagnation_counter = 0
             self.get_logger().info(f"Lap completion bonus applied: +{lap_completion_bonus}")
         
         # NEEDS A CHECK
@@ -397,16 +397,16 @@ class PPOModelNode(Node):
         self.action = None
         self.reward = 0.0
         self.done = False
-        self.prev_state = None  # new
-        self.prev_action = None  # new
-        self.prev_log_prob = None  # new
+        self.prev_state = None
+        self.prev_action = None
+        self.prev_log_prob = None
         self.current_ep_reward = 0.0
         self.current_step_in_episode = 0.0
         self.stagnation_counter = 0
         self.lateral_deviation = 0.0
         self.heading_deviation = 0.0
         self.vehicle_heading = 0.0
-        self.heading_buffer = []  # Reset heading buffer
+        self.heading_buffer = []
         self.collision = False
         self.lap_completed = False
         self.track_progress = 0.0

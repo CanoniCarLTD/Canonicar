@@ -2,13 +2,13 @@
 All the hyper-parameters needed for the PPO algorithm implementation.
 """
 
-MODEL_LOAD = True
+MODEL_LOAD = False
 
 # Directory to save model checkpoints - always stays the same
 PPO_CHECKPOINT_DIR = "/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models"
 
 # Set to None unless you're continuing an exact run (same version/run folder)
-CHECKPOINT_FILE = "/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models/v3.4.2/run_20250424_0008"
+CHECKPOINT_FILE = "/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models/v3.4.2/run_20250424_0013"
 
 VERSION = "v3.4.2"
 
@@ -39,7 +39,7 @@ MIN_ACTION_STD = 0.05
 
 # PPO optimization parameters
 ACTOR_LEARNING_RATE = 2e-4
-CRITIC_LEARNING_RATE = 3e-4
+CRITIC_LEARNING_RATE = 2e-4
 POLICY_CLIP = 0.2
 ENTROPY_COEF = 0.02 # might wanna do 0.005 later
 LAMBDA_GAE = 0.95

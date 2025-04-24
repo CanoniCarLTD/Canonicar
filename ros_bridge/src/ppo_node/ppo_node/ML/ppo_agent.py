@@ -26,6 +26,9 @@ class ActorNetwork(nn.Module):
 
         self.log_std = nn.Parameter(log_std_init.clone())
 
+        # ADD THIS
+        self.input_norm = nn.LayerNorm(input_dim)
+
         self.fc1 = nn.Linear(input_dim, 256)
         self.fc2 = nn.Linear(256, 128)
         self.fc3 = nn.Linear(128, 64)
@@ -33,9 +36,6 @@ class ActorNetwork(nn.Module):
 
         self.init_weights()
         
-        # ADD THIS
-        self.input_norm = nn.LayerNorm(input_dim)
-
     def init_weights(self):
         for layer in [self.fc1, self.fc2, self.fc3]:
             nn.init.kaiming_normal_(layer.weight, nonlinearity="leaky_relu")
@@ -139,13 +139,16 @@ class CriticNetwork(nn.Module):
         self.fc4 = nn.Linear(64, 1)
 
         self.init_weights()
-
+        
+        self.input_norm = nn.LayerNorm(input_dim)  # ← normalize input
+                
     def init_weights(self):
         for layer in [self.fc1, self.fc2, self.fc3, self.fc4]:
             nn.init.kaiming_normal_(layer.weight, nonlinearity="leaky_relu")
             nn.init.zeros_(layer.bias)
 
     def forward(self, state):
+        state = self.input_norm(state)  # ← normalize input here
         x = F.leaky_relu(self.fc1(state), negative_slope=0.2)
         if not torch.isfinite(x).all():
             raise RuntimeError("NaN/Inf after critic fc1")
@@ -385,8 +388,8 @@ class PPOAgent:
             R = rewards[t] + GAMMA * R * (1.0 - dones[t])
             returns[t] = R
         
-        returns = returns.unsqueeze(1) # Trying without normalization
-        # returns = self.normalize_rewards(returns).unsqueeze(1)
+        # returns = returns.unsqueeze(1) # Trying without normalization
+        returns = self.normalize_rewards(returns).unsqueeze(1)
         
         
         assert torch.isfinite(advantages).all(), "\nNon-finite advantages!\n"
