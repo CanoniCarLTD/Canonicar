@@ -40,7 +40,7 @@ track:
 
 
 general:
-  n_tracks: 5
+  n_tracks: 50
   path_planning_timout: 300 
   overwrite: true
   plot_track: true
