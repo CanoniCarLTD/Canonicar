@@ -32,35 +32,73 @@ class ActorNetwork(nn.Module):
         self.fc4 = nn.Linear(64, action_dim)
 
         self.init_weights()
+        
+        # ADD THIS
+        self.input_norm = nn.LayerNorm(input_dim)
 
     def init_weights(self):
-        for layer in [self.fc1, self.fc2, self.fc3, self.fc4]:
-            nn.init.kaiming_uniform_(layer.weight, nonlinearity="leaky_relu")
+        for layer in [self.fc1, self.fc2, self.fc3]:
+            nn.init.kaiming_normal_(layer.weight, nonlinearity="leaky_relu")
             nn.init.zeros_(layer.bias)
+    
+        # FINAL LAYER: steer (index 0) and throttle (index 1)
+        nn.init.normal_(self.fc4.weight, mean=0.0, std=1e-3)  # small & centered
+        nn.init.zeros_(self.fc4.bias)
 
     def forward(self, state):
+        
+        ##############################################################################################################
+        # if not hasattr(self, "state_debug_counter"):
+        #     self.state_debug_counter = 0
+        # if self.state_debug_counter < 20:
+        #     print(f"[DEBUG] Actor input state: mean = {state.mean().item():.4f}, std = {state.std().item():.4f}, min = {state.min().item():.4f}, max = {state.max().item():.4f}")
+        #     self.state_debug_counter += 1
+            
+        state = self.input_norm(state)
+        ##############################################################################################################
+        
         x = F.leaky_relu(self.fc1(state), negative_slope=0.2)
         if not torch.isfinite(x).all():
-            raise RuntimeError(f"NaN/Inf after fc1 → tanh: {x}")
+            raise RuntimeError(f"NaN/Inf after fc1 → leaky_relu: {x}")
+        # print(f"[DEBUG] fc1 out: mean = {x.mean().item():.4f}, std = {x.std().item():.4f}, min = {x.min().item():.4f}, max = {x.max().item():.4f}")
+
         x = F.leaky_relu(self.fc2(x), negative_slope=0.2)
         if not torch.isfinite(x).all():
-            raise RuntimeError(f"NaN/Inf after fc2 → tanh: {x}")
+            raise RuntimeError(f"NaN/Inf after fc2 → leaky_relu: {x}")
+        # print(f"[DEBUG] fc2 out: mean = {x.mean().item():.4f}, std = {x.std().item():.4f}, min = {x.min().item():.4f}, max = {x.max().item():.4f}")
+
         x = F.leaky_relu(self.fc3(x), negative_slope=0.2)
         if not torch.isfinite(x).all():
-            raise RuntimeError(f"NaN/Inf after fc3 → tanh: {x}")
+            raise RuntimeError(f"NaN/Inf after fc3 → leaky_relu: {x}")
+        # print(f"[DEBUG] fc3 out: mean = {x.mean().item():.4f}, std = {x.std().item():.4f}, min = {x.min().item():.4f}, max = {x.max().item():.4f}")
+
         raw_action_mean = self.fc4(x)
+        # print(f"[DEBUG] fc4 raw_action_mean: {raw_action_mean.detach().cpu().numpy()}")
+
         return raw_action_mean
 
     def get_dist(self, state):
         raw_action_mean = self.forward(state)
         action_std = torch.exp(self.log_std)
-        cov_mat = torch.diag_embed(action_std.expand_as(raw_action_mean))
+        action_var = action_std.pow(2)
+        cov_mat = torch.diag_embed(action_var.expand_as(raw_action_mean))
         dist = MultivariateNormal(raw_action_mean, cov_mat)
         return dist
 
     def sample_action(self, state):
         dist = self.get_dist(state)
         raw_action = dist.rsample() # Reparameterization trick
+        
+        ###############################################################################################################
+        # if not hasattr(self, "step_counter"):
+        #     self.step_counter = 0
+        # self.step_counter += 1
+
+        # mean = dist.mean
+        # std = torch.sqrt(dist.covariance_matrix.diagonal(dim1=-2, dim2=-1))
+
+        # print(f"[DEBUG] Step {self.step_counter} | Raw mean: {mean.detach().cpu().numpy()} | Raw sample: {raw_action.detach().cpu().numpy()} | std: {std.detach().cpu().numpy()} | log_std: {self.log_std.data.cpu().numpy()}")
+        ###############################################################################################################
         
         normal = Normal(0, 1)
         cdf_action = normal.cdf(raw_action)  # (batch_size, 2)
@@ -104,7 +142,7 @@ class CriticNetwork(nn.Module):
 
     def init_weights(self):
         for layer in [self.fc1, self.fc2, self.fc3, self.fc4]:
-            nn.init.kaiming_uniform_(layer.weight, nonlinearity="leaky_relu")
+            nn.init.kaiming_normal_(layer.weight, nonlinearity="leaky_relu")
             nn.init.zeros_(layer.bias)
 
     def forward(self, state):
@@ -272,7 +310,7 @@ class PPOAgent:
     def normalize_advantages(self, advantages):
         """Normalize advantages for stability."""
         if advantages.numel() > 1:
-            return (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+            return (advantages - advantages.mean()) / (advantages.std() + 1e-7)
         else:
             return advantages
 
@@ -305,7 +343,7 @@ class PPOAgent:
 
     def normalize_rewards(self, rewards):
         """Normalize rewards before training."""
-        return (rewards - rewards.mean()) / (rewards.std() + 1e-8)
+        return (rewards - rewards.mean()) / (rewards.std() + 1e-7)
 
     ##################################################################################################
     #                                       MAIN PPO ALGORITHM
@@ -335,13 +373,25 @@ class PPOAgent:
         if old_log_probs.dim() == 1:
             old_log_probs = old_log_probs.unsqueeze(1)
         
+
+        # rewards = self.normalize_rewards(rewards) # ← remove per-batch reward norm
+
+        advantages = self.compute_gae(values, rewards, dones) # still normalizes advantages
+        
+        # Step 1: Compute true discounted returns (R_t)
+        returns = torch.zeros_like(rewards)
+        R = 0.0
+        for t in reversed(range(len(rewards))):
+            R = rewards[t] + GAMMA * R * (1.0 - dones[t])
+            returns[t] = R
+        
+        returns = returns.unsqueeze(1) # Trying without normalization
+        # returns = self.normalize_rewards(returns).unsqueeze(1)
+        
+        
         assert torch.isfinite(advantages).all(), "\nNon-finite advantages!\n"
         assert torch.isfinite(values).all(), "\nNon-finite values!\n"
         assert torch.isfinite(rewards).all(), "\nNon-finite rewards!\n"
-
-        rewards = self.normalize_rewards(rewards)
-
-        advantages = self.compute_gae(values, rewards, dones)
         
         total_actor_loss = 0.0
         total_critic_loss = 0.0
@@ -349,7 +399,7 @@ class PPOAgent:
         num_batches = 0
         
         decay_base = 0.999
-        initial_entropy_coef = 0.05
+        initial_entropy_coef = 0.02
         min_entropy_coef = 0.001
         self.entropy_coef = max(initial_entropy_coef * (decay_base ** self.learn_step_counter), min_entropy_coef)
 
@@ -366,8 +416,10 @@ class PPOAgent:
                 batch_old_log_probs = old_log_probs[batch]
                 batch_advantages = advantages[batch].unsqueeze(1)
                 batch_values = values[batch].unsqueeze(1)
-                batch_returns = batch_advantages + batch_values
-
+                
+                # batch_returns = batch_advantages + batch_values
+                batch_returns = returns[batch]  # true discounted return (critic target)
+                
                 # Get new action probabilities and entropy
                 new_log_probs, entropy = self.actor.evaluate_actions(
                     batch_states, batch_actions
@@ -378,13 +430,10 @@ class PPOAgent:
                 if new_log_probs.dim() == 1:
                     new_log_probs = new_log_probs.unsqueeze(1)
                     
-                kl = (batch_old_log_probs - new_log_probs).mean()
+                # kl = (batch_old_log_probs - new_log_probs).mean()
                 
                 # PPO ratio
                 ratio = torch.exp(new_log_probs - batch_old_log_probs)
-                
-                print("PPO ratio mean:", ratio.mean().item(), "ratio std:", ratio.std().item())
-                print("ratio:", ratio.shape)
 
                 # PPO loss terms
                 surr1 = ratio * batch_advantages
@@ -453,7 +502,7 @@ class PPOAgent:
                 # Overall logging
                 self.summary_writer.add_scalar("Exploration/mean log std", current_log_std.mean(), self.learn_step_counter)
                 self.summary_writer.add_scalar("Exploration/mean std", current_action_std.mean(), self.learn_step_counter)
-                self.summary_writer.add_scalar("KL/mean_kl_div", kl.item(), self.learn_step_counter)
+                # self.summary_writer.add_scalar("KL/mean_kl_div", kl.item(), self.learn_step_counter)
                 self.summary_writer.add_scalar("Exploration/entropy_coef", self.entropy_coef, self.learn_step_counter)
 
 

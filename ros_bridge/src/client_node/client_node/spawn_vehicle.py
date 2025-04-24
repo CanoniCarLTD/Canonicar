@@ -191,7 +191,7 @@ class SpawnVehicleNode(Node):
 
             collision_bp = blueprint_library.find("sensor.other.collision")
             if collision_bp:
-                collision_sensor = self.world.spawn_actor(
+                collision_sensor = self.world.try_spawn_actor(
                     collision_bp, carla.Transform(), attach_to=self.vehicle
                 )
                 collision_sensor.listen(lambda event: self._on_collision(event))
@@ -304,7 +304,7 @@ class SpawnVehicleNode(Node):
                 blueprint_library = self.world.get_blueprint_library()
                 collision_bp = blueprint_library.find("sensor.other.collision")
                 if collision_bp:
-                    new_collision_sensor = self.world.spawn_actor(
+                    new_collision_sensor = self.world.try_spawn_actor(
                         collision_bp, carla.Transform(), attach_to=self.vehicle
                     )
                     new_collision_sensor.listen(lambda event: self._on_collision(event))

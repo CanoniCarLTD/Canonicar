@@ -58,6 +58,10 @@ class SensorFusionModel(nn.Module):
             nn.ReLU()
         )
         
+        ###############################################################################
+        self.norm = nn.LayerNorm(final_features)
+        ###############################################################################
+
     def forward(self, rgb_image, lidar_bev):
         """
         Forward pass through the model
@@ -72,11 +76,22 @@ class SensorFusionModel(nn.Module):
         rgb_features = self.rgb_encoder(rgb_image)
         lidar_features = self.lidar_encoder(lidar_bev)
         
+        ####################################################################
+        # print(f"[DEBUG] RGB features: mean={rgb_features.mean().item():.4f}, std={rgb_features.std().item():.4f}, min={rgb_features.min().item():.4f}, max={rgb_features.max().item():.4f}")
+        # print(f"[DEBUG] LiDAR features: mean={lidar_features.mean().item():.4f}, std={lidar_features.std().item():.4f}, min={lidar_features.min().item():.4f}, max={lidar_features.max().item():.4f}")
+        ####################################################################
+
         # Concatenate features
         fused_features = torch.cat([rgb_features, lidar_features], dim=1)
         
+        # print(f"[DEBUG] Fused pre-ReLU: mean={fused_features.mean().item():.4f}, std={fused_features.std().item():.4f}")
+
         # Optional: further compress features
         fused_features = self.fusion_layer(fused_features)
+        
+        ####################################################################
+        fused_features = self.norm(fused_features)
+        ####################################################################
         
         return fused_features
     
