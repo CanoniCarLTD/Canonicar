@@ -33,13 +33,21 @@ class LiDAREncoder(nn.Module):
 
 
 class RGBEncoder(nn.Module):
-    def __init__(self, output_features=128):
+    def __init__(self, output_features=128, pretrained_track=None):
         super(RGBEncoder, self).__init__()
         self.mobilenet = models.mobilenet_v2(weights=models.MobileNet_V2_Weights.IMAGENET1K_V1)
-        self.encoder = nn.Sequential(*list(self.mobilenet.features[:10]))
+        self.encoder = nn.Sequential(*list(self.mobilenet.features[:14]))
         self.global_pool = nn.AdaptiveAvgPool2d((1, 1))
-        self.fc = nn.Linear(64, output_features)  # Channel count at layer 10
-        
+        # Dynamically determine the input size for the fully connected layer
+        self.fc_input_size = self.encoder[-1].out_channels  # Should be 96
+        self.fc = nn.Linear(self.fc_input_size, output_features)
+                
+        # ——— load track-specific weights if provided ———
+        if pretrained_track is not None:
+            state = torch.load(pretrained_track, map_location="cpu")
+            self.encoder.load_state_dict(state, strict=False)
+            print(f"[RGBEncoder] loaded track weights from {pretrained_track}")
+            
     def forward(self, x):
         x = self.encoder(x)
         x = self.global_pool(x)
@@ -112,6 +120,9 @@ class VisionProcessor:
 
         # Create and load the model
         self.model = SensorFusionModel(rgb_features=128, lidar_features=64, final_features=192).to(device)
+        
+        self.model.rgb_encoder = RGBEncoder(output_features=128).to(device)
+        
         self.model.eval()
 
         # Model warmup for more consistent timing

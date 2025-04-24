@@ -1,4 +1,6 @@
 import os
+
+import cv2
 import rclpy
 import math
 import struct
@@ -24,12 +26,20 @@ class DataCollector(Node):
         super().__init__("data_collector")
         
         # torch.autograd.set_detect_anomaly(True) # slows things down, so only enable it for debugging.
-
+        
+        self.record_rgb = True
+        self.record_buffer = []
+        os.makedirs("/ros_bridge/src/client_node/client_node/data/rgb_finetune/train", exist_ok=True)
+        with open("/ros_bridge/src/client_node/client_node/data/rgb_finetune/train/labels.csv","w") as f:
+            f.write("filename,steer\n")
+    
         # Flag to track collector readiness
         self.ready_to_collect = False
         self.vehicle_id = None
         self.last_sensor_timestamp = time.time()
-        
+        self.latest_image_msg = None
+        self.latest_steering = 0.0
+
         self.data_buffer = []  # List of dictionaries to store synchronized data
 
         self.imu_mean = np.zeros(5, dtype=np.float32)
@@ -43,8 +53,21 @@ class DataCollector(Node):
             self.handle_system_state,
             10
         )
-        
-        
+        # Add a regular subscriber for RGB images (not using message_filters)
+        self.rgb_image_subscription = self.create_subscription(
+            Image,
+            "/carla/rgb_front/image_raw",
+            self.handle_rgb_image,
+            10
+        )
+        self.action_subscription = self.create_subscription(
+            Float32MultiArray,
+            '/carla/vehicle/steer',
+            self.handle_save_rgb_steering,
+            10
+        )
+
+    
         self.publish_to_PPO = self.create_publisher(
             Float32MultiArray, "/data_to_ppo", 10
         )
@@ -57,6 +80,10 @@ class DataCollector(Node):
         self.imu_sub = Subscriber(self, Imu, "/carla/imu/imu")
         
         self.get_logger().info("DataCollector Node initialized. Waiting for vehicle...")
+
+    def handle_rgb_image(self, msg):
+        """Store the latest RGB image"""
+        self.latest_image_msg = msg
 
     def setup_subscribers(self):
         """Set up subscribers once we verify the camera is publishing""" 
@@ -114,14 +141,35 @@ class DataCollector(Node):
                 except Exception as e:
                     self.get_logger().error(f"Error parsing vehicle ID from state: {e}")
     
-    
+    def handle_save_rgb_steering(self, msg):
+        self.latest_steering = msg.data[0]  # Update with the steering value            
+        if self.record_rgb and self.latest_steering is not None:
+            # Use the latest stored image message
+            if self.latest_image_msg is None:
+                self.get_logger().warn("No image message received yet.")
+                return
+
+            # Convert image_msg to numpy array
+            raw_image = np.frombuffer(self.latest_image_msg.data, dtype=np.uint8).reshape(
+                (self.latest_image_msg.height, self.latest_image_msg.width, -1)
+            )
+            if raw_image.shape[2] == 4:  # BGRA format
+                bgr_img = raw_image[:, :, :3]  # Remove alpha channel
+            steer = self.latest_steering
+            idx = len(self.record_buffer)
+            fn = f"{idx:05d}.png"
+            cv2.imwrite(f"/ros_bridge/src/client_node/client_node/data/rgb_finetune/train/{fn}", bgr_img)
+            with open("/ros_bridge/src/client_node/client_node/data/rgb_finetune/train/labels.csv", "a") as f:
+                f.write(f"{fn},{steer:.4f}\n")
+            self.record_buffer.append(fn)
+        
     def sync_callback(self, image_msg, lidar_msg, imu_msg):
         """Process synchronized data"""
         if not self.ready_to_collect:
             return
         try:
             # callback_start = time.time()
-
+            
             # Update timestamp to know sensors are active
             self.last_sensor_timestamp = time.time()
             
@@ -159,7 +207,7 @@ class DataCollector(Node):
         )
         if raw_image.shape[2] == 4:  # BGRA format
             raw_image = raw_image[:, :, :3]  # Remove alpha channel
-            raw_image = raw_image[:, :, ::-1].copy()  # Convert BGR to RGB
+            # raw_image = raw_image[:, :, ::-1].copy()  # Convert BGR to RGB
         # Convert lidar_msg to point list
         points = [
             [point[0], point[1], point[2]]  # Extract x, y, z

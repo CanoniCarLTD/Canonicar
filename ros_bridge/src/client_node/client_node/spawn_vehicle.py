@@ -74,6 +74,11 @@ class SpawnVehicleNode(Node):
             Float32MultiArray, "/carla/vehicle/location", 10
         ) 
         self.timer = self.create_timer(0.1, self.publish_vehicle_location)
+        
+        self.steer_publisher = self.create_publisher(
+            Float32MultiArray, "/carla/vehicle/steer", 10
+        ) 
+        self.timer = self.create_timer(0.1, self.publish_vehicle_steer)
 
         self.vehicle_ready_client = self.create_client(VehicleReady, 'vehicle_ready')
 
@@ -107,7 +112,13 @@ class SpawnVehicleNode(Node):
         self.get_logger().info(f"Lap completed! Destroy vehicle {self.vehicle_type}")
         self.destroy_actors()
 
-
+    def publish_vehicle_steer(self):
+        if self.vehicle is not None and self.vehicle.is_alive:
+            steer = self.vehicle.get_control().steer
+            msg = Float32MultiArray()
+            msg.data = [steer]
+            self.steer_publisher.publish(msg)
+            
     def spawn_objects_from_config(self):
 
         self.get_logger().info("Waiting for map to fully load...")
@@ -202,11 +213,11 @@ class SpawnVehicleNode(Node):
             '''
                 AUTOPILOT
             '''
-            # self.traffic_manager.global_percentage_speed_difference(0)
-            # self.traffic_manager.auto_lane_change(self.vehicle, False)
-            # self.traffic_manager.random_left_lanechange_percentage(self.vehicle, 0)
-            # self.traffic_manager.random_right_lanechange_percentage(self.vehicle, 0)
-            # self.vehicle.set_autopilot(True, self.traffic_manager.get_port())
+            self.traffic_manager.global_percentage_speed_difference(0)
+            self.traffic_manager.auto_lane_change(self.vehicle, False)
+            self.traffic_manager.random_left_lanechange_percentage(self.vehicle, 0)
+            self.traffic_manager.random_right_lanechange_percentage(self.vehicle, 0)
+            self.vehicle.set_autopilot(True, self.traffic_manager.get_port())
             
         except Exception as e:
             self.get_logger().error(f"Error spawning vehicle: {e}")
