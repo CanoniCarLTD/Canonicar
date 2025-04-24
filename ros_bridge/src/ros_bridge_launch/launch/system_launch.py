@@ -42,7 +42,7 @@ def generate_launch_description():
     track_xodr_file = os.path.join(
         get_package_share_directory('map_loader'),
         'map_loader',
-        'track2.xodr'
+        'track33.xodr'
     )
 
     sim_state_node = Node(
@@ -51,7 +51,7 @@ def generate_launch_description():
         name='simulation_coordinator',
         output='screen',
         parameters=[
-            {'max_collisions': 200}
+            # {'max_collisions': 200}
         ]
     )
 

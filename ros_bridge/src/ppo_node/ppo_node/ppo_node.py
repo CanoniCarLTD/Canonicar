@@ -284,9 +284,9 @@ class PPOModelNode(Node):
         lap_completion_bonus = 50.0  # Lap completion bonus
 
         max_allowed_deviation = 2.5  # meters before applying harshest penalty
-        deviation_penalty_factor = -5.0  # scale the penalty
+        deviation_penalty_factor = -2.0  # scale the penalty
         max_angle_deviation = math.pi/4  # 45 degrees
-        angle_penalty_factor = -3.0
+        angle_penalty_factor = -1.0
         progress_reward = 0.0  # Initialize progress reward to 0
         # Initialize the reward to 0
         self.reward = 0.0
@@ -315,7 +315,7 @@ class PPOModelNode(Node):
             progress_reward = backwards_penalty
             self.stagnation_counter = 0
             self.get_logger().info(f"Moving backwards: {progress_delta:.6f}, reward = {backwards_penalty}")
-        elif progress_delta > 0.0001:  # Moving forward
+        elif progress_delta > 0.001:  # Moving forward
             progress_reward = progress_multiplier * progress_delta
             self.stagnation_counter = 0
             self.get_logger().info(f"Moving forward: {progress_delta:.6f}, reward = {progress_reward:.4f}")
@@ -337,12 +337,14 @@ class PPOModelNode(Node):
             normalized_deviation = min(self.lateral_deviation / max_allowed_deviation, 1.0)
             deviation_penalty = deviation_penalty_factor * (normalized_deviation ** 2)
             self.reward += deviation_penalty
+            self.get_logger().info(f"Lateral deviation: {self.lateral_deviation:.4f}, penalty = {deviation_penalty:.4f}")
 
         # Add heading angle deviation penalty
         if hasattr(self, 'heading_deviation') and self.heading_deviation is not None:
             normalized_angle_dev = min(self.heading_deviation / max_angle_deviation, 1.0)
             angle_penalty = angle_penalty_factor * (normalized_angle_dev ** 2)
             self.reward += angle_penalty
+            self.get_logger().info(f"Heading deviation: {self.heading_deviation:.4f}, penalty = {angle_penalty:.4f}")
         
         # Add lap completion bonus if detected
         if self.lap_completed:
@@ -352,7 +354,7 @@ class PPOModelNode(Node):
             self.get_logger().info(f"Lap completion bonus applied: +{lap_completion_bonus}")
         
         # NEEDS A CHECK
-        # Penalize strong steering directly
+        # # Penalize strong steering directly
         if self.action is not None and len(self.action) >= 1:
             steer = self.action[0] if isinstance(self.action, (list, tuple, np.ndarray)) else self.action.item()
             steering_penalty = -0.02 * (steer ** 2)
@@ -883,7 +885,6 @@ class PPOModelNode(Node):
             details = ""
 
         self.current_sim_state = state_name
-        
         # Reset model state on simulation reset events
         if state_name == "RUNNING" and "vehicle_" in details and "ready" in details:
             try:
@@ -904,7 +905,7 @@ class PPOModelNode(Node):
                 self.start_point = None
                 self.lap_completed = False
                 self.lap_count = 0
-                
+
                 # Reset location tracking
                 self.vehicle_location = None
                 self.needs_progress_reset = True

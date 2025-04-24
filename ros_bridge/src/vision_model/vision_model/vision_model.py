@@ -4,29 +4,32 @@ import torch.nn.functional as F
 import numpy as np
 import torchvision.models as models
 from torchvision import transforms
-
+from torchvision.models.resnet import BasicBlock
 
 class LiDAREncoder(nn.Module):
-    """Lightweight encoder for LiDAR point cloud data converted to a BEV depth map."""
-    def __init__(self, input_channels=3, output_features=64):
-        super(LiDAREncoder, self).__init__()
-        self.conv1 = nn.Conv2d(input_channels, 16, kernel_size=3, stride=2, padding=1)
-        self.bn1 = nn.BatchNorm2d(16)
-        self.conv2 = nn.Conv2d(16, 32, kernel_size=3, stride=2, padding=1)
-        self.bn2 = nn.BatchNorm2d(32)
-        self.conv3 = nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1)
-        self.bn3 = nn.BatchNorm2d(64)
-        self.global_pool = nn.AdaptiveAvgPool2d((1, 1))
-        self.fc = nn.Linear(64, output_features)
-        
+    def __init__(self, in_ch=3, output_features=64):
+        super().__init__()
+        self.stage1 = nn.Sequential(
+            nn.Conv2d(in_ch, 32, 3, 2, 1), nn.BatchNorm2d(32), nn.ReLU(),
+            BasicBlock(32, 32)
+        )
+        self.stage2 = nn.Sequential(
+            nn.Conv2d(32, 64, 3, 2, 1), nn.BatchNorm2d(64), nn.ReLU(),
+            BasicBlock(64, 64)
+        )
+        self.stage3 = nn.Sequential(
+            nn.Conv2d(64, 128, 3, 2, 1), nn.BatchNorm2d(128), nn.ReLU(),
+            BasicBlock(128, 128)
+        )
+        self.pool = nn.AdaptiveAvgPool2d(1)
+        self.fc = nn.Linear(128, output_features)
+
     def forward(self, x):
-        x = F.relu(self.bn1(self.conv1(x)))
-        x = F.relu(self.bn2(self.conv2(x)))
-        x = F.relu(self.bn3(self.conv3(x)))
-        x = self.global_pool(x)
-        x = torch.flatten(x, 1)
-        x = self.fc(x)
-        return x
+        x = self.stage1(x)
+        x = self.stage2(x)
+        x = self.stage3(x)
+        x = self.pool(x).flatten(1)
+        return self.fc(x)
 
 
 class RGBEncoder(nn.Module):
@@ -50,17 +53,13 @@ class SensorFusionModel(nn.Module):
     def __init__(self, rgb_features=128, lidar_features=64, final_features=192):
         super(SensorFusionModel, self).__init__()
         self.rgb_encoder = RGBEncoder(output_features=rgb_features)
-        self.lidar_encoder = LiDAREncoder(output_features=lidar_features)
+        self.lidar_encoder = LiDAREncoder(in_ch=3,output_features=lidar_features)
         
         # Optional: fusion layer to further compress the concatenated features
         self.fusion_layer = nn.Sequential(
             nn.Linear(rgb_features + lidar_features, final_features),
             nn.ReLU()
         )
-        
-        ###############################################################################
-        self.norm = nn.LayerNorm(final_features)
-        ###############################################################################
 
     def forward(self, rgb_image, lidar_bev):
         """
@@ -88,10 +87,6 @@ class SensorFusionModel(nn.Module):
 
         # Optional: further compress features
         fused_features = self.fusion_layer(fused_features)
-        
-        ####################################################################
-        fused_features = self.norm(fused_features)
-        ####################################################################
         
         return fused_features
     

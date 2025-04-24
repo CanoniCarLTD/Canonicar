@@ -124,13 +124,13 @@ class SimulationCoordinator(Node):
             return
             
         self.last_collision_time = current_time
-        self.collision_count += 1
-        self.get_logger().info(f'Processing collision: {self.collision_count}/{self.max_collisions}')
+        # self.collision_count += 1
+        # self.get_logger().info(f'Processing collision: {self.collision_count}/{self.max_collisions}')
         
-        if self.collision_count >= self.max_collisions:
-            self.trigger_map_swap()
-        else:
-            self.trigger_relocate(f"Collision: {msg.data}")
+        # if self.collision_count >= self.max_collisions:
+        #     self.trigger_map_swap()
+        # else:
+        self.trigger_respawn(f"Collision: {msg.data}")
     
     def handle_map_state(self, msg):
         """Translate map state messages to simulation states"""
@@ -258,29 +258,29 @@ class SimulationCoordinator(Node):
         self.retry_timer.cancel()
         self.trigger_respawn("retry_after_failure")
         
-    def trigger_map_swap(self):
-        """Trigger map swap"""
-        self.state = SimState.MAP_SWAPPING
-        self.publish_state('Swapping map')
+    # def trigger_map_swap(self):
+    #     """Trigger map swap"""
+    #     self.state = SimState.MAP_SWAPPING
+    #     self.publish_state('Swapping map')
         
-        request = SwapMap.Request()
-        request.map_file_path = "" 
+    #     request = SwapMap.Request()
+    #     request.map_file_path = "" 
         
-        future = self.map_swap_client.call_async(request)
-        future.add_done_callback(self.map_swap_done)
+    #     future = self.map_swap_client.call_async(request)
+    #     future.add_done_callback(self.map_swap_done)
     
-    def map_swap_done(self, future):
-        """Handle map swap completion"""
-        try:
-            response = future.result()
-            if response.success:
-                self.collision_count = 0  
-            else:
-                self.state = SimState.ERROR
-                self.publish_state(f'Map swap failed')
-        except Exception as e:
-            self.state = SimState.ERROR
-            self.publish_state(f'Map swap service error')
+    # def map_swap_done(self, future):
+    #     """Handle map swap completion"""
+    #     try:
+    #         response = future.result()
+    #         if response.success:
+    #             self.collision_count = 0  
+    #         else:
+    #             self.state = SimState.ERROR
+    #             self.publish_state(f'Map swap failed')
+    #     except Exception as e:
+    #         self.state = SimState.ERROR
+    #         self.publish_state(f'Map swap service error')
     
     def publish_state(self, details=""):
         """Publish current simulation state"""
