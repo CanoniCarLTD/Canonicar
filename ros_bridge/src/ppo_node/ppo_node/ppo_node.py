@@ -263,9 +263,9 @@ class PPOModelNode(Node):
         action_msg = Float32MultiArray()
         action_msg.data = [steer, throttle, brake]
         
-        self.get_logger().info(
-            f"Publishing | Steer: {steer} | Throttle: {throttle} | Brake: {brake}"
-        )
+        # self.get_logger().info(
+        #     f"Publishing | Steer: {steer} | Throttle: {throttle} | Brake: {brake}"
+        # )
         
         self.action_publisher.publish(action_msg)
 
@@ -287,7 +287,7 @@ class PPOModelNode(Node):
         deviation_penalty_factor = -5.0  # scale the penalty
         max_angle_deviation = math.pi/4  # 45 degrees
         angle_penalty_factor = -3.0
-        
+        progress_reward = 0.0  # Initialize progress reward to 0
         # Initialize the reward to 0
         self.reward = 0.0
         
@@ -319,10 +319,10 @@ class PPOModelNode(Node):
             progress_reward = progress_multiplier * progress_delta
             self.stagnation_counter = 0
             self.get_logger().info(f"Moving forward: {progress_delta:.6f}, reward = {progress_reward:.4f}")
-        else:  # Not moving
-            self.stagnation_counter += 1
-            progress_reward = base_time_penalty * (1 + self.stagnation_counter * stagnation_factor)
-            self.get_logger().info(f"Not moving: {progress_delta:.6f}, stagnation: {self.stagnation_counter}, reward = {progress_reward:.4f}")
+        # else:  # Not moving
+        #     self.stagnation_counter += 1
+        #     progress_reward = base_time_penalty * (1 + self.stagnation_counter * stagnation_factor)
+        #     self.get_logger().info(f"Not moving: {progress_delta:.6f}, stagnation: {self.stagnation_counter}, reward = {progress_reward:.4f}")
         
         # Start with the progress-based reward
         self.reward = progress_reward
