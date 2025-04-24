@@ -351,6 +351,12 @@ class PPOModelNode(Node):
             self.stagnation_counter = 0  # Reset counter
             self.get_logger().info(f"Lap completion bonus applied: +{lap_completion_bonus}")
         
+        # NEEDS A CHECK
+        # Penalize strong steering directly
+        if self.action is not None and len(self.action) >= 1:
+            steer = self.action[0] if isinstance(self.action, (list, tuple, np.ndarray)) else self.action.item()
+            steering_penalty = -0.02 * (steer ** 2)
+            self.reward += steering_penalty
                 
     ##################################################################################################
     #                                       STORE TRANSITION
