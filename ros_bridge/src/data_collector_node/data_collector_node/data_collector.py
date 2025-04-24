@@ -31,6 +31,10 @@ class DataCollector(Node):
         self.last_sensor_timestamp = time.time()
         
         self.data_buffer = []  # List of dictionaries to store synchronized data
+
+        self.imu_mean = np.zeros(5, dtype=np.float32)
+        self.imu_var = np.ones(5, dtype=np.float32)
+        self.imu_count = 1e-4  # avoid div by zero
         
         # Create state subscriber first to handle simulation status
         self.state_subscription = self.create_subscription(
@@ -167,16 +171,31 @@ class DataCollector(Node):
         return fused_features
 
     def process_imu(self, imu_msg):
-        """Process IMU data."""
-        imu_data = [
+        imu_raw = np.array([
             imu_msg.linear_acceleration.x,
             imu_msg.linear_acceleration.y,
             imu_msg.linear_acceleration.z,
             imu_msg.angular_velocity.x,
             imu_msg.angular_velocity.y,
-            # imu_msg.angular_velocity.z,
-        ]
-        return imu_data
+        ], dtype=np.float32)
+
+        # Update running stats
+        self.update_imu_stats(imu_raw)
+
+        # Normalize and clip
+        imu_scaled = self.normalize_imu(imu_raw)
+        return imu_scaled.tolist()
+    
+    def update_imu_stats(self, imu_sample):
+        delta = imu_sample - self.imu_mean
+        self.imu_count += 1
+        self.imu_mean += delta / self.imu_count
+        self.imu_var += delta * (imu_sample - self.imu_mean)
+
+    def normalize_imu(self, imu_sample):
+        std = np.sqrt(self.imu_var / self.imu_count + 1e-6)
+        normalized = (imu_sample - self.imu_mean) / std
+        return np.clip(normalized, -3.0, 3.0)
 
     def aggregate_state_vector(self, vision_features, imu_features):
         """Aggregate features into a single state vector.""" 
