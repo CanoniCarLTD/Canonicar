@@ -87,7 +87,6 @@ class SpawnVehicleNode(Node):
             10
         )
  
-    
         self.respawn_service = self.create_service(
             RespawnVehicle, 
             'respawn_vehicle', 
@@ -269,7 +268,7 @@ class SpawnVehicleNode(Node):
             old_loc = self.vehicle.get_transform().location
             self._reset_collision_sensor()
             self.vehicle.set_transform(self.spawn_transform)
-            self.ignore_collisions_until = time.time() + 0.8 # changerd to 0.8 Grace period to ignore collisions
+            self.ignore_collisions_until = time.time() + 1.2 # changerd to 0.8 Grace period to ignore collisions
             self.get_logger().info(f"Vehicle relocated from ({old_loc.x:.1f},{old_loc.y:.1f}) to spawn point")
             
             self.notify_vehicle_ready()
