@@ -267,7 +267,7 @@ class PPOModelNode(Node):
         #     f"Publishing | Steer: {steer} | Throttle: {throttle} | Brake: {brake}"
         # )
         
-        # self.action_publisher.publish(action_msg)
+        self.action_publisher.publish(action_msg)
 
     ##################################################################################################
     #                                       REWARD FUNCTION
@@ -276,7 +276,7 @@ class PPOModelNode(Node):
     def calculate_reward(self):
         """Improved reward function with properly combined rewards"""
         # Core reward parameters
-        progress_multiplier = 300.0  # More balanced multiplier for progress
+        progress_multiplier = 600.0  # More balanced multiplier for progress
         base_time_penalty = -0.05  # Base penalty when not moving
         stagnation_factor = 0.05  # Increases penalty over time
         backwards_penalty = -5.0  # Penalty for going backwards

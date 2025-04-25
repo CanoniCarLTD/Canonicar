@@ -1,3 +1,4 @@
+import os
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -44,9 +45,12 @@ class RGBEncoder(nn.Module):
                 
         # ——— load track-specific weights if provided ———
         if pretrained_track is not None:
-            state = torch.load(pretrained_track, map_location="cpu")
-            self.encoder.load_state_dict(state, strict=False)
-            print(f"[RGBEncoder] loaded track weights from {pretrained_track}")
+            if os.path.exists(pretrained_track):
+                state = torch.load(pretrained_track, map_location="cpu")
+                self.encoder.load_state_dict(state, strict=False)
+                print(f"[RGBEncoder] loaded track weights from {pretrained_track}")
+            else:
+                raise FileNotFoundError(f"❌ Provided encoder checkpoint not found: {pretrained_track}")
             
     def forward(self, x):
         x = self.encoder(x)
@@ -58,9 +62,9 @@ class RGBEncoder(nn.Module):
 
 class SensorFusionModel(nn.Module):
     """Model that fuses RGB and LiDAR data for autonomous driving."""
-    def __init__(self, rgb_features=128, lidar_features=64, final_features=192):
+    def __init__(self, rgb_features=128, lidar_features=64, final_features=192, pretrained_track = None):
         super(SensorFusionModel, self).__init__()
-        self.rgb_encoder = RGBEncoder(output_features=rgb_features)
+        self.rgb_encoder = RGBEncoder(output_features=rgb_features, pretrained_track = pretrained_track)
         self.lidar_encoder = LiDAREncoder(in_ch=3,output_features=lidar_features)
         
         # Optional: fusion layer to further compress the concatenated features
@@ -101,7 +105,7 @@ class SensorFusionModel(nn.Module):
     
 class VisionProcessor:
     """Helper class to process raw sensor data before feeding to the model."""
-    def __init__(self, lidar_grid_size=(64, 64), height_range=(-2.0, 4.0), device='cpu'):
+    def __init__(self, lidar_grid_size=(64, 64), height_range=(-2.0, 4.0), device='cpu', pretrained_rgb_encoder=None):
         """
         Initialize the vision processor
         
@@ -119,9 +123,8 @@ class VisionProcessor:
         self.rgb_tensor = torch.zeros((1, 3, 224, 224), device=device)
 
         # Create and load the model
-        self.model = SensorFusionModel(rgb_features=128, lidar_features=64, final_features=192).to(device)
-        
-        self.model.rgb_encoder = RGBEncoder(output_features=128).to(device)
+        self.model = SensorFusionModel(rgb_features=128, lidar_features=64, final_features=192,
+                                       pretrained_track = pretrained_rgb_encoder).to(device)
         
         self.model.eval()
 

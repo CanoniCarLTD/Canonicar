@@ -148,3 +148,11 @@ Changed Hyperparameters:
 - Removed brake
 - Fixed collision spawn bug
 - Added vehicle deviation penalty
+
+### v3.5.0
+
+- Trained imagenet rgb model on our track for better feature extraction
+
+
+Changed Hyperparameters:
+    - CRITIC_LEARNING_RATE = 3e-4 -> **2e-4**
