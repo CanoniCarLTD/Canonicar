@@ -7,14 +7,14 @@ import struct
 import time
 
 from carla import Client
-from rclpy.node import Node
-from rclpy.qos import QoSProfile, ReliabilityPolicy
-from sensor_msgs.msg import Image, PointCloud2, Imu, NavSatFix
+from rclpy.node import Node #type: ignore
+from rclpy.qos import QoSProfile, ReliabilityPolicy #type: ignore
+from sensor_msgs.msg import Image, PointCloud2, Imu, NavSatFix #type: ignore
 import numpy as np
-from message_filters import ApproximateTimeSynchronizer, Subscriber
+from message_filters import ApproximateTimeSynchronizer, Subscriber #type: ignore
 import torch
 import torch.nn as nn
-from std_msgs.msg import Float32MultiArray, String
+from std_msgs.msg import Float32MultiArray, String #type: ignore
 from vision_model import VisionProcessor
 
 # os.environ["CUDA_LAUNCH_BLOCKING"] = "1"  # might reduce performance time! Uncomment for debugging CUDA errors
@@ -30,9 +30,24 @@ class DataCollector(Node):
         self.record_rgb = True
         self.record_buffer = []
         os.makedirs("/ros_bridge/src/client_node/client_node/data/rgb_finetune/train", exist_ok=True)
-        with open("/ros_bridge/src/client_node/client_node/data/rgb_finetune/train/labels.csv","w") as f:
-            f.write("filename,steer\n")
-    
+        
+        # Initialize image index from labels.csv
+        labels_path = "/ros_bridge/src/client_node/client_node/data/rgb_finetune/train/labels.csv"
+        if os.path.exists(labels_path):
+            with open(labels_path, "r") as f:
+                lines = f.readlines()
+                if len(lines) > 1:  # Check if there are entries beyond the header
+                    last_line = lines[-1]
+                    last_filename = last_line.split(",")[0]
+                    self.image_index = int(last_filename.split(".")[0]) + 1
+                else:
+                    self.image_index = 0
+        else:
+            # Create the file with a header if it doesn't exist
+            with open(labels_path, "w") as f:
+                f.write("filename,steer\n")
+            self.image_index = 0
+        
         # Flag to track collector readiness
         self.ready_to_collect = False
         self.vehicle_id = None
@@ -41,6 +56,10 @@ class DataCollector(Node):
         self.latest_steering = 0.0
 
         self.data_buffer = []  # List of dictionaries to store synchronized data
+        # Count how many PNGs already exist — start from there
+        existing_files = os.listdir("/ros_bridge/src/client_node/client_node/data/rgb_finetune/train")
+        existing_images = [f for f in existing_files if f.endswith(".png")]
+        self.image_index = len(existing_images)
 
         self.imu_mean = np.zeros(5, dtype=np.float32)
         self.imu_var = np.ones(5, dtype=np.float32)
@@ -73,7 +92,7 @@ class DataCollector(Node):
         )
         
         # Setup vision processing
-        self.vision_processor = VisionProcessor(device=device)
+        self.vision_processor = VisionProcessor(device = device, pretrained_rgb_encoder = "/ros_bridge/src/client_node/client_node/train/checkpoints/mobilenet_trackslice14.pth")
         
         self.image_sub = Subscriber(self, Image, "/carla/rgb_front/image_raw")
         self.lidar_sub = Subscriber(self, PointCloud2, "/carla/lidar/points")
@@ -155,14 +174,15 @@ class DataCollector(Node):
             )
             if raw_image.shape[2] == 4:  # BGRA format
                 bgr_img = raw_image[:, :, :3]  # Remove alpha channel
+                
             steer = self.latest_steering
-            idx = len(self.record_buffer)
-            fn = f"{idx:05d}.png"
+            fn = f"{self.image_index:05d}.png"
             cv2.imwrite(f"/ros_bridge/src/client_node/client_node/data/rgb_finetune/train/{fn}", bgr_img)
             with open("/ros_bridge/src/client_node/client_node/data/rgb_finetune/train/labels.csv", "a") as f:
                 f.write(f"{fn},{steer:.4f}\n")
             self.record_buffer.append(fn)
-        
+            self.image_index += 1
+            
     def sync_callback(self, image_msg, lidar_msg, imu_msg):
         """Process synchronized data"""
         if not self.ready_to_collect:
@@ -207,7 +227,7 @@ class DataCollector(Node):
         )
         if raw_image.shape[2] == 4:  # BGRA format
             raw_image = raw_image[:, :, :3]  # Remove alpha channel
-            # raw_image = raw_image[:, :, ::-1].copy()  # Convert BGR to RGB
+            raw_rgb_image = raw_image[:, :, ::-1]  # Convert to RGB format
         # Convert lidar_msg to point list
         points = [
             [point[0], point[1], point[2]]  # Extract x, y, z
@@ -215,7 +235,7 @@ class DataCollector(Node):
         ]
 
         # Process using our vision model
-        fused_features = self.vision_processor.process_sensor_data(raw_image, points)
+        fused_features = self.vision_processor.process_sensor_data(raw_rgb_image, points)
         return fused_features
 
     def process_imu(self, imu_msg):
