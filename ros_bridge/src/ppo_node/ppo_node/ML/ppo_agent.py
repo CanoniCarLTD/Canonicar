@@ -26,7 +26,6 @@ class ActorNetwork(nn.Module):
 
         self.log_std = nn.Parameter(log_std_init.clone())
 
-        # ADD THIS
         self.input_norm = nn.LayerNorm(input_dim)
 
         self.fc1 = nn.Linear(input_dim, 256)
@@ -133,11 +132,15 @@ class CriticNetwork(nn.Module):
     def __init__(self, input_dim):
         super(CriticNetwork, self).__init__()
 
-        self.fc1 = nn.Linear(input_dim, 256)
-        self.fc2 = nn.Linear(256, 128)
-        self.fc3 = nn.Linear(128, 64)
-        self.fc4 = nn.Linear(64, 1)
-
+        # self.fc1 = nn.Linear(input_dim, 256)
+        # self.fc2 = nn.Linear(256, 128)
+        # self.fc3 = nn.Linear(128, 64)
+        # self.fc4 = nn.Linear(64, 1)
+        self.fc1 = nn.Linear(input_dim, 512)
+        self.fc2 = nn.Linear(512, 256)
+        self.fc3 = nn.Linear(256, 128)
+        self.fc4 = nn.Linear(128, 1)
+        
         self.init_weights()
         
         self.input_norm = nn.LayerNorm(input_dim)  # ← normalize input

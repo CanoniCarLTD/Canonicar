@@ -284,7 +284,7 @@ class PPOModelNode(Node):
         lap_completion_bonus = 50.0  # Lap completion bonus
 
         max_allowed_deviation = 2.5  # meters before applying harshest penalty
-        deviation_penalty_factor = -2.0  # scale the penalty
+        deviation_penalty_factor = -1.5  # scale the penalty
         max_angle_deviation = math.pi/4  # 45 degrees
         angle_penalty_factor = -1.0
         progress_reward = 0.0  # Initialize progress reward to 0
@@ -319,10 +319,7 @@ class PPOModelNode(Node):
             progress_reward = progress_multiplier * progress_delta
             self.stagnation_counter = 0
             self.get_logger().info(f"Moving forward: {progress_delta:.6f}, reward = {progress_reward:.4f}")
-        # else:  # Not moving
-        #     self.stagnation_counter += 1
-        #     progress_reward = base_time_penalty * (1 + self.stagnation_counter * stagnation_factor)
-        #     self.get_logger().info(f"Not moving: {progress_delta:.6f}, stagnation: {self.stagnation_counter}, reward = {progress_reward:.4f}")
+
         
         # Start with the progress-based reward
         self.reward = progress_reward
