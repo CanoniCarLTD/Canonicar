@@ -245,6 +245,7 @@ class DataCollector(Node):
             imu_msg.linear_acceleration.z,
             imu_msg.angular_velocity.x,
             imu_msg.angular_velocity.y,
+            # imu_msg.angular_velocity.z,
         ], dtype=np.float32)
 
         # Update running stats
