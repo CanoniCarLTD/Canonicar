@@ -284,7 +284,7 @@ class PPOModelNode(Node):
         lap_completion_bonus = 50.0  # Lap completion bonus
 
         max_allowed_deviation = 2.5  # meters before applying harshest penalty
-        deviation_penalty_factor = -1.5  # scale the penalty
+        deviation_penalty_factor = -1.1  # scale the penalty
         max_angle_deviation = math.pi/4  # 45 degrees
         angle_penalty_factor = -1.0
         progress_reward = 0.0  # Initialize progress reward to 0

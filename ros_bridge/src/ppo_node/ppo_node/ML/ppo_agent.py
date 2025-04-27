@@ -47,15 +47,15 @@ class ActorNetwork(nn.Module):
     def forward(self, state):
         
         ##############################################################################################################
-        # if not hasattr(self, "state_debug_counter"):
-        #     self.state_debug_counter = 0
-        # if self.state_debug_counter < 20:
-        #     print(f"[DEBUG] Actor input state: mean = {state.mean().item():.4f}, std = {state.std().item():.4f}, min = {state.min().item():.4f}, max = {state.max().item():.4f}")
-        #     self.state_debug_counter += 1
-            
-        state = self.input_norm(state)
+        # if not hasattr(self, "debug_counter"):
+        #     self.debug_counter = 0
+        # if self.debug_counter < 2:  # Only print the first 2 times to avoid spam
+        #     print(f"\n[ACTOR FORWARD] Raw input state (before LayerNorm): {state.detach().cpu().numpy()}")
+        #     self.debug_counter += 1
         ##############################################################################################################
         
+        state = self.input_norm(state)
+
         x = F.leaky_relu(self.fc1(state), negative_slope=0.2)
         if not torch.isfinite(x).all():
             raise RuntimeError(f"NaN/Inf after fc1 → leaky_relu: {x}")
@@ -171,7 +171,7 @@ class CriticNetwork(nn.Module):
 
 
 class PPOAgent:
-    def __init__(self, input_dim=197, action_dim=2, summary_writer=None, logger=None):
+    def __init__(self, input_dim=198, action_dim=2, summary_writer=None, logger=None):
         self.logger = logger
         if self.logger is None:
             raise ValueError("Logger not provided. Please provide a logger instance.")
@@ -476,8 +476,8 @@ class PPOAgent:
                 self.actor_optimizer.step()
 
                 with torch.no_grad():
-                    # steer  std ∈ [0.05, 0.6]
-                    self.actor.log_std.data[0].clamp_(np.log(0.05), np.log(0.6))
+                    # steer  std ∈ [0.05, 0.7]
+                    self.actor.log_std.data[0].clamp_(np.log(0.05), np.log(0.7))
                     # throttle std ∈ [0.05, 1.0]
                     self.actor.log_std.data[1].clamp_(np.log(0.05), np.log(0.8))
 

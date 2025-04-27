@@ -63,6 +63,8 @@ class SpawnVehicleNode(Node):
         self.verify_sensor_timer = None
         self.spawn_transform = None
         self.ignore_collisions_until = 0.0
+        
+        self.toggle_spawn = True
 
         self.collision_publisher = self.create_publisher(
             String,
@@ -175,8 +177,13 @@ class SpawnVehicleNode(Node):
                 return
 
             road_waypoints.sort(key=lambda wp: wp.s)
+            
+            spawn_waypoints = [road_waypoints[3], road_waypoints[42]]
+            
+            spawn_waypoint = spawn_waypoints[0] if self.toggle_spawn else spawn_waypoints[1]
 
-            spawn_waypoint = road_waypoints[3]
+            self.toggle_spawn = not self.toggle_spawn
+
             self.get_logger().info(
                 f"Using waypoint at s={spawn_waypoint.s:.1f} for spawn"
             )

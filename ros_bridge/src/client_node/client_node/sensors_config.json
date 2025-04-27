@@ -32,7 +32,7 @@
                 "upper_fov": 12.5,              
                 "lower_fov": -12.5,            
                 "rotation_frequency": 10,       
-                "sensor_tick": 0.1
+                "sensor_tick": 0.005
             },
             {
                 "type": "sensor.other.imu",

@@ -1,7 +1,7 @@
 import os
 
 import cv2
-import rclpy
+import rclpy #type: ignore
 import math
 import struct
 import time
@@ -27,7 +27,7 @@ class DataCollector(Node):
         
         # torch.autograd.set_detect_anomaly(True) # slows things down, so only enable it for debugging.
         
-        self.record_rgb = True
+        self.record_rgb = False
         self.record_buffer = []
         os.makedirs("/ros_bridge/src/client_node/client_node/data/rgb_finetune/train", exist_ok=True)
         
@@ -61,8 +61,8 @@ class DataCollector(Node):
         existing_images = [f for f in existing_files if f.endswith(".png")]
         self.image_index = len(existing_images)
 
-        self.imu_mean = np.zeros(5, dtype=np.float32)
-        self.imu_var = np.ones(5, dtype=np.float32)
+        self.imu_mean = np.zeros(6, dtype=np.float32)
+        self.imu_var = np.ones(6, dtype=np.float32)
         self.imu_count = 1e-4  # avoid div by zero
         
         # Create state subscriber first to handle simulation status
@@ -72,6 +72,7 @@ class DataCollector(Node):
             self.handle_system_state,
             10
         )
+        
         # Add a regular subscriber for RGB images (not using message_filters)
         self.rgb_image_subscription = self.create_subscription(
             Image,
@@ -245,7 +246,7 @@ class DataCollector(Node):
             imu_msg.linear_acceleration.z,
             imu_msg.angular_velocity.x,
             imu_msg.angular_velocity.y,
-            # imu_msg.angular_velocity.z,
+            imu_msg.angular_velocity.z,
         ], dtype=np.float32)
 
         # Update running stats
@@ -268,14 +269,14 @@ class DataCollector(Node):
 
     def aggregate_state_vector(self, vision_features, imu_features):
         """Aggregate features into a single state vector.""" 
-        # Total vector size: 192 (vision) + 5 (IMU) = 197
-        state_vector = np.zeros(197, dtype=np.float32)
+        # Total vector size: 192 (vision) + 6 (IMU) = 198
+        state_vector = np.zeros(198, dtype=np.float32)
         
         # Fill with vision features (fused RGB + LiDAR)
         state_vector[:192] = vision_features
 
         # # Add IMU data
-        state_vector[192:197] = imu_features
+        state_vector[192:198] = imu_features
         
         return state_vector
 
