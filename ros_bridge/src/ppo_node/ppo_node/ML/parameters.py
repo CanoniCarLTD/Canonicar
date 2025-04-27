@@ -8,10 +8,10 @@ MODEL_LOAD = True
 PPO_CHECKPOINT_DIR = "/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models"
 
 # Set to None unless you're continuing an exact run (same version/run folder)
-CHECKPOINT_FILE = "/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models/v3.5.0/run_20250426_0010"
+CHECKPOINT_FILE = "/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models/v3.5.1/run_20250427_0001"
 #0010 is the long run
 
-VERSION = "v3.5.0"
+VERSION = "v3.5.1"
 
 # Point this to a full run directory from any version (must contain actor.pth etc.)
 # Example: "/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models/v2.1.3/run_20250325_0001"
