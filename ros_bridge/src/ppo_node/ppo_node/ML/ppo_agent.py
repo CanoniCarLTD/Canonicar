@@ -22,7 +22,7 @@ class ActorNetwork(nn.Module):
         super(ActorNetwork, self).__init__()
         self.action_dim = action_dim
         
-        log_std_init = torch.tensor([np.log(0.3), np.log(0.8)], dtype=torch.float32)
+        log_std_init = torch.tensor([np.log(0.5), np.log(0.8)], dtype=torch.float32)
 
         self.log_std = nn.Parameter(log_std_init.clone())
 
@@ -219,7 +219,7 @@ class PPOAgent:
 
         if not os.path.exists(PPO_CHECKPOINT_DIR):
             os.makedirs(PPO_CHECKPOINT_DIR)
-
+            
         self.logger.info("PPO Agent initialized.")
 
     ##################################################################################################
