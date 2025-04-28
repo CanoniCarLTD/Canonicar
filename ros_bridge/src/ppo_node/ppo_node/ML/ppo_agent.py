@@ -128,6 +128,23 @@ class ActorNetwork(nn.Module):
         
         return log_prob, total_entropy
     
+    def act_deterministic(self, state: torch.Tensor) -> np.ndarray:
+        """
+        Given a single state [1xinput_dim], return the *mean* action
+        (no noise) as a numpy array [action_dim].
+        """
+        dist = self.get_dist(state)             # MultivariateNormal
+        raw_mean = dist.mean                    # shape [1, action_dim]
+        normal = Normal(0.0, 1.0)
+        cdf_mean = normal.cdf(raw_mean)         # map Gaussian to [0,1]
+        
+        # steering in [-1,1], throttle in [0,1]
+        steer    = 2.0 * cdf_mean[..., 0:1] - 1.0
+        throttle =       cdf_mean[..., 1:2]
+        
+        action = torch.cat([steer, throttle], dim=1)
+        return action.detach().cpu().numpy()[0]
+    
 class CriticNetwork(nn.Module):
     def __init__(self, input_dim):
         super(CriticNetwork, self).__init__()
@@ -404,7 +421,7 @@ class PPOAgent:
         total_entropy = 0.0
         num_batches = 0
         
-        decay_base = 0.999
+        decay_base = 0.9995
         initial_entropy_coef = 0.02
         min_entropy_coef = 0.001
         self.entropy_coef = max(initial_entropy_coef * (decay_base ** self.learn_step_counter), min_entropy_coef)
