@@ -1,0 +1,10 @@
+ls -al ~/.ssh
+
+# 2. Paste your key and give it a title
+
+# Test your connection
+ssh -T git@github.com
+# You should see: "Hi username! You've successfully authenticated, but GitHub does not provide shell access."
+
+# After setting up the SSH key, try pulling again
+git pull

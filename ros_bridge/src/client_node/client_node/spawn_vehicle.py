@@ -64,6 +64,9 @@ class SpawnVehicleNode(Node):
         self.verify_sensor_timer = None
         self.spawn_transform = None
         self.ignore_collisions_until = 0.0
+        
+        self.toggle_spawn = True
+        self.current_waypoint_index = 0
 
         self.collision_publisher = self.create_publisher(
             String,
@@ -75,6 +78,11 @@ class SpawnVehicleNode(Node):
             Float32MultiArray, "/carla/vehicle/location", 10
         ) 
         self.timer = self.create_timer(0.1, self.publish_vehicle_location)
+        
+        self.steer_publisher = self.create_publisher(
+            Float32MultiArray, "/carla/vehicle/steer", 10
+        ) 
+        self.timer = self.create_timer(0.1, self.publish_vehicle_steer)
 
         self.vehicle_ready_client = self.create_client(VehicleReady, 'vehicle_ready')
 
@@ -108,7 +116,13 @@ class SpawnVehicleNode(Node):
         self.get_logger().info(f"Lap completed! Destroy vehicle {self.vehicle_type}")
         self.destroy_actors()
 
-
+    def publish_vehicle_steer(self):
+        if self.vehicle is not None and self.vehicle.is_alive:
+            steer = self.vehicle.get_control().steer
+            msg = Float32MultiArray()
+            msg.data = [steer]
+            self.steer_publisher.publish(msg)
+            
     def spawn_objects_from_config(self):
 
         self.get_logger().info("Waiting for map to fully load...")
@@ -165,8 +179,25 @@ class SpawnVehicleNode(Node):
                 return
 
             road_waypoints.sort(key=lambda wp: wp.s)
+            
+            # spawn_waypoints = [road_waypoints[3], road_waypoints[42]]
+            
+            # spawn_waypoint = spawn_waypoints[0] if self.toggle_spawn else spawn_waypoints[1]
 
-            spawn_waypoint = road_waypoints[3]
+            # self.toggle_spawn = not self.toggle_spawn
+
+            # self.get_logger().info(
+            #     f"Using waypoint at s={spawn_waypoint.s:.1f} for spawn"
+            # )
+            
+            spawn_waypoints = [road_waypoints[3], road_waypoints[15], road_waypoints[42]]
+
+            # Select the current spawn waypoint
+            spawn_waypoint = spawn_waypoints[self.current_waypoint_index]
+
+            # Update the index to cycle through the waypoints
+            self.current_waypoint_index = (self.current_waypoint_index + 1) % len(spawn_waypoints)
+
             self.get_logger().info(
                 f"Using waypoint at s={spawn_waypoint.s:.1f} for spawn"
             )

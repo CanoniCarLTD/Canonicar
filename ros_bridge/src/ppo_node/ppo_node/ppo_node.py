@@ -237,6 +237,17 @@ class PPOModelNode(Node):
         self.state = data  # might be redundant but just to make sure
         self.action, self.log_prob = self.ppo_agent.select_action(data)
 
+    # For evaluation
+    def get_action_deterministic(self, state: np.ndarray):
+        """
+        Convert raw state → torch tensor → call actor.act_deterministic
+        and store result in self.action.
+        """
+        state_tensor = torch.tensor(state, dtype=torch.float32, device=device).unsqueeze(0)
+        with torch.no_grad():
+            action = self.ppo_agent.actor.act_deterministic(state_tensor)
+        self.action = action
+        
     ##################################################################################################
     #                                       ACTION PUBLISHING
     ##################################################################################################
@@ -263,9 +274,7 @@ class PPOModelNode(Node):
         action_msg = Float32MultiArray()
         action_msg.data = [steer, throttle, brake]
         
-        # self.get_logger().info(
-        #     f"Publishing | Steer: {steer} | Throttle: {throttle} | Brake: {brake}"
-        # )
+        # self.get_logger().info(f"Publishing | Steer: {steer} | Throttle: {throttle} | Brake: {brake}")
         
         self.action_publisher.publish(action_msg)
 
@@ -276,17 +285,18 @@ class PPOModelNode(Node):
     def calculate_reward(self):
         """Improved reward function with properly combined rewards"""
         # Core reward parameters
-        progress_multiplier = 300.0  # More balanced multiplier for progress
+        progress_multiplier = 600.0
         base_time_penalty = -0.05  # Base penalty when not moving
         stagnation_factor = 0.05  # Increases penalty over time
         backwards_penalty = -5.0  # Penalty for going backwards
-        collision_penalty = -20.0  # Stronger collision penalty
-        lap_completion_bonus = 50.0  # Lap completion bonus
+        collision_penalty = -40.0
+        lap_completion_bonus = 50.0
 
         max_allowed_deviation = 2.5  # meters before applying harshest penalty
-        deviation_penalty_factor = -2.0  # scale the penalty
-        max_angle_deviation = math.pi/4  # 45 degrees
-        angle_penalty_factor = -1.0
+        deviation_penalty_factor = -1.7  # scale the penalty
+        max_angle_deviation = math.pi/5 # 36 degrees
+        angle_penalty_factor = -1.5
+        
         progress_reward = 0.0  # Initialize progress reward to 0
         # Initialize the reward to 0
         self.reward = 0.0
@@ -319,10 +329,7 @@ class PPOModelNode(Node):
             progress_reward = progress_multiplier * progress_delta
             self.stagnation_counter = 0
             self.get_logger().info(f"Moving forward: {progress_delta:.6f}, reward = {progress_reward:.4f}")
-        # else:  # Not moving
-        #     self.stagnation_counter += 1
-        #     progress_reward = base_time_penalty * (1 + self.stagnation_counter * stagnation_factor)
-        #     self.get_logger().info(f"Not moving: {progress_delta:.6f}, stagnation: {self.stagnation_counter}, reward = {progress_reward:.4f}")
+
         
         # Start with the progress-based reward
         self.reward = progress_reward
@@ -353,13 +360,6 @@ class PPOModelNode(Node):
             self.stagnation_counter = 0
             self.get_logger().info(f"Lap completion bonus applied: +{lap_completion_bonus}")
         
-        # NEEDS A CHECK
-        # # Penalize strong steering directly
-        if self.action is not None and len(self.action) >= 1:
-            steer = self.action[0] if isinstance(self.action, (list, tuple, np.ndarray)) else self.action.item()
-            steering_penalty = -0.02 * (steer ** 2)
-            self.reward += steering_penalty
-                
     ##################################################################################################
     #                                       STORE TRANSITION
     ##################################################################################################
@@ -557,50 +557,26 @@ class PPOModelNode(Node):
     ##################################################################################################
 
     def testing(self, msg):
-        if self.timestep_counter < TEST_TIMESTEPS:
-            self.state = np.array(msg.data, dtype=np.float32)
-            self.t1 = datetime.now()
-
-            if self.current_step_in_episode < self.episode_length:
-                self.current_step_in_episode += 1
-                self.get_action(self.state)
-                self.publish_action()
-                self.calculate_reward()
-
-                # Mark episode as done if episode_length reached
-                if self.current_step_in_episode >= self.episode_length:
-                    self.done = True
-                    self.termination_reason = "episode_length"
-                self.store_transition()
-                self.timestep_counter += 1
-                self.current_ep_reward += self.reward
-
-                self.summary_writer.add_scalar(
-                    "Rewards/step reward", self.reward, self.timestep_counter
-                )
-                self.summary_writer.add_scalar(
-                    "Rewards/cumulative reward",
-                    self.current_ep_reward,
-                    self.episode_counter,
-                )
-
-                if self.done:
-                    self.t2 = datetime.now()
-                    self.get_logger().info(f"Episode duration: {self.t2 - self.t1}")
-
-                    self.save_training_state(self.run_dir)
-                    self.log_episode_metrics()
-                    self.get_logger().info(f"Checkpoint saved at {self.run_dir}")
-
-                    self.reset_run()
-                    self.episode_counter += 1
-                return 1
-
-        else:
-            self.log_episode_metrics()
-            self.save_training_state(self.run_dir)
-            self.reset_run()
-            self.episode_counter += 1
+        if not hasattr(self, "ready_to_collect") or not self.ready_to_collect:
+            return
+                
+        self.state = np.array(msg.data, dtype=np.float32)
+        # self.t1 = datetime.now()
+        if self.current_step_in_episode < self.episode_length:
+            self.current_step_in_episode += 1
+            self.get_action_deterministic(self.state)
+            self.publish_action()
+            # self.calculate_reward()
+            if self.current_step_in_episode >= self.episode_length:
+                self.done = True
+                self.termination_reason = "episode_length"
+            self.timestep_counter += 1
+            self.current_ep_reward += self.reward
+            if self.done:
+                # self.t2 = datetime.now()
+                self.reset_run()
+                self.episode_counter += 1
+            return 1
 
     ##################################################################################################
     #                                   CHECKPOINTING AND LOGGING

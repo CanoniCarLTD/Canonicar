@@ -22,11 +22,10 @@ class ActorNetwork(nn.Module):
         super(ActorNetwork, self).__init__()
         self.action_dim = action_dim
         
-        log_std_init = torch.tensor([np.log(0.3), np.log(0.8)], dtype=torch.float32)
+        log_std_init = torch.tensor([np.log(0.5), np.log(0.8)], dtype=torch.float32)
 
         self.log_std = nn.Parameter(log_std_init.clone())
 
-        # ADD THIS
         self.input_norm = nn.LayerNorm(input_dim)
 
         self.fc1 = nn.Linear(input_dim, 256)
@@ -48,15 +47,15 @@ class ActorNetwork(nn.Module):
     def forward(self, state):
         
         ##############################################################################################################
-        # if not hasattr(self, "state_debug_counter"):
-        #     self.state_debug_counter = 0
-        # if self.state_debug_counter < 20:
-        #     print(f"[DEBUG] Actor input state: mean = {state.mean().item():.4f}, std = {state.std().item():.4f}, min = {state.min().item():.4f}, max = {state.max().item():.4f}")
-        #     self.state_debug_counter += 1
-            
-        state = self.input_norm(state)
+        # if not hasattr(self, "debug_counter"):
+        #     self.debug_counter = 0
+        # if self.debug_counter < 2:  # Only print the first 2 times to avoid spam
+        #     print(f"\n[ACTOR FORWARD] Raw input state (before LayerNorm): {state.detach().cpu().numpy()}")
+        #     self.debug_counter += 1
         ##############################################################################################################
         
+        state = self.input_norm(state)
+
         x = F.leaky_relu(self.fc1(state), negative_slope=0.2)
         if not torch.isfinite(x).all():
             raise RuntimeError(f"NaN/Inf after fc1 → leaky_relu: {x}")
@@ -129,15 +128,36 @@ class ActorNetwork(nn.Module):
         
         return log_prob, total_entropy
     
+    def act_deterministic(self, state: torch.Tensor) -> np.ndarray:
+        """
+        Given a single state [1xinput_dim], return the *mean* action
+        (no noise) as a numpy array [action_dim].
+        """
+        dist = self.get_dist(state)             # MultivariateNormal
+        raw_mean = dist.mean                    # shape [1, action_dim]
+        normal = Normal(0.0, 1.0)
+        cdf_mean = normal.cdf(raw_mean)         # map Gaussian to [0,1]
+        
+        # steering in [-1,1], throttle in [0,1]
+        steer    = 2.0 * cdf_mean[..., 0:1] - 1.0
+        throttle =       cdf_mean[..., 1:2]
+        
+        action = torch.cat([steer, throttle], dim=1)
+        return action.detach().cpu().numpy()[0]
+    
 class CriticNetwork(nn.Module):
     def __init__(self, input_dim):
         super(CriticNetwork, self).__init__()
 
-        self.fc1 = nn.Linear(input_dim, 256)
-        self.fc2 = nn.Linear(256, 128)
-        self.fc3 = nn.Linear(128, 64)
-        self.fc4 = nn.Linear(64, 1)
-
+        # self.fc1 = nn.Linear(input_dim, 256)
+        # self.fc2 = nn.Linear(256, 128)
+        # self.fc3 = nn.Linear(128, 64)
+        # self.fc4 = nn.Linear(64, 1)
+        self.fc1 = nn.Linear(input_dim, 512)
+        self.fc2 = nn.Linear(512, 256)
+        self.fc3 = nn.Linear(256, 128)
+        self.fc4 = nn.Linear(128, 1)
+        
         self.init_weights()
         
         self.input_norm = nn.LayerNorm(input_dim)  # ← normalize input
@@ -168,7 +188,7 @@ class CriticNetwork(nn.Module):
 
 
 class PPOAgent:
-    def __init__(self, input_dim=197, action_dim=2, summary_writer=None, logger=None):
+    def __init__(self, input_dim=198, action_dim=2, summary_writer=None, logger=None):
         self.logger = logger
         if self.logger is None:
             raise ValueError("Logger not provided. Please provide a logger instance.")
@@ -216,7 +236,7 @@ class PPOAgent:
 
         if not os.path.exists(PPO_CHECKPOINT_DIR):
             os.makedirs(PPO_CHECKPOINT_DIR)
-
+            
         self.logger.info("PPO Agent initialized.")
 
     ##################################################################################################
@@ -401,7 +421,7 @@ class PPOAgent:
         total_entropy = 0.0
         num_batches = 0
         
-        decay_base = 0.999
+        decay_base = 0.9995
         initial_entropy_coef = 0.02
         min_entropy_coef = 0.001
         self.entropy_coef = max(initial_entropy_coef * (decay_base ** self.learn_step_counter), min_entropy_coef)
@@ -473,8 +493,8 @@ class PPOAgent:
                 self.actor_optimizer.step()
 
                 with torch.no_grad():
-                    # steer  std ∈ [0.05, 0.6]
-                    self.actor.log_std.data[0].clamp_(np.log(0.05), np.log(0.6))
+                    # steer  std ∈ [0.05, 0.7]
+                    self.actor.log_std.data[0].clamp_(np.log(0.05), np.log(0.7))
                     # throttle std ∈ [0.05, 1.0]
                     self.actor.log_std.data[1].clamp_(np.log(0.05), np.log(0.8))
 

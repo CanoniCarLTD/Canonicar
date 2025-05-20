@@ -1,3 +1,4 @@
+import os
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -63,6 +64,7 @@ class SemanticEncoder(nn.Module):
         self.global_pool = nn.AdaptiveAvgPool2d((1, 1))
         self.fc = nn.Linear(128, output_features)
         
+
     def forward(self, x):
         x = self.encoder(x)
         x = self.global_pool(x)
@@ -76,7 +78,6 @@ class SensorFusionModel(nn.Module):
         super(SensorFusionModel, self).__init__()
         self.semantic_encoder = SemanticEncoder(output_features=semantic_features)
         self.lidar_encoder = LiDAREncoder(in_ch=3, output_features=lidar_features)
-        
         # Fusion layer to combine the features
         self.fusion_layer = nn.Sequential(
             nn.Linear(semantic_features + lidar_features, final_features),
@@ -109,7 +110,7 @@ class SensorFusionModel(nn.Module):
     
 class VisionProcessor:
     """Helper class to process raw sensor data before feeding to the model."""
-    def __init__(self, lidar_grid_size=(64, 64), height_range=(-2.0, 4.0), device='cpu'):
+    def __init__(self, lidar_grid_size=(64, 64), height_range=(-2.0, 4.0), device='cpu', pretrained_rgb_encoder=None):
         """
         Initialize the vision processor
         
