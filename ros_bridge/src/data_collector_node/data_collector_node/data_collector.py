@@ -52,7 +52,7 @@ class DataCollector(Node):
         # Setup vision processing
         self.vision_processor = VisionProcessor(device=device)
         
-        self.image_sub = Subscriber(self, Image, "/carla/rgb_front/image_raw")
+        self.image_sub = Subscriber(self, Image, "/carla/segmentation_front/image")
         self.lidar_sub = Subscriber(self, PointCloud2, "/carla/lidar/points")
         self.imu_sub = Subscriber(self, Imu, "/carla/imu/imu")
         
@@ -120,8 +120,6 @@ class DataCollector(Node):
         if not self.ready_to_collect:
             return
         try:
-            # callback_start = time.time()
-
             # Update timestamp to know sensors are active
             self.last_sensor_timestamp = time.time()
             
@@ -133,20 +131,30 @@ class DataCollector(Node):
             
             if not np.isnan(processed_data).any():
                 self.publish_to_PPO.publish(response)
-                # process_time = time.time() - callback_start
-                # self.get_logger().info(f"Sensor sync callback took: {process_time:.4f}s")
             else:
                 self.get_logger().warn("State vector contains NaN values. Skipping...")
                 
         except Exception as e:
             self.get_logger().error(f"Error in sync callback: {e}")
 
+
     def process_data(self, image_msg, lidar_msg, imu_msg):
         """Process sensor data into state vector"""
-        # start_time = time.time()
-        vision_features = self.process_vision_data(image_msg, lidar_msg)
-        # end_time = time.time()
-        # self.get_logger().info(f"Vision processing time: {end_time - start_time:.4f} seconds")
+        # Extract semantic segmentation image directly (already processed by carla_semantic_image_to_ros_image)
+        raw_image = np.frombuffer(image_msg.data, dtype=np.uint8).reshape(
+            (image_msg.height, image_msg.width, 3)  # BGR format from semantic converter
+        )
+        
+        # Convert lidar_msg to point list
+        points = [
+            [point[0], point[1], point[2]]  # Extract x, y, z
+            for point in struct.iter_unpack("ffff", lidar_msg.data)
+        ]
+
+        # Process using vision model - note that we're passing raw_image directly
+        # which is now a semantic segmentation image
+        vision_features = self.vision_processor.process_sensor_data(raw_image, points)
+        
         return self.aggregate_state_vector(
             vision_features, self.process_imu(imu_msg)
         )

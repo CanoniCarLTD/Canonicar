@@ -7,7 +7,7 @@ def carla_lidar_to_ros_pointcloud2(carla_lidar_data, header: Header, filter_grou
     """
     Convert a carla.LidarMeasurement to sensor_msgs/PointCloud2.
     """
-    height_threshold = -1.0  
+    height_threshold = -2.5  
 
     points = np.array([
         [float(d.point.x), float(d.point.y), float(d.point.z), float(d.intensity)]

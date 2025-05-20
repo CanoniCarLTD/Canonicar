@@ -13,26 +13,24 @@
         },
         "sensors": [
             {
-                "type": "sensor.camera.rgb",
-                "id": "rgb_front",
+                "type": "sensor.camera.semantic_segmentation",
+                "id": "segmentation_front",
                 "spawn_point": {"x": 2.0, "y": 0.0, "z": 2.0, "roll": 0.0, "pitch": -10.0, "yaw": 0.0},
                 "image_size_x": 640,
                 "image_size_y": 480,
-                "fov": 100.0,
-                "sensor_tick": 0.1
+                "fov": 100.0
             },
             {
                 "type": "sensor.lidar.ray_cast",
                 "id": "lidar",
                 "spawn_point": {"x": 0.0, "y": 0.0, "z": 2.4, "roll": 0.0, "pitch": 0.0, "yaw": 0.0},
-                "range": 150,                 
-                "channels": 144,               
+                "range": 100,                 
+                "channels": 64,               
                 "points_per_second": 452000,    
                 "horizontal_fov": 120,          
                 "upper_fov": 12.5,              
                 "lower_fov": -12.5,            
-                "rotation_frequency": 10,       
-                "sensor_tick": 0.1
+                "rotation_frequency": 20    
             },
             {
                 "type": "sensor.other.imu",
@@ -40,8 +38,7 @@
                 "spawn_point": {"x": 2.0, "y": 0.0, "z": 2.0, "roll": 0.0, "pitch": 0.0, "yaw": 0.0},
                 "noise_accel_stddev_x": 0.0, "noise_accel_stddev_y": 0.0, "noise_accel_stddev_z": 0.0,
                 "noise_gyro_stddev_x": 0.0, "noise_gyro_stddev_y": 0.0, "noise_gyro_stddev_z": 0.0,
-                "noise_gyro_bias_x": 0.0, "noise_gyro_bias_y": 0.0, "noise_gyro_bias_z": 0.0,
-                "sensor_tick": 0.1
+                "noise_gyro_bias_x": 0.0, "noise_gyro_bias_y": 0.0, "noise_gyro_bias_z": 0.0
             }
         ]
     }
