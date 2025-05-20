@@ -6,6 +6,8 @@ import numpy as np
 import torchvision.models as models
 from torchvision import transforms
 from torchvision.models.resnet import BasicBlock
+import cv2
+
 
 class LiDAREncoder(nn.Module):
     def __init__(self, in_ch=3, output_features=64):
@@ -33,25 +35,36 @@ class LiDAREncoder(nn.Module):
         return self.fc(x)
 
 
-class RGBEncoder(nn.Module):
-    def __init__(self, output_features=128, pretrained_track=None):
-        super(RGBEncoder, self).__init__()
-        self.mobilenet = models.mobilenet_v2(weights=models.MobileNet_V2_Weights.IMAGENET1K_V1)
-        self.encoder = nn.Sequential(*list(self.mobilenet.features[:14]))
-        self.global_pool = nn.AdaptiveAvgPool2d((1, 1))
-        # Dynamically determine the input size for the fully connected layer
-        self.fc_input_size = self.encoder[-1].out_channels  # Should be 96
-        self.fc = nn.Linear(self.fc_input_size, output_features)
-                
-        # ——— load track-specific weights if provided ———
-        if pretrained_track is not None:
-            if os.path.exists(pretrained_track):
-                state = torch.load(pretrained_track, map_location="cpu")
-                self.encoder.load_state_dict(state, strict=False)
-                print(f"[RGBEncoder] loaded track weights from {pretrained_track}")
-            else:
-                raise FileNotFoundError(f"❌ Provided encoder checkpoint not found: {pretrained_track}")
+class SemanticEncoder(nn.Module):
+    def __init__(self, output_features=128):
+        super(SemanticEncoder, self).__init__()
+        # Input is 3-channel BGR from the semantic segmentation
+        # Use a more efficient network for semantic images since they're already preprocessed
+        self.encoder = nn.Sequential(
+            # Initial block
+            nn.Conv2d(3, 32, kernel_size=3, stride=2, padding=1),
+            nn.BatchNorm2d(32),
+            nn.ReLU(inplace=True),
             
+            # Block 1
+            nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1),
+            nn.BatchNorm2d(64),
+            nn.ReLU(inplace=True),
+            
+            # Block 2
+            nn.Conv2d(64, 96, kernel_size=3, stride=2, padding=1),
+            nn.BatchNorm2d(96),
+            nn.ReLU(inplace=True),
+            
+            # Block 3
+            nn.Conv2d(96, 128, kernel_size=3, stride=2, padding=1),
+            nn.BatchNorm2d(128),
+            nn.ReLU(inplace=True),
+        )
+        self.global_pool = nn.AdaptiveAvgPool2d((1, 1))
+        self.fc = nn.Linear(128, output_features)
+        
+
     def forward(self, x):
         x = self.encoder(x)
         x = self.global_pool(x)
@@ -59,48 +72,40 @@ class RGBEncoder(nn.Module):
         x = self.fc(x)
         return x
 
-
 class SensorFusionModel(nn.Module):
-    """Model that fuses RGB and LiDAR data for autonomous driving."""
-    def __init__(self, rgb_features=128, lidar_features=64, final_features=192, pretrained_track = None):
+    """Model that fuses Semantic and LiDAR data for autonomous driving."""
+    def __init__(self, semantic_features=128, lidar_features=64, final_features=192):
         super(SensorFusionModel, self).__init__()
-        self.rgb_encoder = RGBEncoder(output_features=rgb_features, pretrained_track = pretrained_track)
-        self.lidar_encoder = LiDAREncoder(in_ch=3,output_features=lidar_features)
-        
-        # Optional: fusion layer to further compress the concatenated features
+        self.semantic_encoder = SemanticEncoder(output_features=semantic_features)
+        self.lidar_encoder = LiDAREncoder(in_ch=3, output_features=lidar_features)
+        # Fusion layer to combine the features
         self.fusion_layer = nn.Sequential(
-            nn.Linear(rgb_features + lidar_features, final_features),
+            nn.Linear(semantic_features + lidar_features, final_features),
             nn.ReLU()
         )
 
-    def forward(self, rgb_image, lidar_bev):
+    def forward(self, semantic_image, lidar_bev):
         """
         Forward pass through the model
         
         Args:
-            rgb_image (tensor): RGB image [B, 3, H, W]
-            lidar_bev (tensor): LiDAR bird's eye view depth map [B, 2, H, W]
+            semantic_image (tensor): Semantic segmentation image [B, 3, H, W]
+            lidar_bev (tensor): LiDAR bird's eye view depth map [B, 3, H, W]
             
         Returns:
             tensor: Fused feature vector
         """
-        rgb_features = self.rgb_encoder(rgb_image)
+        semantic_features = self.semantic_encoder(semantic_image)
         lidar_features = self.lidar_encoder(lidar_bev)
         
-        ####################################################################
-        # print(f"[DEBUG] RGB features: mean={rgb_features.mean().item():.4f}, std={rgb_features.std().item():.4f}, min={rgb_features.min().item():.4f}, max={rgb_features.max().item():.4f}")
-        # print(f"[DEBUG] LiDAR features: mean={lidar_features.mean().item():.4f}, std={lidar_features.std().item():.4f}, min={lidar_features.min().item():.4f}, max={lidar_features.max().item():.4f}")
-        ####################################################################
-
         # Concatenate features
-        fused_features = torch.cat([rgb_features, lidar_features], dim=1)
+        fused_features = torch.cat([semantic_features, lidar_features], dim=1)
         
-        # print(f"[DEBUG] Fused pre-ReLU: mean={fused_features.mean().item():.4f}, std={fused_features.std().item():.4f}")
-
-        # Optional: further compress features
+        # Further compress features
         fused_features = self.fusion_layer(fused_features)
         
         return fused_features
+ 
     
     
 class VisionProcessor:
@@ -118,41 +123,35 @@ class VisionProcessor:
         self.height_range = height_range
         self.device = device
         
-        self.rgb_mean = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1).to(device)
-        self.rgb_std = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1).to(device)
-        self.rgb_tensor = torch.zeros((1, 3, 224, 224), device=device)
+        # No need for RGB normalization since semantic segmentation is already in a standardized format
+        # But we'll still preprocess to normalize to [0, 1] range
+        self.semantic_tensor = torch.zeros((1, 3, 224, 224), device=device)
 
         # Create and load the model
-        self.model = SensorFusionModel(rgb_features=128, lidar_features=64, final_features=192,
-                                       pretrained_track = pretrained_rgb_encoder).to(device)
-        
+        self.model = SensorFusionModel(semantic_features=128, lidar_features=64, final_features=192).to(device)
         self.model.eval()
 
         # Model warmup for more consistent timing
-        dummy_rgb = torch.zeros((1, 3, 224, 224), device=device)
+        dummy_semantic = torch.zeros((1, 3, 224, 224), device=device)
         dummy_lidar = torch.zeros((1, 3, 64, 64), device=device)
         with torch.no_grad():
-            self.model(dummy_rgb, dummy_lidar)
+            self.model(dummy_semantic, dummy_lidar)
 
         
-    def process_rgb(self, rgb_image):
-        """Optimized RGB processing with pre-allocated tensors"""
-        if isinstance(rgb_image, np.ndarray):
-            # Use a more direct conversion path with fewer operations
-            if rgb_image.shape[0] == 224 and rgb_image.shape[1] == 224:
-                # Already correct size
-                rgb_tensor = torch.from_numpy(rgb_image).permute(2, 0, 1).float().div_(255.0).unsqueeze(0)
+    def process_semantic(self, semantic_image):
+        """Process semantic segmentation image"""
+        if isinstance(semantic_image, np.ndarray):
+            # Resize using OpenCV for better performance
+            if semantic_image.shape[0] != 224 or semantic_image.shape[1] != 224:
+                resized = cv2.resize(semantic_image, (224, 224), interpolation=cv2.INTER_NEAREST)
             else:
-                # Resize using OpenCV instead of torch (much faster)
-                import cv2
-                resized = cv2.resize(rgb_image, (224, 224), interpolation=cv2.INTER_LINEAR)
-                rgb_tensor = torch.from_numpy(resized).permute(2, 0, 1).float().div_(255.0).unsqueeze(0)
+                resized = semantic_image
                 
-            # Fast normalization 
-            rgb_tensor = rgb_tensor.to(self.device)
-            rgb_tensor = (rgb_tensor - self.rgb_mean) / self.rgb_std
+            # Convert to tensor [0, 1] range
+            semantic_tensor = torch.from_numpy(resized).permute(2, 0, 1).float().div_(255.0).unsqueeze(0)
+            semantic_tensor = semantic_tensor.to(self.device)
             
-            return rgb_tensor
+            return semantic_tensor
         return None
     
     def lidar_to_bev(self, lidar_points):
@@ -229,26 +228,26 @@ class VisionProcessor:
         grid_tensor = torch.from_numpy(grid_combined).float().unsqueeze(0)
         return grid_tensor.to(self.device)
     
-    def process_sensor_data(self, rgb_image, lidar_points):
+    def process_sensor_data(self, semantic_image, lidar_points):
         """
-        Process both RGB and LiDAR data and run inference
+        Process both semantic segmentation and LiDAR data and run inference
         
         Args:
-            rgb_image: RGB image as np.array [H, W, 3]
+            semantic_image: Semantic segmentation image as np.array [H, W, 3]
             lidar_points: List of LiDAR points [x, y, z, intensity]
             
         Returns:
             np.array: Fused feature vector
         """
-        # Process RGB
-        rgb_tensor = self.process_rgb(rgb_image)
+        # Process semantic image
+        semantic_tensor = self.process_semantic(semantic_image)
         
         # Process LiDAR
         lidar_tensor = self.lidar_to_bev(lidar_points)
         
         # Run inference
         with torch.no_grad():
-            features = self.model(rgb_tensor, lidar_tensor)
+            features = self.model(semantic_tensor, lidar_tensor)
             
         if not torch.isfinite(features).all():
             raise RuntimeError("NaN/Inf in output fused features")

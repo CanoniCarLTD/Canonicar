@@ -20,6 +20,7 @@ from sensors_data import (
     carla_image_to_ros_image,
     carla_lidar_to_ros_pointcloud2,
     carla_imu_to_ros_imu,
+    carla_semantic_image_to_ros_image,
 )
 
 class SpawnVehicleNode(Node):
@@ -479,7 +480,7 @@ class SpawnVehicleNode(Node):
         Modify naming as you prefer for your Foxglove setup.
         """
         if sensor_type.startswith("sensor.camera"):
-            return (f"/carla/{sensor_id}/image_raw", Image)
+            return (f"/carla/{sensor_id}/image", Image)
         elif sensor_type.startswith("sensor.lidar"):
             return (f"/carla/{sensor_id}/points", PointCloud2)
         elif sensor_type.startswith("sensor.other.imu"):
@@ -514,7 +515,7 @@ class SpawnVehicleNode(Node):
                 # Convert the data to ROS format based on sensor type
                 message = None
                 if sensor_type.startswith('sensor.camera'):
-                    message = carla_image_to_ros_image(data, header)
+                    message = carla_semantic_image_to_ros_image(data, header)
                 elif sensor_type.startswith('sensor.lidar'):
                     message = carla_lidar_to_ros_pointcloud2(data, header)
                 elif sensor_type.startswith("sensor.other.imu"):

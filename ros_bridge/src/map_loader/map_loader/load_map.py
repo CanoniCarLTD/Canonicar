@@ -56,18 +56,18 @@ class LoadMapNode(Node):
         self.available_maps = glob.glob(f"{map_directory}/*.xodr")
         self.get_logger().info(f"Found {len(self.available_maps)} available maps: {[os.path.basename(m) for m in self.available_maps]}")
 
-        self.map_swap_service = self.create_service(
-            SwapMap, 'map_swap', self.handle_map_swap
-        )
+        # self.map_swap_service = self.create_service(
+        #     SwapMap, 'map_swap', self.handle_map_swap
+        # )
 
         self.state_publisher = self.create_publisher(
             String, '/map/state', 10
         )
 
-        if self.TRACK_XODR in self.available_maps:
-            self.current_map_index = self.available_maps.index(self.TRACK_XODR)
-        else:
-            self.current_map_index = 0
+        # if self.TRACK_XODR in self.available_maps:
+        #     self.current_map_index = self.available_maps.index(self.TRACK_XODR)
+        # else:
+        #     self.current_map_index = 0
 
         # Initialize CARLA client and setup map
         try:
@@ -84,24 +84,24 @@ class LoadMapNode(Node):
     def setup_map(self):
         try:
             self.publish_state("LOADING")
-            with open(self.TRACK_XODR, "r") as f:
-                opendrive_data = f.read()
-            self.get_logger().info(
-                "Raw OpenDRIVE data loaded (length: {})".format(len(opendrive_data))
-            )
+            # with open(self.TRACK_XODR, "r") as f:
+            #     opendrive_data = f.read()
+            # self.get_logger().info(
+            #     "Raw OpenDRIVE data loaded (length: {})".format(len(opendrive_data))
+            # )
 
-            opendrive_params = carla.OpendriveGenerationParameters(
-                # vertex_distance=2.0,
-                # max_road_length=500.0,
-                wall_height=2.5,
-                # additional_width=20.0,
-                smooth_junctions=True,
-                enable_mesh_visibility=True,
-                enable_pedestrian_navigation=True,
-            )
+            # opendrive_params = carla.OpendriveGenerationParameters(
+            #     # vertex_distance=2.0,
+            #     # max_road_length=500.0,
+            #     wall_height=2.5,
+            #     # additional_width=20.0,
+            #     smooth_junctions=True,
+            #     enable_mesh_visibility=True,
+            #     enable_pedestrian_navigation=True,
+            # )
 
-            self.get_logger().info(f"Using improved OpenDRIVE generation parameters")
-            self.client.generate_opendrive_world(opendrive_data, opendrive_params)
+            # self.get_logger().info(f"Using improved OpenDRIVE generation parameters")
+            # self.client.generate_opendrive_world(opendrive_data, opendrive_params)
             self.world = self.client.get_world()
 
             settings = self.world.get_settings()
@@ -143,48 +143,48 @@ class LoadMapNode(Node):
         self.state_publisher.publish(msg)
 
     # Handle multiple quick map changes better:
-    def handle_map_swap(self, request, response):
-        """Service handler for map swap requests"""
-        self.publish_state("SWAPPING", "Preparing for map swap")
+    # def handle_map_swap(self, request, response):
+    #     """Service handler for map swap requests"""
+    #     self.publish_state("SWAPPING", "Preparing for map swap")
         
-        # Add cleanup for existing map resources
-        try:
-            # Clean any existing visualizations
-            self.world.debug.draw_point(
-                carla.Location(0,0,0), size=0.1, 
-                color=carla.Color(0,0,0,0), life_time=0.0
-            )
-            self.get_logger().info("Cleaned up previous map visualizations")
-            self.world = self.client.reload_world()
-        except:
-            pass
+    #     # Add cleanup for existing map resources
+    #     try:
+    #         # Clean any existing visualizations
+    #         self.world.debug.draw_point(
+    #             carla.Location(0,0,0), size=0.1, 
+    #             color=carla.Color(0,0,0,0), life_time=0.0
+    #         )
+    #         self.get_logger().info("Cleaned up previous map visualizations")
+    #         self.world = self.client.reload_world()
+    #     except:
+    #         pass
         
-        try:
-            if request.map_file_path and os.path.exists(request.map_file_path):
-                new_map_path = request.map_file_path
-            else:
-                current_idx = self.current_map_index
-                next_idx = (current_idx + 1) % len(self.available_maps)
-                new_map_path = self.available_maps[next_idx]
+    #     try:
+    #         if request.map_file_path and os.path.exists(request.map_file_path):
+    #             new_map_path = request.map_file_path
+    #         else:
+    #             current_idx = self.current_map_index
+    #             next_idx = (current_idx + 1) % len(self.available_maps)
+    #             new_map_path = self.available_maps[next_idx]
             
-            self.TRACK_XODR = new_map_path
-            self.current_map_index = self.available_maps.index(new_map_path)
+    #         self.TRACK_XODR = new_map_path
+    #         self.current_map_index = self.available_maps.index(new_map_path)
             
-            self.setup_map()
+    #         self.setup_map()
             
-            self.extract_track_waypoints()
+    #         self.extract_track_waypoints()
             
-            self.publish_state("READY", f"Loaded {os.path.basename(new_map_path)}")
+    #         self.publish_state("READY", f"Loaded {os.path.basename(new_map_path)}")
             
-            response.success = True
-            response.message = f"Successfully loaded map: {os.path.basename(new_map_path)}"
-            return response
+    #         response.success = True
+    #         response.message = f"Successfully loaded map: {os.path.basename(new_map_path)}"
+    #         return response
                 
-        except Exception as e:
-            self.publish_state("ERROR", f"Map swap failed: {str(e)}")
-            response.success = False
-            response.message = f"Failed to swap map: {str(e)}"
-            return response
+    #     except Exception as e:
+    #         self.publish_state("ERROR", f"Map swap failed: {str(e)}")
+    #         response.success = False
+    #         response.message = f"Failed to swap map: {str(e)}"
+    #         return response
 
     def extract_track_waypoints(self):
         """Extract waypoints and calculate track length"""
