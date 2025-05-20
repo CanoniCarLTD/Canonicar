@@ -6,7 +6,7 @@ import torchvision.models as models
 from torchvision import transforms
 from torchvision.models.resnet import BasicBlock
 import cv2
-
+from vae.variational_encoder import VariationalEncoder
 
 class LiDAREncoder(nn.Module):
     def __init__(self, in_ch=3, output_features=64):
@@ -73,13 +73,17 @@ class SemanticEncoder(nn.Module):
 
 class SensorFusionModel(nn.Module):
     """Model that fuses Semantic and LiDAR data for autonomous driving."""
-    def __init__(self, semantic_features=128, lidar_features=64, final_features=192):
+    def __init__(self, latent_dim=128, lidar_features=64, final_features=192):
         super(SensorFusionModel, self).__init__()
-        self.semantic_encoder = SemanticEncoder(output_features=semantic_features)
+        # self.semantic_encoder = SemanticEncoder(output_features=semantic_features)
+        self.vae_encoder = VariationalEncoder(latent_dims=latent_dim)
+        # freeze weights in case someone accidentally trains it
+        for p in self.vae_encoder.parameters():
+            p.requires_grad = False
         self.lidar_encoder = LiDAREncoder(in_ch=3, output_features=lidar_features)
         # Fusion layer to combine the features
         self.fusion_layer = nn.Sequential(
-            nn.Linear(semantic_features + lidar_features, final_features),
+            nn.Linear(latent_dim + lidar_features, final_features),
             nn.ReLU()
         )
 
@@ -94,7 +98,7 @@ class SensorFusionModel(nn.Module):
         Returns:
             tensor: Fused feature vector
         """
-        semantic_features = self.semantic_encoder(semantic_image)
+        semantic_features = self.vae_encoder(semantic_image)
         lidar_features = self.lidar_encoder(lidar_bev)
         
         # Concatenate features
@@ -129,7 +133,10 @@ class VisionProcessor:
         # Create and load the model
         self.model = SensorFusionModel(semantic_features=128, lidar_features=64, final_features=192).to(device)
         self.model.eval()
-
+        
+        VAE_PATH = "ros_bridge/src/vae/model/var_encoder_model.pth"
+        self.model.vae_encoder.load()      # uses our .load() helper
+        
         # Model warmup for more consistent timing
         dummy_semantic = torch.zeros((1, 3, 224, 224), device=device)
         dummy_lidar = torch.zeros((1, 3, 64, 64), device=device)

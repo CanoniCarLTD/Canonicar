@@ -15,4 +15,4 @@ CUDA.py
 preTrained_PPO_models/
 logs_from_old_log_settings/
 
-data/
+images/

@@ -15,10 +15,20 @@ import torch.nn as nn
 from std_msgs.msg import Float32MultiArray, String
 from vision_model import VisionProcessor
 
+import cv2
+from pathlib import Path
+import threading
+from queue import Queue
+
 # os.environ["CUDA_LAUNCH_BLOCKING"] = "1"  # might reduce performance time! Uncomment for debugging CUDA errors
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+RECORD_SS_IMAGES   = True        # flip to False when you just want PPO
+SAVE_EVERY_N_FRAMES = 5
+DATA_ROOT = Path("/ros_bridge/src/data_collector_node/data_collector_node/VAE/images")   # will create Train/ Val/ inside
+NUMBER_OF_IMAGES = 14000
+        
 class DataCollector(Node):
     def __init__(self):
         super().__init__("data_collector")
@@ -44,7 +54,6 @@ class DataCollector(Node):
             10
         )
         
-        
         self.publish_to_PPO = self.create_publisher(
             Float32MultiArray, "/data_to_ppo", 10
         )
@@ -56,8 +65,39 @@ class DataCollector(Node):
         self.lidar_sub = Subscriber(self, PointCloud2, "/carla/lidar/points")
         self.imu_sub = Subscriber(self, Imu, "/carla/imu/imu")
         
+        #Semantic segmentation and VAE training
+        self.frame_id = 0
+        self.saved_image_index = 1
+        self.save_queue = Queue(maxsize=128)
+        if RECORD_SS_IMAGES:
+            ts = time.strftime("%Y%m%d")
+            self.run_dir = DATA_ROOT / f"raw_{ts}"
+            self.run_dir.mkdir(parents=True, exist_ok=True)  # Ensure directory exists
+            existing_files = list(self.run_dir.glob("*.png"))
+            if existing_files:
+                max_idx = max([int(f.stem) for f in existing_files if f.stem.isdigit()], default=0)
+                self.saved_image_index = max_idx + 1
+            self.writer_thread = threading.Thread(target=self._disk_writer, daemon=True)
+            self.writer_thread.start()
+            
+        
         self.get_logger().info("DataCollector Node initialized. Waiting for vehicle...")
-
+    
+    # Helper functions for VAE training
+    def _disk_writer(self):
+        """Runs in background; receives (img, path) tuples from queue."""
+        while True:
+            if self.saved_image_index > NUMBER_OF_IMAGES:
+                self.get_logger().info(f"Reached the maximum number of images ({NUMBER_OF_IMAGES}). Stopping image saving.")
+                break  # Exit the loop to stop saving images
+            img, out_path = self.save_queue.get()
+            try:
+                cv2.imwrite(str(out_path), img)
+            except Exception as e:
+                self.get_logger().error(f"[VAE-rec] Failed to save {out_path}: {e}")
+            self.save_queue.task_done()
+            
+    
     def setup_subscribers(self):
         """Set up subscribers once we verify the camera is publishing""" 
         # Create health check timer
@@ -145,6 +185,19 @@ class DataCollector(Node):
             (image_msg.height, image_msg.width, 3)  # BGR format from semantic converter
         )
         
+        # ─── NEW: queue saving ───────────────────────────────────────────────
+        if (RECORD_SS_IMAGES and
+            (self.frame_id % SAVE_EVERY_N_FRAMES == 0)):
+            run_dir = self.run_dir
+            out_path = run_dir / f"{self.saved_image_index:06}.png"
+            self.saved_image_index += 1
+            try:
+                self.save_queue.put_nowait((raw_image.copy(), out_path))
+            except Queue.Full:
+                self.get_logger().warn("[VAE-rec] Save queue full, dropping frame")
+        self.frame_id += 1
+        # --------------------------------------------------------------------
+        
         # Convert lidar_msg to point list
         points = [
             [point[0], point[1], point[2]]  # Extract x, y, z
@@ -226,6 +279,8 @@ def main(args=None):
     except KeyboardInterrupt:
         pass
     finally:
+        if RECORD_SS_IMAGES:
+            node.save_queue.join()   # flush pending writes
         node.destroy_node()
         rclpy.shutdown()
 

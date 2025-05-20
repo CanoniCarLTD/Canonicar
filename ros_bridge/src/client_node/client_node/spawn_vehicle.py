@@ -223,7 +223,7 @@ class SpawnVehicleNode(Node):
             # self.traffic_manager.auto_lane_change(self.vehicle, False)
             # self.traffic_manager.random_left_lanechange_percentage(self.vehicle, 0)
             # self.traffic_manager.random_right_lanechange_percentage(self.vehicle, 0)
-            # self.vehicle.set_autopilot(True, self.traffic_manager.get_port())
+            self.vehicle.set_autopilot(True, self.traffic_manager.get_port())
             
         except Exception as e:
             self.get_logger().error(f"Error spawning vehicle: {e}")
