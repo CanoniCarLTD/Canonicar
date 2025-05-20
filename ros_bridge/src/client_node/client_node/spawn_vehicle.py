@@ -180,23 +180,8 @@ class SpawnVehicleNode(Node):
 
             road_waypoints.sort(key=lambda wp: wp.s)
             
-            # spawn_waypoints = [road_waypoints[3], road_waypoints[42]]
-            
-            # spawn_waypoint = spawn_waypoints[0] if self.toggle_spawn else spawn_waypoints[1]
+            spawn_waypoint = road_waypoints[3]
 
-            # self.toggle_spawn = not self.toggle_spawn
-
-            # self.get_logger().info(
-            #     f"Using waypoint at s={spawn_waypoint.s:.1f} for spawn"
-            # )
-            
-            spawn_waypoints = [road_waypoints[3], road_waypoints[15], road_waypoints[42]]
-
-            # Select the current spawn waypoint
-            spawn_waypoint = spawn_waypoints[self.current_waypoint_index]
-
-            # Update the index to cycle through the waypoints
-            self.current_waypoint_index = (self.current_waypoint_index + 1) % len(spawn_waypoints)
 
             self.get_logger().info(
                 f"Using waypoint at s={spawn_waypoint.s:.1f} for spawn"

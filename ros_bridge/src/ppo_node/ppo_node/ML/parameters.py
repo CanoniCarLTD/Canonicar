@@ -2,7 +2,7 @@
 All the hyper-parameters needed for the PPO algorithm implementation.
 """
 
-MODEL_LOAD = True
+MODEL_LOAD = False
 
 # Directory to save model checkpoints - always stays the same
 PPO_CHECKPOINT_DIR = "/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models"
@@ -31,7 +31,7 @@ SAVE_EVERY_N_TIMESTEPS = LEARN_EVERY_N_STEPS * 2 # Save model every 2 policy upd
 EPISODES = 1e8 # Not in use
 
 # PPO-specific hyperparameters
-PPO_INPUT_DIM = 198
+PPO_INPUT_DIM = 197
 TOTAL_TIMESTEPS = 2e8  # Total number of timesteps for training
 
 # Exploration settings (action noise)

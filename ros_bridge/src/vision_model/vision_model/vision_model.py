@@ -1,4 +1,3 @@
-import os
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -110,7 +109,7 @@ class SensorFusionModel(nn.Module):
     
 class VisionProcessor:
     """Helper class to process raw sensor data before feeding to the model."""
-    def __init__(self, lidar_grid_size=(64, 64), height_range=(-2.0, 4.0), device='cpu', pretrained_rgb_encoder=None):
+    def __init__(self, lidar_grid_size=(64, 64), height_range=(-2.0, 4.0), device='cpu'):
         """
         Initialize the vision processor
         
@@ -249,7 +248,5 @@ class VisionProcessor:
         with torch.no_grad():
             features = self.model(semantic_tensor, lidar_tensor)
             
-        if not torch.isfinite(features).all():
-            raise RuntimeError("NaN/Inf in output fused features")
         
         return features.cpu().numpy()[0]  # Return as numpy array
