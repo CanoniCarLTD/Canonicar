@@ -17,3 +17,4 @@ logs_from_old_log_settings/
 
 ros_bridge/src/data_collector_node/data_collector_node/VAE/images/raw_20250520/*
 ros_bridge/src/vae/vae/model/*.pth
+vae_backup/
