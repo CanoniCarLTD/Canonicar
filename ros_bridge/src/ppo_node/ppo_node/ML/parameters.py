@@ -23,8 +23,8 @@ DETERMINISTIC_CUDNN = False
 # Training configuration
 TRAIN = True
 EPISODE_LENGTH = 7000  # Maximum timesteps per episode
-LEARN_EVERY_N_STEPS = 2048 # Number of timesteps collected before a policy update
-MINIBATCH_SIZE = 128  # Each PPO update uses mini-batches of MINIBATCH_SIZE
+LEARN_EVERY_N_STEPS = 4096 # Number of timesteps collected before a policy update
+MINIBATCH_SIZE = 512  # Each PPO update uses mini-batches of MINIBATCH_SIZE
 NUM_EPOCHS = 4  # Each mini-batch is seen 3 times (full data 3×) in PPO update (Best practice: 3-10)
 SAVE_EVERY_N_TIMESTEPS = LEARN_EVERY_N_STEPS * 2 # Save model every 2 policy updates
 
@@ -35,18 +35,19 @@ PPO_INPUT_DIM = 197
 TOTAL_TIMESTEPS = 2e8  # Total number of timesteps for training
 
 # Exploration settings (action noise)
-ACTION_STD_INIT = 0.15
-ACTION_STD_DECAY_RATE = 0.05 # Not used as we are currently using learnable action std
-MIN_ACTION_STD = 0.05
+ACTION_STD_INIT = 0.3
+ACTION_STD_DECAY_RATE = 0.0 # Not used as we are currently using learnable action std
+MIN_ACTION_STD = 0.1
 
 # PPO optimization parameters
-ACTOR_LEARNING_RATE = 2e-4
-CRITIC_LEARNING_RATE = 2e-4
+ACTOR_LEARNING_RATE = 7.5e-5 # 0.000075
+CRITIC_LEARNING_RATE = 7.5e-5 # 0.000075
 POLICY_CLIP = 0.2
-ENTROPY_COEF = 0.02 # might wanna do 0.005 later
+ENTROPY_COEF = 0.01 # might wanna do 0.005 later
 LAMBDA_GAE = 0.95
 VF_COEF = 0.5  # Giving half the weight to critic loss relative to the summed losses
 GAMMA = 0.99 # Discount Factor for future rewards
+
 
 # Evaluation settings
 TEST_TIMESTEPS = 5e4
