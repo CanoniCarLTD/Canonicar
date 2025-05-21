@@ -276,7 +276,7 @@ class PPOModelNode(Node):
         
         # self.get_logger().info(f"Publishing | Steer: {steer} | Throttle: {throttle} | Brake: {brake}")
         
-        # self.action_publisher.publish(action_msg)
+        self.action_publisher.publish(action_msg)
 
     ##################################################################################################
     #                                       REWARD FUNCTION

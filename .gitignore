@@ -16,3 +16,4 @@ preTrained_PPO_models/
 logs_from_old_log_settings/
 
 images/
+ros_bridge/src/vae/vae/model/*.pth

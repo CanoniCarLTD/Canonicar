@@ -132,7 +132,7 @@ class VehicleControlNode(Node):
             control.steer = float(steer)
             control.throttle = float(throttle)
             control.brake = float(brake)
-            # self.vehicle.apply_control(control)
+            self.vehicle.apply_control(control)
         else:
             self.get_logger().warn("Control message received but no vehicle available")
 
