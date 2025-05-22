@@ -330,6 +330,7 @@ class PPOAgent:
         values = torch.cat([values, last_value.view(1)])
 
         advantages, returns = self.compute_gae(rewards, values, dones)
+        returns = (returns - returns.mean()) / (returns.std() + 1e-8)
         old_log_probs = torch.cat(self.log_probs, dim=0).detach().view(-1,1).to(device)
 
         # assert torch.isfinite(advantages).all(), "\nNon-finite advantages!\n"

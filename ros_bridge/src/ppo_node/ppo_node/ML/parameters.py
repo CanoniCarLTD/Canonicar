@@ -2,16 +2,21 @@
 All the hyper-parameters needed for the PPO algorithm implementation.
 """
 
+import numpy as np
+
+
 MODEL_LOAD = False
 
 # Directory to save model checkpoints - always stays the same
 PPO_CHECKPOINT_DIR = "/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models"
 
 # Set to None unless you're continuing an exact run (same version/run folder)
-CHECKPOINT_FILE = "/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models/v4.0.0/run_20250522_0017"
+CHECKPOINT_FILE = "/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models/v4.0.0/run_20250522_0006"
 # 0005 is complex ppo and old reward function
 # 0007 is complex ppo and new rewa  rd function
-# 0017 after deep research
+# 0003 after deep research
+# 0004 experimental reward function
+
 VERSION = "v4.0.0"
 
 # Point this to a full run directory from any version (must contain actor.pth etc.)
@@ -52,3 +57,11 @@ GAMMA = 0.99 # Discount Factor for future rewards
 
 # Evaluation settings
 TEST_TIMESTEPS = 5e4
+
+
+# Experimental
+MIN_SPEED               = 1.0    # m/s
+TARGET_SPEED            = 10.0   # m/s (choose your “cruise” speed)
+MAX_SPEED               = 30.0   # m/s (or whatever Carla max is)
+MAX_DISTANCE_FROM_CENTER= 2.5    # meters
+ANGLE_THRESH_RAD        = np.deg2rad(45)  # 45 degrees
