@@ -1,3 +1,4 @@
+#PPO agent:
 
 import os
 import torch
@@ -17,11 +18,14 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 #                                       ACTOR AND CRITIC NETWORKS
 ##################################################################################################
 
+LOG_STD_MIN = -20
+LOG_STD_MAX =  2
 
 class ActorNetwork(nn.Module):
     def __init__(self, input_dim, action_dim):
         super(ActorNetwork, self).__init__()
         self.action_dim = action_dim
+
 
         # self.log_std = nn.Parameter(
         #     torch.ones(action_dim) * -0.5
@@ -50,9 +54,10 @@ class ActorNetwork(nn.Module):
 
     def get_dist(self, state):
         mean = self.forward(state)
-        std = torch.exp(self.log_std).expand_as(mean)
-        dist = Normal(mean, std)
-        return dist
+        # NEW: clamp log_std before exp
+        log_std = torch.clamp(self.log_std, LOG_STD_MIN, LOG_STD_MAX)
+        std = torch.exp(log_std).expand_as(mean)
+        return Normal(mean, std)
 
     def sample_action(self, state):
         dist = self.get_dist(state)
@@ -273,24 +278,23 @@ class PPOAgent:
     #                                           COMPUTE GAE
     ##################################################################################################
 
-    def compute_gae(self, values, rewards, dones, gamma=GAMMA, lam=LAMBDA_GAE):
-        """Compute Generalized Advantage Estimation (GAE)."""
-        values = torch.cat(
-            (values, torch.zeros(1).to(device))
-        )  # Add zero for last next_value
-        advantages = torch.zeros_like(rewards).to(device)
-        gae = 0
-
-        for step in reversed(range(len(rewards))):
-            delta = (
-                rewards[step]
-                + gamma * values[step + 1] * (1 - dones[step])
-                - values[step]
-            )
-            gae = delta + gamma * lam * (1 - dones[step]) * gae
-            advantages[step] = gae
-
-        return self.normalize_advantages(advantages)
+    def compute_gae(self, rewards, values, dones, gamma=GAMMA, lam=LAMBDA_GAE):
+        """
+        rewards, values, dones are 1-D tensors of length T
+        values already contains V(s_t) for t=0..T  (last extra element is V(s_T) or 0)
+        returns both advantage and return tensors of length T
+        """
+        T = rewards.size(0)
+        advantages = torch.zeros(T, device=device)
+        lastgaelam = 0.0
+        for t in reversed(range(T)):
+            next_nonterminal = 1.0 - dones[t]
+            delta = rewards[t] + gamma * values[t + 1] * next_nonterminal - values[t]
+            lastgaelam = delta + gamma * lam * next_nonterminal * lastgaelam
+            advantages[t] = lastgaelam
+        returns = advantages + values[:-1]          # drop the bootstrap value
+        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+        return advantages, returns
 
     ##################################################################################################
     #                                       NORMALIZE REWARDS
@@ -310,30 +314,27 @@ class PPOAgent:
         returns: actor_loss, critic_loss, entropy
         """
         # Convert lists to numpy arrays first
-        states = np.array(self.states, dtype=np.float32)
-        actions = np.array(self.actions, dtype=np.float32)
-        values = np.array(self.vals, dtype=np.float32)
-        rewards = np.array(self.rewards, dtype=np.float32)
-        dones = np.array(self.dones, dtype=np.float32)
+        states     = torch.as_tensor(np.array(self.states),   dtype=torch.float32, device=device)
+        actions    = torch.as_tensor(np.array(self.actions),  dtype=torch.float32, device=device)
+        rewards    = torch.as_tensor(self.rewards,            dtype=torch.float32, device=device)
+        dones      = torch.as_tensor(self.dones,              dtype=torch.float32, device=device)
 
-        # Convert lists to tensors
-        states = torch.tensor(states).to(device)
-        actions = torch.tensor(actions).to(device)
-        values = torch.tensor(values).to(device).detach()
-        rewards = torch.tensor(rewards).to(device)
-        dones = torch.tensor(dones).to(device)
-        old_log_probs = torch.cat(self.log_probs, dim=0).detach()
-        if old_log_probs.device != device:
-            old_log_probs = old_log_probs.to(device)
-        if old_log_probs.dim() == 1:
-            old_log_probs = old_log_probs.unsqueeze(1)
+        # fresh value estimates (no need to store them in memory)
+        with torch.no_grad():
+            values = self.critic(states).squeeze()
+            last_value = torch.zeros(1, device=device) if dones[-1] else self.critic(states[-1:]).squeeze()
+            
+        assert values.ndim == 1, f"Expected values to be 1D, got {values.shape}"
+        assert last_value.ndim == 0 or last_value.shape == torch.Size([]), f"Expected scalar last_value, got {last_value.shape}"
+        
+        values = torch.cat([values, last_value.view(1)])
 
-        advantages = self.compute_gae(values, rewards, dones)
-        returns = advantages + values
+        advantages, returns = self.compute_gae(rewards, values, dones)
+        old_log_probs = torch.cat(self.log_probs, dim=0).detach().view(-1,1).to(device)
 
-        assert torch.isfinite(advantages).all(), "\nNon-finite advantages!\n"
-        assert torch.isfinite(values).all(), "\nNon-finite values!\n"
-        assert torch.isfinite(rewards).all(), "\nNon-finite rewards!\n"
+        # assert torch.isfinite(advantages).all(), "\nNon-finite advantages!\n"
+        # assert torch.isfinite(values).all(), "\nNon-finite values!\n"
+        # assert torch.isfinite(rewards).all(), "\nNon-finite rewards!\n"
         
         total_actor_loss = 0.0
         total_critic_loss = 0.0
@@ -350,7 +351,7 @@ class PPOAgent:
                 batch_states = states[batch]
                 batch_actions = actions[batch]
                 batch_old_log_probs = old_log_probs[batch]
-                batch_advantages = advantages[batch].unsqueeze(1)  # [B,1]
+                batch_advantages = advantages[batch].unsqueeze(1).detach()  # [B,1]
                 batch_returns = returns[batch].detach().unsqueeze(1)  # [B,1]
 
                 # ---- Actor update ----
@@ -380,21 +381,9 @@ class PPOAgent:
                 torch.nn.utils.clip_grad_norm_(self.actor.parameters(), 0.5)
                 self.actor_optimizer.step()
 
-                with torch.no_grad():
-                    # steer  std ∈ [0.05, 0.7]
-                    self.actor.log_std.data[0].clamp_(np.log(0.1), np.log(0.7))
-                    # throttle std ∈ [0.05, 1.0]
-                    self.actor.log_std.data[1].clamp_(np.log(0.1), np.log(0.9))
-
                 # ---- Critic update ----
                 values_pred = self.critic(batch_states).view(-1, 1)
-                old_value = (batch_returns - batch_advantages).detach()
-                unclipped = F.mse_loss(values_pred, batch_returns)
-                clipped = F.mse_loss(
-                    old_value + (values_pred - old_value).clamp(-0.2, 0.2),
-                    batch_returns,
-                )
-                critic_loss = VF_COEF * torch.max(unclipped, clipped)
+                critic_loss = F.mse_loss(values_pred, batch_returns)
 
                 self.critic_optimizer.zero_grad()
                 critic_loss.backward()

@@ -259,7 +259,7 @@ class PPOModelNode(Node):
         
         if action is None:
             action = self.action
-        
+            
         action_list = action.tolist()
         
         if len(action_list) == 2:
@@ -282,83 +282,175 @@ class PPOModelNode(Node):
     #                                       REWARD FUNCTION
     ##################################################################################################
 
+    # def calculate_reward(self):
+    #     """Improved reward function with properly combined rewards"""
+    #     # Core reward parameters
+    #     progress_multiplier = 900.0
+    #     base_time_penalty = -0.05  # Base penalty when not moving
+    #     stagnation_factor = 0.05  # Increases penalty over time
+    #     backwards_penalty = -5.0  # Penalty for going backwards
+    #     collision_penalty = -40.0
+    #     lap_completion_bonus = 50.0
+
+    #     max_allowed_deviation = 2.5  # meters before applying harshest penalty
+    #     deviation_penalty_factor = -1.7  # scale the penalty
+    #     max_angle_deviation = math.pi/5 # 36 degrees
+    #     angle_penalty_factor = -1.5
+        
+    #     progress_reward = 0.0  # Initialize progress reward to 0
+    #     # Initialize the reward to 0
+    #     self.reward = 0.0
+        
+    #     # Initialize stagnation counter if not exists
+    #     if not hasattr(self, "stagnation_counter"):
+    #         self.stagnation_counter = 0
+
+    #     # Handle collision case first
+    #     if self.collision:
+    #         self.get_logger().info(f"Applied collision penalty: {collision_penalty}")
+    #         self.reward = collision_penalty
+    #         self.done = True
+    #         self.stagnation_counter = 0
+    #         return
+
+    #     # Calculate progress delta
+    #     progress_delta = self.track_progress - self.prev_progress_distance
+
+    #     if self.current_step_in_episode <= 1 and abs(progress_delta) > 0.1:
+    #         self.get_logger().warn(f"Detected large progress delta {progress_delta:.6f} in first step - ignoring")
+    #         progress_delta = 0.0
+        
+    #     # Calculate the progress-based component of the reward
+    #     if progress_delta < -0.001:  # Moving backwards
+    #         progress_reward = backwards_penalty
+    #         self.stagnation_counter = 0
+    #         self.get_logger().info(f"Moving backwards: {progress_delta:.6f}, reward = {backwards_penalty}")
+    #     elif progress_delta > 0.001:  # Moving forward
+    #         progress_reward = progress_multiplier * progress_delta
+    #         self.stagnation_counter = 0
+    #         self.get_logger().info(f"Moving forward: {progress_delta:.6f}, reward = {progress_reward:.4f}")
+
+        
+    #     # Start with the progress-based reward
+    #     self.reward = progress_reward
+        
+    #     # Handle wrap-around at 1.0 (lap completion)
+    #     if progress_delta < -0.5:
+    #         progress_delta = (1.0 - self.prev_progress_distance) + self.track_progress
+    #         self.get_logger().info(f"Lap progress wrap-around detected: {progress_delta:.4f}")
+        
+    #     # Add centerline deviation penalty
+    #     if hasattr(self, 'lateral_deviation') and self.lateral_deviation is not None:
+    #         normalized_deviation = min(self.lateral_deviation / max_allowed_deviation, 1.0)
+    #         deviation_penalty = deviation_penalty_factor * (normalized_deviation ** 2)
+    #         self.reward += deviation_penalty
+    #         self.get_logger().info(f"Lateral deviation: {self.lateral_deviation:.4f}, penalty = {deviation_penalty:.4f}")
+
+    #     # Add heading angle deviation penalty
+    #     if hasattr(self, 'heading_deviation') and self.heading_deviation is not None:
+    #         normalized_angle_dev = min(self.heading_deviation / max_angle_deviation, 1.0)
+    #         angle_penalty = angle_penalty_factor * (normalized_angle_dev ** 2)
+    #         self.reward += angle_penalty
+    #         self.get_logger().info(f"Heading deviation: {self.heading_deviation:.4f}, penalty = {angle_penalty:.4f}")
+        
+    #     # Add lap completion bonus if detected
+    #     if self.lap_completed:
+    #         self.reward += lap_completion_bonus
+    #         self.lap_completed = False
+    #         self.stagnation_counter = 0
+    #         self.get_logger().info(f"Lap completion bonus applied: +{lap_completion_bonus}")
+
     def calculate_reward(self):
-        """Improved reward function with properly combined rewards"""
-        # Core reward parameters
-        progress_multiplier = 600.0
-        base_time_penalty = -0.05  # Base penalty when not moving
-        stagnation_factor = 0.05  # Increases penalty over time
-        backwards_penalty = -5.0  # Penalty for going backwards
-        collision_penalty = -40.0
-        lap_completion_bonus = 50.0
+        """Simplified reward function with throttle regulation."""
+        # Parameters
+        collision_penalty = -200.0
+        progress_multiplier = 750.0
+        base_time_penalty = -0.01
+        stagnation_factor = 0.001
+        backwards_penalty = -10.0
+        lap_completion_bonus = 200.0
 
-        max_allowed_deviation = 2.5  # meters before applying harshest penalty
-        deviation_penalty_factor = -1.7  # scale the penalty
-        max_angle_deviation = math.pi/5 # 36 degrees
-        angle_penalty_factor = -1.5
-        
-        progress_reward = 0.0  # Initialize progress reward to 0
-        # Initialize the reward to 0
-        self.reward = 0.0
-        
-        # Initialize stagnation counter if not exists
-        if not hasattr(self, "stagnation_counter"):
-            self.stagnation_counter = 0
+        max_deviation = 2.5
+        deviation_penalty_factor = -1.05
+        max_angle_deviation = math.pi / 4
+        angle_penalty_factor = -0.8
+        smoothness_penalty_factor = -1.2
 
-        # Handle collision case first
+        # Initialize reward
+        reward = 0.0
+
+        # Collision Handling
         if self.collision:
-            self.get_logger().info(f"Applied collision penalty: {collision_penalty}")
             self.reward = collision_penalty
             self.done = True
             self.stagnation_counter = 0
+            self.get_logger().info(f"Collision penalty applied: {collision_penalty}")
             return
 
-        # Calculate progress delta
+        # Progress Reward
         progress_delta = self.track_progress - self.prev_progress_distance
-
-        if self.current_step_in_episode <= 1 and abs(progress_delta) > 0.1:
-            self.get_logger().warn(f"Detected large progress delta {progress_delta:.6f} in first step - ignoring")
-            progress_delta = 0.0
-        
-        # Calculate the progress-based component of the reward
-        if progress_delta < -0.001:  # Moving backwards
-            progress_reward = backwards_penalty
-            self.stagnation_counter = 0
-            self.get_logger().info(f"Moving backwards: {progress_delta:.6f}, reward = {backwards_penalty}")
-        elif progress_delta > 0.001:  # Moving forward
+        if progress_delta > 0.001:
             progress_reward = progress_multiplier * progress_delta
             self.stagnation_counter = 0
-            self.get_logger().info(f"Moving forward: {progress_delta:.6f}, reward = {progress_reward:.4f}")
+            self.get_logger().info(f"Forward progress: {progress_delta:.4f}, reward: {progress_reward:.4f}")
+        elif progress_delta < -0.001:
+            progress_reward = backwards_penalty
+            self.stagnation_counter = 0
+            self.get_logger().info(f"Backward movement penalty: {backwards_penalty}")
+        else:
+            self.stagnation_counter += 1
+            progress_reward = base_time_penalty * (1 + self.stagnation_counter * stagnation_factor)
+            self.get_logger().info(f"Stagnation penalty: {progress_reward:.4f}")
+        reward += progress_reward
 
-        
-        # Start with the progress-based reward
-        self.reward = progress_reward
-        
-        # Handle wrap-around at 1.0 (lap completion)
-        if progress_delta < -0.5:
-            progress_delta = (1.0 - self.prev_progress_distance) + self.track_progress
-            self.get_logger().info(f"Lap progress wrap-around detected: {progress_delta:.4f}")
-        
-        # Add centerline deviation penalty
-        if hasattr(self, 'lateral_deviation') and self.lateral_deviation is not None:
-            normalized_deviation = min(self.lateral_deviation / max_allowed_deviation, 1.0)
-            deviation_penalty = deviation_penalty_factor * (normalized_deviation ** 2)
-            self.reward += deviation_penalty
-            self.get_logger().info(f"Lateral deviation: {self.lateral_deviation:.4f}, penalty = {deviation_penalty:.4f}")
+        # Lateral Deviation Penalty
+        normalized_deviation = min(abs(self.lateral_deviation) / max_deviation, 1.0)
+        deviation_penalty = deviation_penalty_factor * (normalized_deviation ** 2)
+        reward += deviation_penalty
+        self.get_logger().info(f"Lateral deviation penalty: {deviation_penalty:.4f}")
 
-        # Add heading angle deviation penalty
-        if hasattr(self, 'heading_deviation') and self.heading_deviation is not None:
-            normalized_angle_dev = min(self.heading_deviation / max_angle_deviation, 1.0)
-            angle_penalty = angle_penalty_factor * (normalized_angle_dev ** 2)
-            self.reward += angle_penalty
-            self.get_logger().info(f"Heading deviation: {self.heading_deviation:.4f}, penalty = {angle_penalty:.4f}")
-        
-        # Add lap completion bonus if detected
+        # Heading Angle Penalty
+        normalized_angle_dev = min(abs(self.heading_deviation) / max_angle_deviation, 1.0)
+        angle_penalty = angle_penalty_factor * (normalized_angle_dev ** 2)
+        reward += angle_penalty
+        self.get_logger().info(f"Heading angle penalty: {angle_penalty:.4f}")
+
+        # Action Smoothness Penalty
+        if hasattr(self, 'action') and hasattr(self, 'prev_action') and self.prev_action is not None and self.action is not None:
+            action_diff = np.abs(np.array(self.action) - np.array(self.prev_action))
+            smoothness_penalty = smoothness_penalty_factor * np.mean(action_diff)
+            reward += smoothness_penalty
+            self.get_logger().info(f"Smoothness penalty: {smoothness_penalty:.4f}")
+
+        if self.action is not None and len(self.action) > 1:
+            if self.action[1] > 0.6:
+                throttle_penalty = -0.05 * (self.action[1] - 0.6)
+            else:
+                throttle_penalty = 0.0
+            reward += throttle_penalty
+            self.get_logger().info(f"Throttle overuse penalty: {throttle_penalty:.4f}")
+
+        # Throttle Smoothness Penalty
+        if self.action is not None and len(self.action) > 1:
+            if hasattr(self, "prev_throttle"):
+                delta_throttle = abs(self.action[1] - self.prev_throttle)
+                throttle_smooth_penalty = -0.02 * delta_throttle
+            else:
+                throttle_smooth_penalty = 0.0
+            self.prev_throttle = self.action[1]
+            reward += throttle_smooth_penalty
+            self.get_logger().info(f"Throttle smooth penalty: {throttle_smooth_penalty:.4f}")
+        else:
+            throttle_smooth_penalty = 0.0
+
+        # Lap Completion Bonus
         if self.lap_completed:
-            self.reward += lap_completion_bonus
+            reward += lap_completion_bonus
             self.lap_completed = False
             self.stagnation_counter = 0
-            self.get_logger().info(f"Lap completion bonus applied: +{lap_completion_bonus}")
+            self.get_logger().info(f"Lap completion bonus: {lap_completion_bonus}")
+
+        self.reward = reward
         
     ##################################################################################################
     #                                       STORE TRANSITION
@@ -384,9 +476,12 @@ class PPOModelNode(Node):
         value = self.ppo_agent.critic(
             torch.tensor(state, dtype=torch.float32).to(device).unsqueeze(0)
         ).item()
+        
+        if isinstance(log_prob, torch.Tensor):
+            log_prob = log_prob.item()
 
         self.ppo_agent.store_transition(
-            state, action, float(log_prob), value, reward, done
+            state, action, log_prob, value, reward, done
         )
 
     ##################################################################################################
@@ -540,7 +635,6 @@ class PPOModelNode(Node):
 
                     self.episode_counter += 1
                     return 1
-
             self.get_logger().info(
                 f"Episode: {self.episode_counter}, Timestep: {self.current_step_in_episode}, Reward: {self.current_ep_reward}"
             )

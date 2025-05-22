@@ -8,9 +8,10 @@ MODEL_LOAD = False
 PPO_CHECKPOINT_DIR = "/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models"
 
 # Set to None unless you're continuing an exact run (same version/run folder)
-CHECKPOINT_FILE = "/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models/v4.0.0/run_20250521_0001"
-#0010 is the long run
-
+CHECKPOINT_FILE = "/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models/v4.0.0/run_20250522_0017"
+# 0005 is complex ppo and old reward function
+# 0007 is complex ppo and new rewa  rd function
+# 0017 after deep research
 VERSION = "v4.0.0"
 
 # Point this to a full run directory from any version (must contain actor.pth etc.)
