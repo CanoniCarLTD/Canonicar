@@ -275,10 +275,25 @@ class PPOModelNode(Node):
             self.get_logger().error(f"Invalid action format: {action_list}")
             return
         
+        # Discretize steering: values properly sorted from most left to most right
+        discrete_steer_values = [-1.0, -0.75, -0.5, -0.25, 0.0, 0.25, 0.5, 0.75, 1.0]
+        # Discretize throttle: 0.0, 0.33, 0.66, 1.0
+        discrete_throttle_values = [0.0, 0.33, 0.5, 0.66, 1.0]
+
+        # Find closest discrete values
+        steer_idx = min(range(len(discrete_steer_values)), 
+                        key=lambda i: abs(discrete_steer_values[i] - steer))
+        throttle_idx = min(range(len(discrete_throttle_values)), 
+                           key=lambda i: abs(discrete_throttle_values[i] - throttle))
+
+        # Get discrete actions
+        discrete_steer = discrete_steer_values[steer_idx]
+        discrete_throttle = discrete_throttle_values[throttle_idx]
+    
         action_msg = Float32MultiArray()
-        action_msg.data = [steer, throttle, brake]
+        action_msg.data = [discrete_steer, discrete_throttle, brake]
         
-        # self.get_logger().info(f"Publishing | Steer: {steer} | Throttle: {throttle} | Brake: {brake}")
+        self.get_logger().info(f"Publishing | Steer: {discrete_steer} | Throttle: {discrete_throttle}")
         
         self.action_publisher.publish(action_msg)
 
@@ -532,8 +547,8 @@ class PPOModelNode(Node):
 
         # 9) Combine all rewards with appropriate weighting
         reward = (
-            progress_reward * 7.0 +      # Progress is most important
-            centering_reward * 0.4 +     # Centering is very important
+            progress_reward * 9.0 +      # Progress is most important
+            centering_reward * 0.15 +     # Centering is very important
             heading_reward * 0.75 +       # Alignment is very important
             speed_reward * 0.3 +         # Speed is somewhat important
             lap_bonus +                  # One-time bonus for lap completion

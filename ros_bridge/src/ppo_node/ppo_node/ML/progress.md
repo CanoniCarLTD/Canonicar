@@ -156,7 +156,8 @@ Changed Hyperparameters:
 Changed Hyperparameters:
 
 - CRITIC_LEARNING_RATE = 3e-4 -> **2e-4**
-
+- LEARN_EVERY_N_STEPS = 2048 -> **4096**
+- MINIBATCH_SIZE = 128 -> **512**
 - NUM_EPOCHS = 3 -> **4**
 
 ### v3.5.1
@@ -172,3 +173,14 @@ Changed Hyperparameters:
 - New race track
 - Built carla and Unreal Engine from source
 - Added and Trained VAE on the new track for better feature extraction
+
+### v4.0.1
+
+- Discrete partition of action space
+
+Changed Hyperparameters:
+
+- PPO_INPUT_DIM = 198 -> **134** (No Lidar At The Moment)
+- LEARN_EVERY_N_STEPS = 4096 -> **1024**
+- MINIBATCH_SIZE = 512 -> **128**
+- NUM_EPOCHS = 4 -> **5**
