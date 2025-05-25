@@ -177,6 +177,7 @@ Changed Hyperparameters:
 ### v4.0.1
 
 - Discrete partition of action space
+- Take action every 5 steps
 
 Changed Hyperparameters:
 
