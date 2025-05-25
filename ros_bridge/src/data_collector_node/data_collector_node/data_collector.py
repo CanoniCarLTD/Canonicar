@@ -42,7 +42,9 @@ class DataCollector(Node):
         self.ready_to_collect = False
         self.vehicle_id = None
         self.last_sensor_timestamp = time.time()
-
+        
+        self.steps_counter = 0
+        
         self.data_buffer = []  # List of dictionaries to store synchronized data
 
         self.imu_mean = np.zeros(6, dtype=np.float32)
@@ -189,7 +191,9 @@ class DataCollector(Node):
             response.data = processed_data.tolist()
 
             if not np.isnan(processed_data).any():
-                self.publish_to_PPO.publish(response)
+                if self.steps_counter % 5 == 0:
+                    self.publish_to_PPO.publish(response)
+                self.steps_counter += 1
             else:
                 self.get_logger().warn("State vector contains NaN values. Skipping...")
 

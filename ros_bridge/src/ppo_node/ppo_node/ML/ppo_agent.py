@@ -322,7 +322,7 @@ class PPOAgent:
         # fresh value estimates (no need to store them in memory)
         with torch.no_grad():
             values = self.critic(states).squeeze()
-            last_value = torch.zeros(1, device=device) if dones[-1] else self.critic(states[-1:]).squeeze()
+            last_value = torch.zeros(1, device=device).squeeze() if dones[-1] else self.critic(states[-1:]).squeeze()
             
         assert values.ndim == 1, f"Expected values to be 1D, got {values.shape}"
         assert last_value.ndim == 0 or last_value.shape == torch.Size([]), f"Expected scalar last_value, got {last_value.shape}"

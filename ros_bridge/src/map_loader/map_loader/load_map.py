@@ -113,7 +113,7 @@ class LoadMapNode(Node):
             self.world.apply_settings(settings)
             
             spectator = self.world.get_spectator()
-            spectator.set_transform(carla.Transform(carla.Location(x=-2, y=-4, z=9), carla.Rotation(pitch=-20, yaw=40, roll=0)))
+            spectator.set_transform(carla.Transform(carla.Location(x=-20, y=-4, z=9), carla.Rotation(pitch=-20, yaw=-80, roll=0)))
             
             sleep(2)
             self.map = self.world.get_map()
