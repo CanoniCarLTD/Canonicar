@@ -1,9 +1,7 @@
 """
 All the hyper-parameters needed for the PPO algorithm implementation.
 """
-
 import numpy as np
-
 
 MODEL_LOAD = False
 
@@ -11,11 +9,12 @@ MODEL_LOAD = False
 PPO_CHECKPOINT_DIR = "/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models"
 
 # Set to None unless you're continuing an exact run (same version/run folder)
-CHECKPOINT_FILE = "/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models/v4.0.0/run_20250522_0006"
-# 0005 is complex ppo and old reward function
+CHECKPOINT_FILE = "/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models/v4.0.0/run_20250525_0016"
+# 21_0005 is complex ppo and old reward function
 # 0007 is complex ppo and new rewa  rd function
 # 0003 after deep research
 # 0004 experimental reward function
+# 0010 experimental reward function no lidar
 
 VERSION = "v4.0.0"
 
@@ -31,13 +30,13 @@ TRAIN = True
 EPISODE_LENGTH = 7000  # Maximum timesteps per episode
 LEARN_EVERY_N_STEPS = 4096 # Number of timesteps collected before a policy update
 MINIBATCH_SIZE = 512  # Each PPO update uses mini-batches of MINIBATCH_SIZE
-NUM_EPOCHS = 4  # Each mini-batch is seen 3 times (full data 3×) in PPO update (Best practice: 3-10)
+NUM_EPOCHS = 5  # Each mini-batch is seen 5 times (full data 5×) in PPO update (Best practice: 3-10)
 SAVE_EVERY_N_TIMESTEPS = LEARN_EVERY_N_STEPS * 2 # Save model every 2 policy updates
 
 EPISODES = 1e8 # Not in use
 
 # PPO-specific hyperparameters
-PPO_INPUT_DIM = 197
+PPO_INPUT_DIM = 134
 TOTAL_TIMESTEPS = 2e8  # Total number of timesteps for training
 
 # Exploration settings (action noise)

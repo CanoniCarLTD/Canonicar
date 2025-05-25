@@ -461,58 +461,97 @@ class PPOModelNode(Node):
     #     self.reward = reward
         
     def calculate_reward(self):
-        # 1) step-level defaults
-        # done   = False
+        # 1) Initialize reward
         reward = 0.0
 
-        # 2) terminal / hard penalties
+        # 2) Terminal penalties
         if self.collision:
-            self.done   = True
-            reward = -10.0
+            self.done = True
+            self.reward = -100.0
             self.get_logger().info(f"Collision penalty applied: {reward}")
+            return
 
-        # elif self.lateral_deviation > MAX_DISTANCE_FROM_CENTER:
-        #     done   = True
-        #     reward = -10.0
+        # if self.lateral_deviation > MAX_DISTANCE_FROM_CENTER:
+        #     self.done = True
+        #     reward = -5.0
+        #     self.get_logger().info(f"Off-track penalty applied: {reward}")
+        #     self.reward = reward
+        #     return
 
-        # elif (datetime.now() - self.episode_start_time).total_seconds() > 10.0 \
-        #      and self.current_speed < MIN_SPEED:
-        #     done   = True
-        #     reward = -10.0
+        # 3) Progress reward - primary incentive
+        progress_diff = 0.0
+        if hasattr(self, 'prev_progress_distance'):
+            # Calculate progress made since last step
+            progress_diff = self.track_progress - self.prev_progress_distance
+            # Handle track wraparound (0.99 to 0.01)
+            if progress_diff < -0.5:
+                progress_diff = (1.0 - self.prev_progress_distance) + self.track_progress
 
-        # elif self.current_speed > MAX_SPEED:
-        #     done   = True
-        #     reward = -10.0
+        # Scale progress reward significantly - this is the main driver
+        progress_reward = progress_diff * 10.0
 
-        # 3) smooth “shaping” if not done
-        if not self.done:
-            # how well centered [0..1]
-            centering = max(
-                1.0 - (self.lateral_deviation / MAX_DISTANCE_FROM_CENTER),
-                0.0
-            )
-            # how well aligned [0..1]
-            angle_f = max(
-                1.0 - (abs(self.heading_deviation) / ANGLE_THRESH_RAD),
-                0.0
-            )
+        # 4) Centering reward (non-linear to be more forgiving near center)
+        # Exponential dropoff makes being far from center much worse
+        center_ratio = self.lateral_deviation / MAX_DISTANCE_FROM_CENTER
+        centering_reward = 2.0 * math.exp(-5.0 * center_ratio) - 1.0
 
-            # continuous-action speed band
+        # 5) Heading alignment reward (also non-linear)
+        # Perfect alignment gets max reward, severe misalignment gets penalty
+        angle_ratio = abs(self.heading_deviation) / ANGLE_THRESH_RAD
+        heading_reward = 1.0 * math.exp(-3.0 * angle_ratio) - 0.5
+
+        # 6) Speed reward - encourages appropriate speed
+        speed_reward = 0.0
+        if hasattr(self, 'current_speed'):
+            MIN_SPEED = 2.0  # m/s
+            TARGET_SPEED = 8.0  # m/s
+            MAX_SPEED = 20.0  # m/s
+
             if self.current_speed < MIN_SPEED:
-                speed_factor = (self.current_speed / MIN_SPEED)
+                # Penalty for going too slow
+                speed_reward = -1.0 + (self.current_speed / MIN_SPEED)
+            elif self.current_speed > MAX_SPEED:
+                # Strong penalty for excessive speed
+                speed_reward = -2.0 * (self.current_speed - MAX_SPEED) / MAX_SPEED
             elif self.current_speed > TARGET_SPEED:
-                speed_factor = 1.0 - (
-                    (self.current_speed - TARGET_SPEED)
-                    / (MAX_SPEED - TARGET_SPEED)
-                )
+                # Small penalty for being over target but under max
+                speed_reward = 1.0 - 0.5 * ((self.current_speed - TARGET_SPEED) / (MAX_SPEED - TARGET_SPEED))
             else:
-                speed_factor = 1.0
+                # Reward for being in the ideal range
+                speed_reward = 1.0 * (self.current_speed / TARGET_SPEED)
 
-            # Apply extra penalty scaling
-            penalty_scale = 0.5  # Lower = harsher
-            reward = speed_factor * centering * angle_f * penalty_scale
+        # 7) Lap completion bonus
+        lap_bonus = 0.0
+        if self.lap_completed:
+            lap_bonus = 200.0
+            self.get_logger().info(f"Lap completion bonus: +{lap_bonus}")
+            self.lap_completed = False  # Reset for next lap
 
-        # 4) write back
+        # 8) Small survival bonus
+        survival_bonus = 0.05
+
+        # 9) Combine all rewards with appropriate weighting
+        reward = (
+            progress_reward * 7.0 +      # Progress is most important
+            centering_reward * 0.4 +     # Centering is very important
+            heading_reward * 0.75 +       # Alignment is very important
+            speed_reward * 0.3 +         # Speed is somewhat important
+            lap_bonus +                  # One-time bonus for lap completion
+            survival_bonus               # Small bonus for each step
+        )
+    
+        # 10) Apply scaling and bounds
+        # Normalize reward to prevent extreme values
+        reward = max(min(reward, 10.0), -10.0)
+
+        # Log significant rewards for debugging
+        if abs(reward) > 5.0 or lap_bonus > 0:
+            self.get_logger().info(
+                f"Reward: {reward:.2f} (progress: {progress_reward:.2f}, center: {centering_reward:.2f}, "
+                f"heading: {heading_reward:.2f}, speed: {speed_reward:.2f}, lap: {lap_bonus})"
+            )
+
+        # 11) Store and return
         self.reward = reward
         
     ##################################################################################################

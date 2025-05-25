@@ -30,7 +30,7 @@ class ActorNetwork(nn.Module):
         # self.log_std = nn.Parameter(
         #     torch.ones(action_dim) * -0.5
         # )
-        self.log_std = nn.Parameter(torch.ones(action_dim) * 0.0)  # std ~1.0 initially
+        self.log_std = nn.Parameter(torch.ones(action_dim) * -0.7)
         
         self.fc = nn.Sequential(
             nn.Linear(input_dim, 256),
