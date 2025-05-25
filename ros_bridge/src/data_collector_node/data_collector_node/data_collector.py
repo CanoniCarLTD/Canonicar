@@ -45,8 +45,8 @@ class DataCollector(Node):
 
         self.data_buffer = []  # List of dictionaries to store synchronized data
 
-        self.imu_mean = np.zeros(5, dtype=np.float32)
-        self.imu_var = np.ones(5, dtype=np.float32)
+        self.imu_mean = np.zeros(6, dtype=np.float32)
+        self.imu_var = np.ones(6, dtype=np.float32)
         self.imu_count = 1e-4  # avoid div by zero
 
         # Create state subscriber first to handle simulation status
@@ -254,6 +254,7 @@ class DataCollector(Node):
                 imu_msg.linear_acceleration.z,
                 imu_msg.angular_velocity.x,
                 imu_msg.angular_velocity.y,
+                imu_msg.angular_velocity.z,
             ],
             dtype=np.float32,
         )
@@ -279,13 +280,13 @@ class DataCollector(Node):
     def aggregate_state_vector(self, vision_features, imu_features):
         """Aggregate features into a single state vector."""
         # Total vector size: 192 (vision) + 5 (IMU) = 197
-        state_vector = np.zeros(197, dtype=np.float32)
+        state_vector = np.zeros(134, dtype=np.float32)
 
         # Fill with vision features (fused RGB + LiDAR)
-        state_vector[:192] = vision_features
+        state_vector[:128] = vision_features
 
         # # Add IMU data
-        state_vector[192:197] = imu_features
+        state_vector[128:134] = imu_features
 
         return state_vector
 

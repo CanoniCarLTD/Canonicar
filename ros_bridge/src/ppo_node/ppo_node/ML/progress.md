@@ -170,5 +170,5 @@ Changed Hyperparameters:
 ### v4.0.0
 
 - New race track
-- built carla and Unreal Engine from source
+- Built carla and Unreal Engine from source
 - Added and Trained VAE on the new track for better feature extraction

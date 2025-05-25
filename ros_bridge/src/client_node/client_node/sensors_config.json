@@ -1,7 +1,7 @@
 {
     "objects": [
       {
-        "type": "vehicle.tesla.model3",    
+        "type": "vehicle.formula.car",    
         "id": "ego_vehicle",            
         "spawn_point": {
           "x": -5.0,
@@ -15,7 +15,7 @@
             {
                 "type": "sensor.camera.semantic_segmentation",
                 "id": "segmentation_front",
-                "spawn_point": {"x": 2.0, "y": 0.0, "z": 2.0, "roll": 0.0, "pitch": -10.0, "yaw": 0.0},
+                "spawn_point": {"x": 4.0, "y": 0.0, "z": 2.0, "roll": 0.0, "pitch": -10.0, "yaw": 0.0},
                 "image_size_x": 640,
                 "image_size_y": 480,
                 "fov": 100.0

@@ -155,6 +155,10 @@ class PPOModelNode(Node):
         self.last_critic_loss = None
         self.last_entropy = None
 
+        self.prev_loc       = None
+        self.prev_t         = None
+        self.current_speed  = 0.0
+
         self.state_subscription = self.create_subscription(
             String, "/simulation/state", self.handle_system_state, 10
         )
@@ -259,7 +263,7 @@ class PPOModelNode(Node):
         
         if action is None:
             action = self.action
-        
+            
         action_list = action.tolist()
         
         if len(action_list) == 2:
@@ -282,83 +286,273 @@ class PPOModelNode(Node):
     #                                       REWARD FUNCTION
     ##################################################################################################
 
+    # def calculate_reward(self):
+    #     """Improved reward function with properly combined rewards"""
+    #     # Core reward parameters
+    #     progress_multiplier = 900.0
+    #     base_time_penalty = -0.05  # Base penalty when not moving
+    #     stagnation_factor = 0.05  # Increases penalty over time
+    #     backwards_penalty = -5.0  # Penalty for going backwards
+    #     collision_penalty = -40.0
+    #     lap_completion_bonus = 50.0
+
+    #     max_allowed_deviation = 2.5  # meters before applying harshest penalty
+    #     deviation_penalty_factor = -1.7  # scale the penalty
+    #     max_angle_deviation = math.pi/5 # 36 degrees
+    #     angle_penalty_factor = -1.5
+        
+    #     progress_reward = 0.0  # Initialize progress reward to 0
+    #     # Initialize the reward to 0
+    #     self.reward = 0.0
+        
+    #     # Initialize stagnation counter if not exists
+    #     if not hasattr(self, "stagnation_counter"):
+    #         self.stagnation_counter = 0
+
+    #     # Handle collision case first
+    #     if self.collision:
+    #         self.get_logger().info(f"Applied collision penalty: {collision_penalty}")
+    #         self.reward = collision_penalty
+    #         self.done = True
+    #         self.stagnation_counter = 0
+    #         return
+
+    #     # Calculate progress delta
+    #     progress_delta = self.track_progress - self.prev_progress_distance
+
+    #     if self.current_step_in_episode <= 1 and abs(progress_delta) > 0.1:
+    #         self.get_logger().warn(f"Detected large progress delta {progress_delta:.6f} in first step - ignoring")
+    #         progress_delta = 0.0
+        
+    #     # Calculate the progress-based component of the reward
+    #     if progress_delta < -0.001:  # Moving backwards
+    #         progress_reward = backwards_penalty
+    #         self.stagnation_counter = 0
+    #         self.get_logger().info(f"Moving backwards: {progress_delta:.6f}, reward = {backwards_penalty}")
+    #     elif progress_delta > 0.001:  # Moving forward
+    #         progress_reward = progress_multiplier * progress_delta
+    #         self.stagnation_counter = 0
+    #         self.get_logger().info(f"Moving forward: {progress_delta:.6f}, reward = {progress_reward:.4f}")
+
+        
+    #     # Start with the progress-based reward
+    #     self.reward = progress_reward
+        
+    #     # Handle wrap-around at 1.0 (lap completion)
+    #     if progress_delta < -0.5:
+    #         progress_delta = (1.0 - self.prev_progress_distance) + self.track_progress
+    #         self.get_logger().info(f"Lap progress wrap-around detected: {progress_delta:.4f}")
+        
+    #     # Add centerline deviation penalty
+    #     if hasattr(self, 'lateral_deviation') and self.lateral_deviation is not None:
+    #         normalized_deviation = min(self.lateral_deviation / max_allowed_deviation, 1.0)
+    #         deviation_penalty = deviation_penalty_factor * (normalized_deviation ** 2)
+    #         self.reward += deviation_penalty
+    #         self.get_logger().info(f"Lateral deviation: {self.lateral_deviation:.4f}, penalty = {deviation_penalty:.4f}")
+
+    #     # Add heading angle deviation penalty
+    #     if hasattr(self, 'heading_deviation') and self.heading_deviation is not None:
+    #         normalized_angle_dev = min(self.heading_deviation / max_angle_deviation, 1.0)
+    #         angle_penalty = angle_penalty_factor * (normalized_angle_dev ** 2)
+    #         self.reward += angle_penalty
+    #         self.get_logger().info(f"Heading deviation: {self.heading_deviation:.4f}, penalty = {angle_penalty:.4f}")
+        
+    #     # Add lap completion bonus if detected
+    #     if self.lap_completed:
+    #         self.reward += lap_completion_bonus
+    #         self.lap_completed = False
+    #         self.stagnation_counter = 0
+    #         self.get_logger().info(f"Lap completion bonus applied: +{lap_completion_bonus}")
+
+
+    ##################################################################################################
+    
+    
+    # def calculate_reward(self):
+    #     """Simplified reward function with throttle regulation."""
+    #     # Parameters
+    #     collision_penalty = -200.0
+    #     progress_multiplier = 750.0
+    #     base_time_penalty = -0.01
+    #     stagnation_factor = 0.001
+    #     backwards_penalty = -10.0
+    #     lap_completion_bonus = 200.0
+
+    #     max_deviation = 2.5
+    #     deviation_penalty_factor = -0.9
+    #     max_angle_deviation = math.pi / 4
+    #     angle_penalty_factor = -0.8
+    #     smoothness_penalty_factor = -1.2
+
+    #     # Initialize reward
+    #     reward = 0.0
+
+    #     # Collision Handling
+    #     if self.collision:
+    #         self.reward = collision_penalty
+    #         self.done = True
+    #         self.stagnation_counter = 0
+    #         self.get_logger().info(f"Collision penalty applied: {collision_penalty}")
+    #         return
+
+    #     # Progress Reward
+    #     progress_delta = self.track_progress - self.prev_progress_distance
+    #     if progress_delta > 0.001:
+    #         progress_reward = progress_multiplier * progress_delta
+    #         self.stagnation_counter = 0
+    #         self.get_logger().info(f"Forward progress: {progress_delta:.4f}, reward: {progress_reward:.4f}")
+    #     elif progress_delta < -0.001:
+    #         progress_reward = backwards_penalty
+    #         self.stagnation_counter = 0
+    #         self.get_logger().info(f"Backward movement penalty: {backwards_penalty}")
+    #     else:
+    #         self.stagnation_counter += 1
+    #         progress_reward = base_time_penalty * (1 + self.stagnation_counter * stagnation_factor)
+    #         self.get_logger().info(f"Stagnation penalty: {progress_reward:.4f}")
+    #     reward += progress_reward
+
+    #     # Lateral Deviation Penalty
+    #     normalized_deviation = min(abs(self.lateral_deviation) / max_deviation, 1.0)
+    #     deviation_penalty = deviation_penalty_factor * (normalized_deviation ** 2)
+    #     reward += deviation_penalty
+    #     self.get_logger().info(f"Lateral deviation penalty: {deviation_penalty:.4f}")
+
+    #     # Heading Angle Penalty
+    #     normalized_angle_dev = min(abs(self.heading_deviation) / max_angle_deviation, 1.0)
+    #     angle_penalty = angle_penalty_factor * (normalized_angle_dev ** 2)
+    #     reward += angle_penalty
+    #     self.get_logger().info(f"Heading angle penalty: {angle_penalty:.4f}")
+
+    #     # Action Smoothness Penalty
+    #     if hasattr(self, 'action') and hasattr(self, 'prev_action') and self.prev_action is not None and self.action is not None:
+    #         action_diff = np.abs(np.array(self.action) - np.array(self.prev_action))
+    #         smoothness_penalty = smoothness_penalty_factor * np.mean(action_diff)
+    #         reward += smoothness_penalty
+    #         self.get_logger().info(f"Smoothness penalty: {smoothness_penalty:.4f}")
+
+    #     if self.action is not None and len(self.action) > 1:
+    #         if self.action[1] > 0.6:
+    #             throttle_penalty = -0.05 * (self.action[1] - 0.6)
+    #         else:
+    #             throttle_penalty = 0.0
+    #         reward += throttle_penalty
+    #         self.get_logger().info(f"Throttle overuse penalty: {throttle_penalty:.4f}")
+
+    #     # Throttle Smoothness Penalty
+    #     if self.action is not None and len(self.action) > 1:
+    #         if hasattr(self, "prev_throttle"):
+    #             delta_throttle = abs(self.action[1] - self.prev_throttle)
+    #             throttle_smooth_penalty = -0.02 * delta_throttle
+    #         else:
+    #             throttle_smooth_penalty = 0.0
+    #         self.prev_throttle = self.action[1]
+    #         reward += throttle_smooth_penalty
+    #         self.get_logger().info(f"Throttle smooth penalty: {throttle_smooth_penalty:.4f}")
+    #     else:
+    #         throttle_smooth_penalty = 0.0
+
+    #     # Lap Completion Bonus
+    #     if self.lap_completed:
+    #         reward += lap_completion_bonus
+    #         self.lap_completed = False
+    #         self.stagnation_counter = 0
+    #         self.get_logger().info(f"Lap completion bonus: {lap_completion_bonus}")
+
+    #     self.reward = reward
+        
     def calculate_reward(self):
-        """Improved reward function with properly combined rewards"""
-        # Core reward parameters
-        progress_multiplier = 600.0
-        base_time_penalty = -0.05  # Base penalty when not moving
-        stagnation_factor = 0.05  # Increases penalty over time
-        backwards_penalty = -5.0  # Penalty for going backwards
-        collision_penalty = -40.0
-        lap_completion_bonus = 50.0
+        # 1) Initialize reward
+        reward = 0.0
 
-        max_allowed_deviation = 2.5  # meters before applying harshest penalty
-        deviation_penalty_factor = -1.7  # scale the penalty
-        max_angle_deviation = math.pi/5 # 36 degrees
-        angle_penalty_factor = -1.5
-        
-        progress_reward = 0.0  # Initialize progress reward to 0
-        # Initialize the reward to 0
-        self.reward = 0.0
-        
-        # Initialize stagnation counter if not exists
-        if not hasattr(self, "stagnation_counter"):
-            self.stagnation_counter = 0
-
-        # Handle collision case first
+        # 2) Terminal penalties
         if self.collision:
-            self.get_logger().info(f"Applied collision penalty: {collision_penalty}")
-            self.reward = collision_penalty
             self.done = True
-            self.stagnation_counter = 0
+            self.reward = -100.0
+            self.get_logger().info(f"Collision penalty applied: {reward}")
             return
 
-        # Calculate progress delta
-        progress_delta = self.track_progress - self.prev_progress_distance
+        # if self.lateral_deviation > MAX_DISTANCE_FROM_CENTER:
+        #     self.done = True
+        #     reward = -5.0
+        #     self.get_logger().info(f"Off-track penalty applied: {reward}")
+        #     self.reward = reward
+        #     return
 
-        if self.current_step_in_episode <= 1 and abs(progress_delta) > 0.1:
-            self.get_logger().warn(f"Detected large progress delta {progress_delta:.6f} in first step - ignoring")
-            progress_delta = 0.0
-        
-        # Calculate the progress-based component of the reward
-        if progress_delta < -0.001:  # Moving backwards
-            progress_reward = backwards_penalty
-            self.stagnation_counter = 0
-            self.get_logger().info(f"Moving backwards: {progress_delta:.6f}, reward = {backwards_penalty}")
-        elif progress_delta > 0.001:  # Moving forward
-            progress_reward = progress_multiplier * progress_delta
-            self.stagnation_counter = 0
-            self.get_logger().info(f"Moving forward: {progress_delta:.6f}, reward = {progress_reward:.4f}")
+        # 3) Progress reward - primary incentive
+        progress_diff = 0.0
+        if hasattr(self, 'prev_progress_distance'):
+            # Calculate progress made since last step
+            progress_diff = self.track_progress - self.prev_progress_distance
+            # Handle track wraparound (0.99 to 0.01)
+            if progress_diff < -0.5:
+                progress_diff = (1.0 - self.prev_progress_distance) + self.track_progress
 
-        
-        # Start with the progress-based reward
-        self.reward = progress_reward
-        
-        # Handle wrap-around at 1.0 (lap completion)
-        if progress_delta < -0.5:
-            progress_delta = (1.0 - self.prev_progress_distance) + self.track_progress
-            self.get_logger().info(f"Lap progress wrap-around detected: {progress_delta:.4f}")
-        
-        # Add centerline deviation penalty
-        if hasattr(self, 'lateral_deviation') and self.lateral_deviation is not None:
-            normalized_deviation = min(self.lateral_deviation / max_allowed_deviation, 1.0)
-            deviation_penalty = deviation_penalty_factor * (normalized_deviation ** 2)
-            self.reward += deviation_penalty
-            self.get_logger().info(f"Lateral deviation: {self.lateral_deviation:.4f}, penalty = {deviation_penalty:.4f}")
+        # Scale progress reward significantly - this is the main driver
+        progress_reward = progress_diff * 10.0
 
-        # Add heading angle deviation penalty
-        if hasattr(self, 'heading_deviation') and self.heading_deviation is not None:
-            normalized_angle_dev = min(self.heading_deviation / max_angle_deviation, 1.0)
-            angle_penalty = angle_penalty_factor * (normalized_angle_dev ** 2)
-            self.reward += angle_penalty
-            self.get_logger().info(f"Heading deviation: {self.heading_deviation:.4f}, penalty = {angle_penalty:.4f}")
-        
-        # Add lap completion bonus if detected
+        # 4) Centering reward (non-linear to be more forgiving near center)
+        # Exponential dropoff makes being far from center much worse
+        center_ratio = self.lateral_deviation / MAX_DISTANCE_FROM_CENTER
+        centering_reward = 2.0 * math.exp(-5.0 * center_ratio) - 1.0
+
+        # 5) Heading alignment reward (also non-linear)
+        # Perfect alignment gets max reward, severe misalignment gets penalty
+        angle_ratio = abs(self.heading_deviation) / ANGLE_THRESH_RAD
+        heading_reward = 1.0 * math.exp(-3.0 * angle_ratio) - 0.5
+
+        # 6) Speed reward - encourages appropriate speed
+        speed_reward = 0.0
+        if hasattr(self, 'current_speed'):
+            MIN_SPEED = 2.0  # m/s
+            TARGET_SPEED = 8.0  # m/s
+            MAX_SPEED = 20.0  # m/s
+
+            if self.current_speed < MIN_SPEED:
+                # Penalty for going too slow
+                speed_reward = -1.0 + (self.current_speed / MIN_SPEED)
+            elif self.current_speed > MAX_SPEED:
+                # Strong penalty for excessive speed
+                speed_reward = -2.0 * (self.current_speed - MAX_SPEED) / MAX_SPEED
+            elif self.current_speed > TARGET_SPEED:
+                # Small penalty for being over target but under max
+                speed_reward = 1.0 - 0.5 * ((self.current_speed - TARGET_SPEED) / (MAX_SPEED - TARGET_SPEED))
+            else:
+                # Reward for being in the ideal range
+                speed_reward = 1.0 * (self.current_speed / TARGET_SPEED)
+
+        # 7) Lap completion bonus
+        lap_bonus = 0.0
         if self.lap_completed:
-            self.reward += lap_completion_bonus
-            self.lap_completed = False
-            self.stagnation_counter = 0
-            self.get_logger().info(f"Lap completion bonus applied: +{lap_completion_bonus}")
+            lap_bonus = 200.0
+            self.get_logger().info(f"Lap completion bonus: +{lap_bonus}")
+            self.lap_completed = False  # Reset for next lap
+
+        # 8) Small survival bonus
+        survival_bonus = 0.05
+
+        # 9) Combine all rewards with appropriate weighting
+        reward = (
+            progress_reward * 7.0 +      # Progress is most important
+            centering_reward * 0.4 +     # Centering is very important
+            heading_reward * 0.75 +       # Alignment is very important
+            speed_reward * 0.3 +         # Speed is somewhat important
+            lap_bonus +                  # One-time bonus for lap completion
+            survival_bonus               # Small bonus for each step
+        )
+    
+        # 10) Apply scaling and bounds
+        # Normalize reward to prevent extreme values
+        reward = max(min(reward, 10.0), -10.0)
+
+        # Log significant rewards for debugging
+        if abs(reward) > 5.0 or lap_bonus > 0:
+            self.get_logger().info(
+                f"Reward: {reward:.2f} (progress: {progress_reward:.2f}, center: {centering_reward:.2f}, "
+                f"heading: {heading_reward:.2f}, speed: {speed_reward:.2f}, lap: {lap_bonus})"
+            )
+
+        # 11) Store and return
+        self.reward = reward
         
     ##################################################################################################
     #                                       STORE TRANSITION
@@ -384,9 +578,12 @@ class PPOModelNode(Node):
         value = self.ppo_agent.critic(
             torch.tensor(state, dtype=torch.float32).to(device).unsqueeze(0)
         ).item()
+        
+        if isinstance(log_prob, torch.Tensor):
+            log_prob = log_prob.item()
 
         self.ppo_agent.store_transition(
-            state, action, float(log_prob), value, reward, done
+            state, action, log_prob, value, reward, done
         )
 
     ##################################################################################################
@@ -540,7 +737,6 @@ class PPOModelNode(Node):
 
                     self.episode_counter += 1
                     return 1
-
             self.get_logger().info(
                 f"Episode: {self.episode_counter}, Timestep: {self.current_step_in_episode}, Reward: {self.current_ep_reward}"
             )
@@ -1039,6 +1235,19 @@ class PPOModelNode(Node):
 
         # Extract vehicle location
         self.vehicle_location = (msg.data[0], msg.data[1])
+        
+        # Experimetal
+        
+        now = time.time()
+        if previous_location is not None and self.prev_t is not None:
+            dx = self.vehicle_location[0] - previous_location[0]
+            dy = self.vehicle_location[1] - previous_location[1]
+            dt = max(1e-4, now - self.prev_t)
+            # speed in m/s
+            self.current_speed = math.hypot(dx, dy) / dt
+        # update for next step
+        self.prev_loc = self.vehicle_location
+        self.prev_t   = now
 
         # First call - just store the location
         if previous_location is None:
