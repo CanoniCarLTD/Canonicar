@@ -3,20 +3,15 @@ All the hyper-parameters needed for the PPO algorithm implementation.
 """
 import numpy as np
 
-MODEL_LOAD = True
+MODEL_LOAD = False
 
 # Directory to save model checkpoints - always stays the same
 PPO_CHECKPOINT_DIR = "/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models"
 
 # Set to None unless you're continuing an exact run (same version/run folder)
-CHECKPOINT_FILE = "/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models/v4.0.0/run_20250525_0029"
-# 21_0005 is complex ppo and old reward function
-# 0007 is complex ppo and new rewa  rd function
-# 0003 after deep research
-# 0004 experimental reward function
-# 0010 experimental reward function no lidar
+CHECKPOINT_FILE = "/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models/v4.0.1/run_20250527_0001"
 
-VERSION = "v4.0.0"
+VERSION = "v4.0.1"
 
 # Point this to a full run directory from any version (must contain actor.pth etc.)
 # Example: "/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models/v2.1.3/run_20250325_0001"
@@ -47,7 +42,7 @@ MIN_ACTION_STD = 0.1
 # PPO optimization parameters
 ACTOR_LEARNING_RATE = 7.5e-5 # 0.000075
 CRITIC_LEARNING_RATE = 7.5e-5 # 0.000075
-POLICY_CLIP = 0.2
+POLICY_CLIP = 0.1 # CHANGED from 0.2 to 0.1
 ENTROPY_COEF = 0.01 # might wanna do 0.005 later
 LAMBDA_GAE = 0.95
 VF_COEF = 0.5  # Giving half the weight to critic loss relative to the summed losses

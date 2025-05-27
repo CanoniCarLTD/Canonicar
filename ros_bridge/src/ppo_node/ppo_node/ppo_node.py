@@ -276,9 +276,12 @@ class PPOModelNode(Node):
             return
         
         # Discretize steering: values properly sorted from most left to most right
-        discrete_steer_values = [-1.0, -0.75, -0.5, -0.25, 0.0, 0.25, 0.5, 0.75, 1.0]
+        discrete_steer_values = [
+            -1.0, -0.9, -0.8, -0.7, -0.6, -0.5, -0.4, -0.3, -0.2, -0.1, 0.0,
+            0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0
+        ]
         # Discretize throttle: 0.0, 0.33, 0.66, 1.0
-        discrete_throttle_values = [0.0, 0.33, 0.5, 0.66, 1.0]
+        discrete_throttle_values = [0.25, 0.5, 0.75]
 
         # Find closest discrete values
         steer_idx = min(range(len(discrete_steer_values)), 
@@ -293,7 +296,7 @@ class PPOModelNode(Node):
         action_msg = Float32MultiArray()
         action_msg.data = [discrete_steer, discrete_throttle, brake]
         
-        self.get_logger().info(f"Publishing | Steer: {discrete_steer} | Throttle: {discrete_throttle}")
+        # self.get_logger().info(f"Publishing | Steer: {discrete_steer} | Throttle: {discrete_throttle}")
         
         self.action_publisher.publish(action_msg)
 
@@ -548,9 +551,9 @@ class PPOModelNode(Node):
         # 9) Combine all rewards with appropriate weighting
         reward = (
             progress_reward * 9.0 +      # Progress is most important
-            centering_reward * 0.15 +     # Centering is very important
-            heading_reward * 0.75 +       # Alignment is very important
-            speed_reward * 0.3 +         # Speed is somewhat important
+            centering_reward * 0.35 +     # Centering is very important
+            heading_reward * 0.9 +       # Alignment is very important
+            speed_reward * 0.1 +         # Speed is somewhat important
             lap_bonus +                  # One-time bonus for lap completion
             survival_bonus               # Small bonus for each step
         )
@@ -909,9 +912,6 @@ class PPOModelNode(Node):
             "Loss/critic", self.critic_loss, self.timestep_counter
         )
         self.summary_writer.add_scalar("Entropy", self.entropy, self.timestep_counter)
-        self.summary_writer.add_scalar(
-            "Rewards/learn_step_reward", self.reward, self.timestep_counter
-        )
 
         try:
             # Create metrics message

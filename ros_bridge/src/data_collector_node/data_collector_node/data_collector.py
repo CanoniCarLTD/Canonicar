@@ -194,6 +194,9 @@ class DataCollector(Node):
                 if self.steps_counter % 5 == 0:
                     self.publish_to_PPO.publish(response)
                 self.steps_counter += 1
+                if self.steps_counter == 100000:
+                    # reset the counter to avoid overflow
+                    self.steps_counter = 0
             else:
                 self.get_logger().warn("State vector contains NaN values. Skipping...")
 

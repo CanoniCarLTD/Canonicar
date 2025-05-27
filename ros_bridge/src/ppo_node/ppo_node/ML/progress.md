@@ -185,3 +185,4 @@ Changed Hyperparameters:
 - LEARN_EVERY_N_STEPS = 4096 -> **1024**
 - MINIBATCH_SIZE = 512 -> **128**
 - NUM_EPOCHS = 4 -> **5**
+- POLICY_CLIP = 0.2 -> **0.1**
