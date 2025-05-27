@@ -506,8 +506,15 @@ class PPOModelNode(Node):
                 progress_diff = (1.0 - self.prev_progress_distance) + self.track_progress
 
         # Scale progress reward significantly - this is the main driver
-        progress_reward = progress_diff * 10.0
-
+        immediate_progress_reward = progress_diff * 10.0
+        
+        # Add cumulative progress reward - increases as vehicle makes more progress
+        # This rewards being further along the track, regardless of step size
+        cumulative_progress_reward = self.track_progress * 20.0
+                
+        # Combine all progress-related rewards
+        progress_reward = immediate_progress_reward + cumulative_progress_reward
+        
         # 4) Centering reward (non-linear to be more forgiving near center)
         # Exponential dropoff makes being far from center much worse
         center_ratio = self.lateral_deviation / MAX_DISTANCE_FROM_CENTER
@@ -522,8 +529,8 @@ class PPOModelNode(Node):
         speed_reward = 0.0
         if hasattr(self, 'current_speed'):
             MIN_SPEED = 2.0  # m/s
-            TARGET_SPEED = 8.0  # m/s
-            MAX_SPEED = 20.0  # m/s
+            TARGET_SPEED = 6.0  # m/s
+            MAX_SPEED = 10.0  # m/s
 
             if self.current_speed < MIN_SPEED:
                 # Penalty for going too slow
@@ -550,10 +557,10 @@ class PPOModelNode(Node):
 
         # 9) Combine all rewards with appropriate weighting
         reward = (
-            progress_reward * 9.0 +      # Progress is most important
-            centering_reward * 0.35 +     # Centering is very important
-            heading_reward * 0.9 +       # Alignment is very important
-            speed_reward * 0.1 +         # Speed is somewhat important
+            progress_reward * 4.0 +      # Progress is most important
+            centering_reward * 3.0 +     # Centering is very important
+            heading_reward * 7.0 +       # Alignment is very important
+            speed_reward * 0.5 +         # Speed is somewhat important
             lap_bonus +                  # One-time bonus for lap completion
             survival_bonus               # Small bonus for each step
         )
@@ -570,6 +577,7 @@ class PPOModelNode(Node):
             )
 
         # 11) Store and return
+        self.get_logger().info("speed is {}".format(self.current_speed))
         self.reward = reward
         
     ##################################################################################################

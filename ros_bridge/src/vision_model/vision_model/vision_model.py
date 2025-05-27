@@ -86,7 +86,10 @@ class SensorFusionModel(nn.Module):
         super(SensorFusionModel, self).__init__()
         # self.semantic_encoder = SemanticEncoder(output_features=semantic_features)
         self.vae_encoder = VariationalEncoder(latent_dims=latent_dim)
-        self.vae_encoder.load_state_dict(torch.load("/ros_bridge/src/vae/vae/model/vae_encoder_only.pth"))
+        try:
+            self.vae_encoder.load_state_dict(torch.load("/ros_bridge/src/vae/vae/model/vae_encoder_only.pth"))
+        except FileNotFoundError:
+            print("VAE encoder weights not found. Please check the path.")
         self.vae_encoder.eval()
         for p in self.vae_encoder.parameters():
             p.requires_grad = False
