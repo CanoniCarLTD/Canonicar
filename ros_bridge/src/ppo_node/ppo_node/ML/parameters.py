@@ -3,7 +3,7 @@ All the hyper-parameters needed for the PPO algorithm implementation.
 """
 import numpy as np
 
-MODEL_LOAD = True
+MODEL_LOAD = False
 
 # Directory to save model checkpoints - always stays the same
 PPO_CHECKPOINT_DIR = "/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models"
