@@ -23,8 +23,8 @@ DETERMINISTIC_CUDNN = False
 # Training configuration
 TRAIN = True
 EPISODE_LENGTH = 7000  # Maximum timesteps per episode
-LEARN_EVERY_N_STEPS = 1024 # Number of timesteps collected before a policy update
-MINIBATCH_SIZE = 128  # Each PPO update uses mini-batches of MINIBATCH_SIZE
+LEARN_EVERY_N_STEPS = 2048 # Number of timesteps collected before a policy update
+MINIBATCH_SIZE = 256  # Each PPO update uses mini-batches of MINIBATCH_SIZE
 NUM_EPOCHS = 5  # Each mini-batch is seen 5 times (full data 5×) in PPO update (Best practice: 3-10)
 SAVE_EVERY_N_TIMESTEPS = LEARN_EVERY_N_STEPS * 2 # Save model every 2 policy updates
 
