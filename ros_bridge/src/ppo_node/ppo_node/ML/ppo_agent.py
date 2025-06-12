@@ -1,4 +1,4 @@
-#PPO agent:
+# PPO agent:
 
 import os
 import torch
@@ -19,19 +19,16 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 ##################################################################################################
 
 LOG_STD_MIN = -20
-LOG_STD_MAX =  2
+LOG_STD_MAX = 2
+
 
 class ActorNetwork(nn.Module):
     def __init__(self, input_dim, action_dim):
         super(ActorNetwork, self).__init__()
         self.action_dim = action_dim
 
-
-        # self.log_std = nn.Parameter(
-        #     torch.ones(action_dim) * -0.5
-        # )
         self.log_std = nn.Parameter(torch.ones(action_dim) * -0.7)
-        
+
         self.fc = nn.Sequential(
             nn.Linear(input_dim, 256),
             nn.Tanh(),
@@ -46,15 +43,13 @@ class ActorNetwork(nn.Module):
             if isinstance(m, nn.Linear):
                 nn.init.orthogonal_(m.weight, gain=np.sqrt(2))
                 nn.init.zeros_(m.bias)
-        # self.fc[-1].bias.data = torch.tensor([0.0, 0.25], dtype=torch.float32)  # steer 0, throttle 0.25
-        self.fc[-1].bias.data.zero_()  # unbiased initialization
-        
+        self.fc[-1].bias.data.zero_()
+
     def forward(self, state):
         return self.fc(state)
 
     def get_dist(self, state):
         mean = self.forward(state)
-        # NEW: clamp log_std before exp
         log_std = torch.clamp(self.log_std, LOG_STD_MIN, LOG_STD_MAX)
         std = torch.exp(log_std).expand_as(mean)
         return Normal(mean, std)
@@ -67,10 +62,12 @@ class ActorNetwork(nn.Module):
         throttle = (action[:, 1:2] + 1) / 2  # map [-1,1] to [0,1]
         final_action = torch.cat([steer, throttle], dim=1)
         raw_log_prob = dist.log_prob(raw_action).sum(dim=-1, keepdim=True)
-        squash_correction = torch.log(1 - action.pow(2) + 1e-6).sum(dim=-1, keepdim=True)
+        squash_correction = torch.log(1 - action.pow(2) + 1e-6).sum(
+            dim=-1, keepdim=True
+        )
         log_prob = raw_log_prob - squash_correction
         return final_action.detach(), log_prob
-    
+
     def evaluate_actions(self, state, action):
         steer = action[:, 0:1]
         throttle = action[:, 1:2] * 2 - 1  # map [0,1] to [-1,1]
@@ -79,7 +76,8 @@ class ActorNetwork(nn.Module):
         dist = self.get_dist(state)
         raw_log_prob = dist.log_prob(raw_action).sum(dim=-1, keepdim=True)
         squash_correction = torch.log(1 - squashed_action.pow(2) + 1e-6).sum(
-        dim=-1, keepdim=True)
+            dim=-1, keepdim=True
+        )
         log_prob = raw_log_prob - squash_correction
         entropy = dist.entropy().sum(dim=-1, keepdim=True)
         return log_prob, entropy
@@ -251,14 +249,18 @@ class PPOAgent:
             self.critic.load_state_dict(
                 torch.load(os.path.join(directory, "critic.pth"), map_location=device)
             )
-    
+
             self.actor_optimizer.load_state_dict(
-                torch.load(os.path.join(directory, "actor_optim.pth"), map_location=device)
+                torch.load(
+                    os.path.join(directory, "actor_optim.pth"), map_location=device
+                )
             )
             self.critic_optimizer.load_state_dict(
-                torch.load(os.path.join(directory, "critic_optim.pth"), map_location=device)
+                torch.load(
+                    os.path.join(directory, "critic_optim.pth"), map_location=device
+                )
             )
-    
+
             self.logger.info("Model and optimizer states loaded successfully.")
         except Exception as e:
             self.logger.info(f"❌ Error loading model and optimizer: {e}")
@@ -292,7 +294,7 @@ class PPOAgent:
             delta = rewards[t] + gamma * values[t + 1] * next_nonterminal - values[t]
             lastgaelam = delta + gamma * lam * next_nonterminal * lastgaelam
             advantages[t] = lastgaelam
-        returns = advantages + values[:-1]          # drop the bootstrap value
+        returns = advantages + values[:-1]  # drop the bootstrap value
         advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
         return advantages, returns
 
@@ -314,29 +316,39 @@ class PPOAgent:
         returns: actor_loss, critic_loss, entropy
         """
         # Convert lists to numpy arrays first
-        states     = torch.as_tensor(np.array(self.states),   dtype=torch.float32, device=device)
-        actions    = torch.as_tensor(np.array(self.actions),  dtype=torch.float32, device=device)
-        rewards    = torch.as_tensor(self.rewards,            dtype=torch.float32, device=device)
-        dones      = torch.as_tensor(self.dones,              dtype=torch.float32, device=device)
+        states = torch.as_tensor(
+            np.array(self.states), dtype=torch.float32, device=device
+        )
+        actions = torch.as_tensor(
+            np.array(self.actions), dtype=torch.float32, device=device
+        )
+        rewards = torch.as_tensor(self.rewards, dtype=torch.float32, device=device)
+        dones = torch.as_tensor(self.dones, dtype=torch.float32, device=device)
 
         # fresh value estimates (no need to store them in memory)
         with torch.no_grad():
             values = self.critic(states).squeeze()
-            last_value = torch.zeros(1, device=device).squeeze() if dones[-1] else self.critic(states[-1:]).squeeze()
-            
+            last_value = (
+                torch.zeros(1, device=device).squeeze()
+                if dones[-1]
+                else self.critic(states[-1:]).squeeze()
+            )
+
         assert values.ndim == 1, f"Expected values to be 1D, got {values.shape}"
-        assert last_value.ndim == 0 or last_value.shape == torch.Size([]), f"Expected scalar last_value, got {last_value.shape}"
-        
+        assert last_value.ndim == 0 or last_value.shape == torch.Size(
+            []
+        ), f"Expected scalar last_value, got {last_value.shape}"
+
         values = torch.cat([values, last_value.view(1)])
 
         advantages, returns = self.compute_gae(rewards, values, dones)
         returns = (returns - returns.mean()) / (returns.std() + 1e-8)
-        old_log_probs = torch.cat(self.log_probs, dim=0).detach().view(-1,1).to(device)
+        old_log_probs = torch.cat(self.log_probs, dim=0).detach().view(-1, 1).to(device)
 
         # assert torch.isfinite(advantages).all(), "\nNon-finite advantages!\n"
         # assert torch.isfinite(values).all(), "\nNon-finite values!\n"
         # assert torch.isfinite(rewards).all(), "\nNon-finite rewards!\n"
-        
+
         total_actor_loss = 0.0
         total_critic_loss = 0.0
         total_entropy = 0.0
