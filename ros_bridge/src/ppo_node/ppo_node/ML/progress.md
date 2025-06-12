@@ -186,3 +186,8 @@ Changed Hyperparameters:
 - MINIBATCH_SIZE = 512 -> **128**
 - NUM_EPOCHS = 4 -> **5**
 - POLICY_CLIP = 0.2 -> **0.1**
+
+### v4.0.2
+
+- Removed commented out code
+- Format
