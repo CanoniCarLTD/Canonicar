@@ -1,0 +1,4 @@
+ros_bridge/src/vae/vae/model/vae_full.pth filter=lfs diff=lfs merge=lfs -text
+ros_bridge/src/vae/vae/model/encoder.pth filter=lfs diff=lfs merge=lfs -text
+ros_bridge/src/vae/vae/model/decoder.pth filter=lfs diff=lfs merge=lfs -text
+ros_bridge/src/vae/vae/model/vae_encoder_only.pth filter=lfs diff=lfs merge=lfs -text
