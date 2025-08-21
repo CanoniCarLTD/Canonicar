@@ -103,7 +103,6 @@ class LoadMapNode(Node):
             # self.get_logger().info(f"Using improved OpenDRIVE generation parameters")
             # self.client.generate_opendrive_world(opendrive_data, opendrive_params)
             self.world = self.client.get_world()
-
             settings = self.world.get_settings()
             settings.synchronous_mode = False
             # settings.fixed_delta_seconds = 0.025  # 40Hz simulation (4× sensor frequency)

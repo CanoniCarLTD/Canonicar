@@ -287,13 +287,13 @@ class DataCollector(Node):
     def aggregate_state_vector(self, vision_features, imu_features):
         """Aggregate features into a single state vector."""
         # Total vector size: 192 (vision) + 5 (IMU) = 197
-        state_vector = np.zeros(134, dtype=np.float32)
+        state_vector = np.zeros(198, dtype=np.float32)
 
         # Fill with vision features (fused RGB + LiDAR)
-        state_vector[:128] = vision_features
+        state_vector[:192] = vision_features
 
         # # Add IMU data
-        state_vector[128:134] = imu_features
+        state_vector[192:198] = imu_features
 
         return state_vector
 

@@ -30,11 +30,13 @@ class ActorNetwork(nn.Module):
         self.log_std = nn.Parameter(torch.ones(action_dim) * -0.7)
 
         self.fc = nn.Sequential(
-            nn.Linear(input_dim, 256),
+            nn.Linear(input_dim, 500),
             nn.Tanh(),
-            nn.Linear(256, 128),
+            nn.Linear(500, 300),
             nn.Tanh(),
-            nn.Linear(128, action_dim),
+            nn.Linear(300, 100),
+            nn.Tanh(),
+            nn.Linear(100, action_dim),
         )
         self.init_weights()
 
@@ -105,11 +107,13 @@ class CriticNetwork(nn.Module):
         super(CriticNetwork, self).__init__()
 
         self.fc = nn.Sequential(
-            nn.Linear(input_dim, 256),
+            nn.Linear(input_dim, 500),
             nn.Tanh(),
-            nn.Linear(256, 128),
+            nn.Linear(500, 300),
             nn.Tanh(),
-            nn.Linear(128, 1),
+            nn.Linear(300, 100),
+            nn.Tanh(),
+            nn.Linear(100, 1),
         )
         self.init_weights()
 
@@ -240,7 +244,7 @@ class PPOAgent:
         except Exception as e:
             self.logger.info(f"❌ Error saving model + optimizer: {e}")
 
-    def load_model_and_optimizers(self, directory):
+    def old_load_model_and_optimizers(self, directory):
         self.logger.info(f"Loading model + optimizer from: {directory}")
         try:
             self.actor.load_state_dict(
@@ -264,6 +268,66 @@ class PPOAgent:
             self.logger.info("Model and optimizer states loaded successfully.")
         except Exception as e:
             self.logger.info(f"❌ Error loading model and optimizer: {e}")
+
+    def load_model_and_optimizers(self, directory):
+        """Load model weights only.
+
+        Supports either passing a path to a single .pth file, or a directory
+        containing a single .pth file. The function expects a flat state_dict
+        using keys prefixed with 'actor.' and 'critic.' (e.g. 'actor.0.weight').
+        Optimizer states are intentionally ignored.
+        """
+        self.logger.info(f"Loading model weights from: {directory}")
+        try:
+            # Determine candidate checkpoint file
+            single = None
+            if os.path.isfile(directory) and directory.endswith('.pth'):
+                single = directory
+            elif os.path.isdir(directory):
+                pths = [f for f in os.listdir(directory) if f.endswith('.pth')]
+                # prefer a file that's not explicitly named actor.pth/critic.pth
+                for p in pths:
+                    if p not in ("actor.pth", "critic.pth"):
+                        single = os.path.join(directory, p)
+                        break
+                if single is None and pths:
+                    single = os.path.join(directory, pths[0])
+
+            if single is None:
+                raise FileNotFoundError(f"No .pth checkpoint file found at {directory}")
+
+            self.logger.info(f"Loading checkpoint: {single}")
+            data = torch.load(single, map_location=device)
+            # support nested 'state_dict'
+            if isinstance(data, dict) and 'state_dict' in data:
+                data = data['state_dict']
+
+            if not isinstance(data, dict):
+                raise RuntimeError("Checkpoint does not contain a state_dict-like mapping")
+
+            # build actor/critic sub-dicts by prefix
+            actor_sd = {k[len('actor.'):]: v for k, v in data.items() if isinstance(k, str) and k.startswith('actor.')}
+            critic_sd = {k[len('critic.'):]: v for k, v in data.items() if isinstance(k, str) and k.startswith('critic.')}
+
+            if actor_sd:
+                info = self.actor.load_state_dict(actor_sd, strict=False)
+                self.logger.info(f"Actor load: missing_keys={info.missing_keys}, unexpected_keys={info.unexpected_keys}")
+                if info.missing_keys:
+                    self.logger.warning("Actor missing keys after load; architecture may not match checkpoint")
+            else:
+                self.logger.warning("No 'actor.' prefixed keys found in checkpoint; actor not loaded")
+
+            if critic_sd:
+                info = self.critic.load_state_dict(critic_sd, strict=False)
+                self.logger.info(f"Critic load: missing_keys={info.missing_keys}, unexpected_keys={info.unexpected_keys}")
+                if info.missing_keys:
+                    self.logger.warning("Critic missing keys after load; architecture may not match checkpoint")
+            else:
+                self.logger.warning("No 'critic.' prefixed keys found in checkpoint; critic not loaded")
+
+            self.logger.info("Model weights loaded (optimizers were ignored).")
+        except Exception as e:
+            self.logger.info(f"❌ Error loading model weights: {e}")
 
     ##################################################################################################
     #                                       NORMALIZE ADVANTAGES

@@ -180,7 +180,7 @@ class SpawnVehicleNode(Node):
 
             road_waypoints.sort(key=lambda wp: wp.s)
             
-            spawn_waypoint = road_waypoints[10]
+            spawn_waypoint = road_waypoints[2]
 
 
             self.get_logger().info(
@@ -188,7 +188,7 @@ class SpawnVehicleNode(Node):
             )
 
             self.spawn_transform = spawn_waypoint.transform
-            self.spawn_transform.location.z += 0.2
+            self.spawn_transform.location.z += 3
 
             self.vehicle = self.world.try_spawn_actor(vehicle_bp, self.spawn_transform)
             if not self.vehicle:

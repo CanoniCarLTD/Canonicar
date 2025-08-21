@@ -4,13 +4,12 @@ All the hyper-parameters needed for the PPO algorithm implementation.
 
 import numpy as np
 
-MODEL_LOAD = False
-
+MODEL_LOAD = True
 # Directory to save model checkpoints - always stays the same
 PPO_CHECKPOINT_DIR = "/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models"
 
 # Set to None unless you're continuing an exact run (same version/run folder)
-CHECKPOINT_FILE = "/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models/v4.0.1/run_20250527_0030"
+CHECKPOINT_FILE = "/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models/v4.0.2/run_20250821_0001"
 
 VERSION = "v4.0.2"
 
@@ -32,7 +31,7 @@ SAVE_EVERY_N_TIMESTEPS = LEARN_EVERY_N_STEPS * 2  # Save model every 2 policy up
 EPISODES = 1e8  # Not in use
 
 # PPO-specific hyperparameters
-PPO_INPUT_DIM = 134
+PPO_INPUT_DIM = 198
 TOTAL_TIMESTEPS = 2e8  # Total number of timesteps for training
 
 # Exploration settings (action noise)
