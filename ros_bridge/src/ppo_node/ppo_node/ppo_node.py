@@ -785,12 +785,6 @@ class PPOModelNode(Node):
                 "cumulative_reward": float(self.current_ep_reward),
             }
 
-            # Save metrics to MongoDB using the existing connection
-            # try:
-            #     self.save_to_mongodb(schema=metrics)
-            # except Exception as e:
-            #     self.get_logger().error(f"❌ Step metrics not saved to MongoDB: {e}")
-
         except Exception as e:
             self.get_logger().error(f"Failed to log step metrics: {e}")
             self.log_error("log_every_learn_step_metrics", str(e))
