@@ -31,7 +31,7 @@ SAVE_EVERY_N_TIMESTEPS = LEARN_EVERY_N_STEPS * 2  # Save model every 2 policy up
 EPISODES = 1e8  # Not in use
 
 # PPO-specific hyperparameters
-PPO_INPUT_DIM = 198
+PPO_INPUT_DIM = 101
 TOTAL_TIMESTEPS = 2e8  # Total number of timesteps for training
 
 # Exploration settings (action noise)
@@ -40,9 +40,9 @@ ACTION_STD_DECAY_RATE = 0.0  # Not used as we are currently using learnable acti
 MIN_ACTION_STD = 0.1
 
 # PPO optimization parameters
-ACTOR_LEARNING_RATE = 7.5e-5  # 0.000075
-CRITIC_LEARNING_RATE = 7.5e-5  # 0.000075
-POLICY_CLIP = 0.1  # CHANGED from 0.2 to 0.1
+ACTOR_LEARNING_RATE = 1e-4  # 0.0001
+CRITIC_LEARNING_RATE = 1e-4  # 0.0001
+POLICY_CLIP = 0.2
 ENTROPY_COEF = 0.01  # might wanna do 0.005 later
 LAMBDA_GAE = 0.95
 VF_COEF = 0.5  # Giving half the weight to critic loss relative to the summed losses

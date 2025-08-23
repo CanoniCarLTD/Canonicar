@@ -191,3 +191,4 @@ Changed Hyperparameters:
 
 - Removed commented out code
 - Format
+- POLICY_CLIP = 0.1 -> **0.2**
