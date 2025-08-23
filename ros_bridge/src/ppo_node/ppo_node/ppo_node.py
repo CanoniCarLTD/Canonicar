@@ -106,7 +106,7 @@ class PPOModelNode(Node):
         self.get_logger().info(f"Checkpoint directory: {PPO_CHECKPOINT_DIR}")
 
         self.state = None
-        self.action = None
+        self.action = [0.0, 0.0]
         self.reward = 0.0
         self.done = False
 
@@ -429,14 +429,11 @@ class PPOModelNode(Node):
     #                                       STORE TRANSITION
     ##################################################################################################
 
-    def store_transition(
-        self, state=None, action=None, log_prob=None, reward=None, done=None
-    ):
+
+    def store_transition(self, state=None, action=None, log_prob=None, reward=None, done=None):
         state = self.state if state is None else state
         if self.current_sim_state in ["RESPAWNING", "MAP_SWAPPING"] or state is None:
-            self.get_logger().debug(
-                "Skipping transition storage during respawn or with None state"
-            )
+            self.get_logger().debug("Skipping transition storage during respawn or with None state")
             return
 
         action = self.action if action is None else action
@@ -446,14 +443,20 @@ class PPOModelNode(Node):
 
         assert action is not None, "Trying to store transition with None action!"
 
-        value = self.ppo_agent.critic(
-            torch.tensor(state, dtype=torch.float32).to(device).unsqueeze(0)
-        ).item()
+        # NEW: value from unified ActorCritic (on device)
+        with torch.no_grad():
+            v = self.ppo_agent.ac.get_value(
+                torch.tensor(state, dtype=torch.float32, device=device).unsqueeze(0)
+            ).item()
 
-        if isinstance(log_prob, torch.Tensor):
-            log_prob = log_prob.item()
+        # Normalize log_prob input type; PPOAgent.store_transition handles either
+        if isinstance(log_prob, torch.Tensor) and log_prob.numel() == 1:
+            lp = log_prob  # keep as tensor
+        else:
+            lp = float(log_prob)
 
-        self.ppo_agent.store_transition(state, action, log_prob, value, reward, done)
+        self.ppo_agent.store_transition(state, action, lp, v, reward, done)
+
 
     ##################################################################################################
     #                                           RESET RUN
@@ -534,6 +537,12 @@ class PPOModelNode(Node):
 
         if self.timestep_counter < self.total_timesteps:
             self.state = np.array(msg.data, dtype=np.float32)
+            self.state[96:97] = self.action[0] if self.action is not None else 0.0 #prev steer
+            self.state[97:98] = self.action[1] if self.action is not None else 0.0 #prev throttle
+            # deviation from centerline
+            self.state[98:99] = self.lateral_deviation
+            # heading deviation
+            self.state[99:100] = self.heading_deviation
 
             self.calculate_reward()  # compute reward for previous transition
             reward_to_store = self.reward
@@ -667,21 +676,20 @@ class PPOModelNode(Node):
         self.load_training_metadata(state_dict_dir)
 
     def save_training_metadata(self, state_dict_dir):
-        log_std = self.ppo_agent.actor.log_std
-        if not torch.isfinite(log_std).all():
-            raise RuntimeError(f"NaN/Inf detected in log_std: {log_std}")
-        log_std = log_std.detach().cpu().tolist()
-        meta = {
-            "episode_counter": self.episode_counter,
-            "timestep_counter": self.timestep_counter,
-            "log_std": log_std,
-            "current_ep_reward": self.current_ep_reward,
-            "current_step_in_episode": self.current_step_in_episode,
-            "learn_step_counter": self.ppo_agent.learn_step_counter,
-            "entropy_coef": self.ppo_agent.entropy_coef,
-        }
-        # self.save_to_mongodb(meta)
         try:
+            # Persist fixed action stds (Idrees-style)
+            action_std = self.ppo_agent.ac.cov_var.detach().cpu().tolist()
+
+            meta = {
+                "episode_counter": self.episode_counter,
+                "timestep_counter": self.timestep_counter,
+                "action_std": action_std,  # << replaces log_std
+                "current_ep_reward": self.current_ep_reward,
+                "current_step_in_episode": self.current_step_in_episode,
+                "learn_step_counter": self.ppo_agent.learn_step_counter,
+                "entropy_coef": self.ppo_agent.entropy_coef,
+            }
+
             meta_path = os.path.join(state_dict_dir, "meta.json")
             with open(meta_path, "w") as f:
                 json.dump(meta, f)
@@ -689,32 +697,36 @@ class PPOModelNode(Node):
         except Exception as e:
             self.get_logger().error(f"❌ Metadata not saved: {e}")
 
+
     def load_training_metadata(self, state_dict_dir):
         try:
             meta_path = os.path.join(state_dict_dir, "meta.json")
             if os.path.exists(meta_path):
                 with open(meta_path, "r") as f:
                     meta = json.load(f)
+
                 self.episode_counter = meta.get("episode_counter", 0)
                 self.timestep_counter = meta.get("timestep_counter", 0)
                 self.current_ep_reward = meta.get("current_ep_reward", 0)
                 self.current_step_in_episode = meta.get("current_step_in_episode", 0)
                 self.ppo_agent.learn_step_counter = meta.get("learn_step_counter", 0)
                 self.ppo_agent.entropy_coef = meta.get("entropy_coef", ENTROPY_COEF)
-                log_std_list = meta.get("log_std")
-                if log_std_list is not None:
-                    log_std_tensor = torch.tensor(
-                        log_std_list, dtype=torch.float32, device=device
-                    )
-                with torch.no_grad():
-                    self.ppo_agent.actor.log_std.copy_(log_std_tensor)
+
+                action_std_list = meta.get("action_std")
+                if action_std_list is not None:
+                    std_tensor = torch.tensor(action_std_list, dtype=torch.float32, device=device)
+                    with torch.no_grad():
+                        # restore into both current and old policies
+                        for ac in (self.ppo_agent.ac, self.ppo_agent.old_ac):
+                            ac.cov_var.copy_(std_tensor)
+                            ac.cov_mat.copy_(torch.diag(ac.cov_var).unsqueeze(0))
+
                 self.get_logger().info(f"Metadata loaded: {meta}")
             else:
-                self.get_logger().warn(
-                    f"No meta.json found in {state_dict_dir}. No metadata loaded."
-                )
+                self.get_logger().warn(f"No meta.json found in {state_dict_dir}. No metadata loaded.")
         except Exception as e:
             self.get_logger().error(f"❌ Metadata not loaded: {e}")
+
 
     def log_hyperparameters(self):
         hparams = {

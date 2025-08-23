@@ -50,6 +50,13 @@ class DataCollector(Node):
         self.imu_mean = np.zeros(6, dtype=np.float32)
         self.imu_var = np.ones(6, dtype=np.float32)
         self.imu_count = 1e-4  # avoid div by zero
+        self.prev_time = 0
+        # concat 5 more values: velocity, throttle, previous steer, dev from center and angle
+        
+        self.velocity = 0.0
+        self.velocity_x = 0.0
+        self.velocity_y = 0.0
+        self.velocity_z = 0.0
 
         # Create state subscriber first to handle simulation status
         self.state_subscription = self.create_subscription(
@@ -205,6 +212,7 @@ class DataCollector(Node):
 
     def process_data(self, image_msg, lidar_msg, imu_msg):
         """Process sensor data into state vector"""
+        self.process_imu(imu_msg)
         # Extract semantic segmentation image directly (already processed by carla_semantic_image_to_ros_image)
         raw_image = np.frombuffer(image_msg.data, dtype=np.uint8).reshape(
             (image_msg.height, image_msg.width, 3)  # BGR format from semantic converter
@@ -231,11 +239,10 @@ class DataCollector(Node):
         # Process using vision model - note that we're passing raw_image directly
         # which is now a semantic segmentation image
         vision_features = self.vision_processor.process_sensor_data(raw_image, points)
-
-        return self.aggregate_state_vector(vision_features, self.process_imu(imu_msg))
+        return self.aggregate_state_vector(vision_features)
 
     def process_vision_data(self, image_msg, lidar_msg):
-        """Process both RGB and LiDAR data using our fusion model."""
+        """Process both segmentation and LiDAR data using our fusion model."""
         # Convert image_msg to numpy array
         raw_image = np.frombuffer(image_msg.data, dtype=np.uint8).reshape(
             (image_msg.height, image_msg.width, -1)
@@ -253,6 +260,31 @@ class DataCollector(Node):
         fused_features = self.vision_processor.process_sensor_data(raw_image, points)
         return fused_features
 
+
+    def update_velocity_from_imu(self, imu_msg):
+        # Get current time
+        current_time = time.time()
+        if self.prev_time is None:
+            self.prev_time = current_time
+            return 0.0  # No velocity update on first call
+
+        # Calculate time difference
+        dt = current_time - self.prev_time
+        self.prev_time = current_time
+
+        # Integrate acceleration to estimate velocity
+        self.velocity_x += imu_msg[0] * dt
+        self.velocity_y += imu_msg[1] * dt
+        self.velocity_z += imu_msg[2] * dt
+
+        # Compute velocity magnitude (m/s)
+        velocity = np.sqrt(
+            self.velocity_x**2 +
+            self.velocity_y**2 +
+            self.velocity_z**2
+        )*3.6  # Convert to km/h
+        return velocity
+    
     def process_imu(self, imu_msg):
         imu_raw = np.array(
             [
@@ -271,7 +303,8 @@ class DataCollector(Node):
 
         # Normalize and clip
         imu_scaled = self.normalize_imu(imu_raw)
-        return imu_scaled.tolist()
+        self.velocity = self.update_velocity_from_imu(imu_scaled)
+    
 
     def update_imu_stats(self, imu_sample):
         delta = imu_sample - self.imu_mean
@@ -284,16 +317,16 @@ class DataCollector(Node):
         normalized = (imu_sample - self.imu_mean) / std
         return np.clip(normalized, -3.0, 3.0)
 
-    def aggregate_state_vector(self, vision_features, imu_features):
+    def aggregate_state_vector(self, vision_features):
         """Aggregate features into a single state vector."""
-        # Total vector size: 192 (vision) + 5 (IMU) = 197
-        state_vector = np.zeros(198, dtype=np.float32)
+        # Total vector size: 95 (vision) + 6 (IMU) = 101
+        state_vector = np.zeros(101, dtype=np.float32)
 
-        # Fill with vision features (fused RGB + LiDAR)
-        state_vector[:192] = vision_features
+        # Fill with vision features (fused Segmentation + LiDAR)
+        state_vector[:95] = vision_features
 
         # # Add IMU data
-        state_vector[192:198] = imu_features
+        state_vector[95:96] = self.velocity
 
         return state_vector
 

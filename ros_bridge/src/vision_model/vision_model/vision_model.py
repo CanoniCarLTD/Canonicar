@@ -82,7 +82,7 @@ class LiDAREncoder(nn.Module):
 class SensorFusionModel(nn.Module):
     """Model that fuses Semantic and LiDAR data for autonomous driving."""
 
-    def __init__(self, lidar_features=64 ,latent_dim=128, final_features=192):
+    def __init__(self,latent_dim=95, final_features=95):
         super(SensorFusionModel, self).__init__()
         # self.semantic_encoder = SemanticEncoder(output_features=semantic_features)
         self.vae_encoder = VariationalEncoder(latent_dims=latent_dim)
@@ -93,13 +93,13 @@ class SensorFusionModel(nn.Module):
         self.vae_encoder.eval()
         for p in self.vae_encoder.parameters():
             p.requires_grad = False
-        self.lidar_encoder = LiDAREncoder(in_ch=3, output_features=lidar_features)
+        # self.lidar_encoder = LiDAREncoder(in_ch=3, output_features=lidar_features)
         # Fusion layer to combine the features
         self.fusion_layer = nn.Sequential(
-            nn.Linear(latent_dim + lidar_features, final_features), nn.ReLU()
+            nn.Linear(latent_dim, final_features), nn.ReLU()
         )
 
-    def forward(self, semantic_image,lidar_bev):
+    def forward(self, semantic_image):
         """
         Forward pass through the model
 
@@ -111,13 +111,13 @@ class SensorFusionModel(nn.Module):
             tensor: Fused feature vector
         """
         semantic_features = self.vae_encoder(semantic_image)
-        lidar_features = self.lidar_encoder(lidar_bev)
+        # lidar_features = self.lidar_encoder(lidar_bev)
 
         # Concatenate features
-        fused_features = torch.cat([semantic_features, lidar_features], dim=1)
+        # fused_features = torch.cat([semantic_features, lidar_features], dim=1)
 
         # Further compress features
-        fused_features = self.fusion_layer(fused_features)
+        fused_features = self.fusion_layer(semantic_features)
 
         return fused_features
 
@@ -126,7 +126,7 @@ class VisionProcessor:
     """Helper class to process raw sensor data before feeding to the model."""
 
     def __init__(
-        self, lidar_grid_size=(64, 64), height_range=(-2.0, 4.0), device="cpu"
+        self, height_range=(-2.0, 4.0), device="cpu"
     ):
         """
         Initialize the vision processor
@@ -136,7 +136,7 @@ class VisionProcessor:
             height_range (tuple): Min and max height for LiDAR points
             device: Torch device to run on
         """
-        self.lidar_grid_size = lidar_grid_size
+        # self.lidar_grid_size = lidar_grid_size
         self.height_range = height_range
         self.device = device
 
@@ -146,15 +146,15 @@ class VisionProcessor:
 
         # Create and load the model
         self.model = SensorFusionModel(
-            latent_dim=128,lidar_features=64, final_features=192
+            latent_dim=95, final_features=95
         ).to(self.device)
         self.model.eval()
 
         # Model warmup for more consistent timing
         dummy_semantic = torch.zeros((1, 3, 80, 160), device=self.device)
-        dummy_lidar = torch.zeros((1, 3, 64, 64), device=self.device)
+        # dummy_lidar = torch.zeros((1, 3, 64, 64), device=self.device)
         with torch.no_grad():
-            self.model(dummy_semantic, dummy_lidar)
+            self.model(dummy_semantic)
 
         # debugging
         # z = self.model.vae_encoder(dummy_semantic)
@@ -284,19 +284,19 @@ class VisionProcessor:
         semantic_tensor = self.process_semantic(semantic_image)
 
         # Process LiDAR
-        lidar_tensor = self.lidar_to_bev(lidar_points)
+        # lidar_tensor = self.lidar_to_bev(lidar_points)
 
         # sanity-check the shapes are exactly what the model expects
         assert semantic_tensor.shape == (1, 3, 80, 160), (
             f"semantic_tensor wrong shape {semantic_tensor.shape}, "
             "expected (1,3,80,160)"
         )
-        assert lidar_tensor.shape[1:] == (3, 64, 64), (
-            f"lidar_tensor wrong shape {lidar_tensor.shape}, " "expected (_,3,64,64)"
-        )
+        # assert lidar_tensor.shape[1:] == (3, 64, 64), (
+        #     f"lidar_tensor wrong shape {lidar_tensor.shape}, " "expected (_,3,64,64)"
+        # )
 
         # Run inference
         with torch.no_grad():
-            features = self.model(semantic_tensor, lidar_tensor)
+            features = self.model(semantic_tensor)
 
         return features.cpu().numpy()[0]  # Return as numpy array

@@ -6,7 +6,7 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 import numpy as np
-from torch.distributions import MultivariateNormal, Normal
+from torch.distributions import MultivariateNormal
 from .parameters import *
 
 # os.environ["CUDA_LAUNCH_BLOCKING"] = "1"  # might reduce performance time! Uncomment for debugging CUDA errors
@@ -18,96 +18,39 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 #                                       ACTOR AND CRITIC NETWORKS
 ##################################################################################################
 
-LOG_STD_MIN = -20
-LOG_STD_MAX = 2
+# NOTE:
+# - Idrees-style unified ActorCritic:
+#     * actor: MLP with Tanh head -> mean in [-1,1]^action_dim
+#     * critic: MLP -> V(s)
+#     * fixed diagonal covariance (no learnable log_std)
+#     * MultivariateNormal for sampling / logprob
+# - Explicit sampling/eval methods; forward() left unimplemented on purpose.
 
-
-class ActorNetwork(nn.Module):
-    def __init__(self, input_dim, action_dim):
-        super(ActorNetwork, self).__init__()
+class ActorCritic(nn.Module):
+    def __init__(self, obs_dim, action_dim, action_std_init: float):
+        super(ActorCritic, self).__init__()
+        self.obs_dim = obs_dim
         self.action_dim = action_dim
 
-        self.log_std = nn.Parameter(torch.ones(action_dim) * -0.7)
+        # Fixed diagonal covariance; registered so .to(device) moves it.
+        self.register_buffer("cov_var", torch.full((action_dim,), float(action_std_init)))
+        self.register_buffer("cov_mat", torch.diag(self.cov_var).unsqueeze(dim=0))  # [1,A,A]
 
-        self.fc = nn.Sequential(
-            nn.Linear(input_dim, 500),
+        # actor
+        self.actor = nn.Sequential(
+            nn.Linear(self.obs_dim, 500),
             nn.Tanh(),
             nn.Linear(500, 300),
             nn.Tanh(),
             nn.Linear(300, 100),
             nn.Tanh(),
-            nn.Linear(100, action_dim),
+            nn.Linear(100, self.action_dim),
+            nn.Tanh(),  # outputs in [-1,1]
         )
-        self.init_weights()
 
-    def init_weights(self):
-        for m in self.fc:
-            if isinstance(m, nn.Linear):
-                nn.init.orthogonal_(m.weight, gain=np.sqrt(2))
-                nn.init.zeros_(m.bias)
-        self.fc[-1].bias.data.zero_()
-
-    def forward(self, state):
-        return self.fc(state)
-
-    def get_dist(self, state):
-        mean = self.forward(state)
-        log_std = torch.clamp(self.log_std, LOG_STD_MIN, LOG_STD_MAX)
-        std = torch.exp(log_std).expand_as(mean)
-        return Normal(mean, std)
-
-    def sample_action(self, state):
-        dist = self.get_dist(state)
-        raw_action = dist.rsample()  # Reparameterization trick
-        action = torch.tanh(raw_action)
-        steer = action[:, 0:1]  # [-1, 1]
-        throttle = (action[:, 1:2] + 1) / 2  # map [-1,1] to [0,1]
-        final_action = torch.cat([steer, throttle], dim=1)
-        raw_log_prob = dist.log_prob(raw_action).sum(dim=-1, keepdim=True)
-        squash_correction = torch.log(1 - action.pow(2) + 1e-6).sum(
-            dim=-1, keepdim=True
-        )
-        log_prob = raw_log_prob - squash_correction
-        return final_action.detach(), log_prob
-
-    def evaluate_actions(self, state, action):
-        steer = action[:, 0:1]
-        throttle = action[:, 1:2] * 2 - 1  # map [0,1] to [-1,1]
-        squashed_action = torch.cat([steer, throttle], dim=1).clamp(-0.999, 0.999)
-        raw_action = 0.5 * torch.log((1 + squashed_action) / (1 - squashed_action))
-        dist = self.get_dist(state)
-        raw_log_prob = dist.log_prob(raw_action).sum(dim=-1, keepdim=True)
-        squash_correction = torch.log(1 - squashed_action.pow(2) + 1e-6).sum(
-            dim=-1, keepdim=True
-        )
-        log_prob = raw_log_prob - squash_correction
-        entropy = dist.entropy().sum(dim=-1, keepdim=True)
-        return log_prob, entropy
-
-    def act_deterministic(self, state: torch.Tensor) -> np.ndarray:
-        """
-        Given a single state [1xinput_dim], return the *mean* action
-        (no noise) as a numpy array [action_dim].
-        """
-        dist = self.get_dist(state)  # MultivariateNormal
-        raw_mean = dist.mean  # shape [1, action_dim]
-        normal = Normal(0.0, 1.0)
-        cdf_mean = normal.cdf(raw_mean)  # map Gaussian to [0,1]
-
-        # steering in [-1,1], throttle in [0,1]
-        steer = 2.0 * cdf_mean[..., 0:1] - 1.0
-        throttle = cdf_mean[..., 1:2]
-
-        action = torch.cat([steer, throttle], dim=1)
-        return action.detach().cpu().numpy()[0]
-
-
-class CriticNetwork(nn.Module):
-    def __init__(self, input_dim):
-        super(CriticNetwork, self).__init__()
-
-        self.fc = nn.Sequential(
-            nn.Linear(input_dim, 500),
+        # critic
+        self.critic = nn.Sequential(
+            nn.Linear(self.obs_dim, 500),
             nn.Tanh(),
             nn.Linear(500, 300),
             nn.Tanh(),
@@ -115,50 +58,80 @@ class CriticNetwork(nn.Module):
             nn.Tanh(),
             nn.Linear(100, 1),
         )
-        self.init_weights()
 
-    def init_weights(self):
-        for m in self.fc:
-            if isinstance(m, nn.Linear):
-                nn.init.orthogonal_(m.weight, gain=np.sqrt(2))
-                nn.init.zeros_(m.bias)
+    def forward(self):
+        raise NotImplementedError  # defensive: use explicit methods below
 
-    def forward(self, state):
-        return self.fc(state)
+    def set_action_std(self, new_action_std: float):
+        # updates registered buffers
+        with torch.no_grad():
+            self.cov_var.fill_(float(new_action_std))
+            self.cov_mat.copy_(torch.diag(self.cov_var).unsqueeze(0))
+
+    @torch.no_grad()
+    def get_value(self, obs):
+        if isinstance(obs, np.ndarray):
+            obs = torch.tensor(obs, dtype=torch.float32, device=device)
+        return self.critic(obs)
+
+    @torch.no_grad()
+    def get_action_and_log_prob(self, obs):
+        # mean in [-1,1] due to tanh head
+        if isinstance(obs, np.ndarray):
+            obs = torch.tensor(obs, dtype=torch.float32, device=device)
+        mean = self.actor(obs)
+        cov = self.cov_mat.expand(mean.shape[0], self.action_dim, self.action_dim)
+        dist = MultivariateNormal(mean, cov)
+        action = dist.sample()           # NOT squashed; can exceed [-1,1]
+        log_prob = dist.log_prob(action) # scalar per batch element
+        return action, log_prob
+
+    def evaluate(self, obs, action):
+        # action is expected in model domain [-1,1]
+        mean = self.actor(obs)
+        cov_var = self.cov_var.expand_as(mean)
+        cov_mat = torch.diag_embed(cov_var)
+        dist = MultivariateNormal(mean, cov_mat)
+        logprobs = dist.log_prob(action)     # [B]
+        dist_entropy = dist.entropy()        # [B]
+        values = self.critic(obs)            # [B,1]
+        return logprobs, values, dist_entropy
 
 
 ##################################################################################################
 #                                       PPO AGENT
 ##################################################################################################
 
-
 class PPOAgent:
     def __init__(self, input_dim=197, action_dim=2, summary_writer=None, logger=None):
         self.logger = logger
         if self.logger is None:
             raise ValueError("Logger not provided. Please provide a logger instance.")
-        self.logger.info("Initializing PPO Agent...")
+        self.logger.info("Initializing PPO Agent (Idrees-style policy/logprob/cov)...")
         self.logger.info(f"device: {device}")
+
         self.input_dim = input_dim if PPO_INPUT_DIM is None else PPO_INPUT_DIM
         self.logger.info(f"Action input dimension: {self.input_dim}")
         self.action_dim = action_dim
+        if self.action_dim != 2:
+            # FATAL: this code assumes [steer, throttle] exactly
+            raise ValueError("action_dim must be 2 (steer[-1,1], throttle[0,1]).")
         self.logger.info(f"Action output dimension: {self.action_dim}")
 
         self.summary_writer = summary_writer
-
         self.entropy_coef = ENTROPY_COEF
 
-        self.actor = ActorNetwork(self.input_dim, action_dim).to(device)
-        self.critic = CriticNetwork(self.input_dim).to(device)
+        # === unified Idrees-style module + frozen copy for sampling (old policy) ===
+        action_std_init = float(globals().get("ACTION_STD_INIT", 0.2))
+        self.ac = ActorCritic(self.input_dim, self.action_dim, action_std_init).to(device)
+        self.old_ac = ActorCritic(self.input_dim, self.action_dim, action_std_init).to(device)
+        self.old_ac.load_state_dict(self.ac.state_dict())
 
-        self.actor_optimizer = optim.Adam(
-            self.actor.parameters(), lr=ACTOR_LEARNING_RATE
-        )
-        self.critic_optimizer = optim.Adam(
-            self.critic.parameters(), lr=CRITIC_LEARNING_RATE
-        )
+        # Keep separate optimizers (actor/critic) like before
+        self.actor_optimizer = optim.Adam(self.ac.actor.parameters(), lr=ACTOR_LEARNING_RATE)
+        self.critic_optimizer = optim.Adam(self.ac.critic.parameters(), lr=CRITIC_LEARNING_RATE)
 
-        # Experience storage
+        # Experience storage (unchanged)
         (
             self.states,
             self.actions,
@@ -166,19 +139,22 @@ class PPOAgent:
             self.vals,
             self.rewards,
             self.dones,
-        ) = (
-            [],
-            [],
-            [],
-            [],
-            [],
-            [],
-        )
+        ) = ([], [], [], [], [], [])
 
         self.learn_step_counter = 0  # Track PPO updates
 
         if not os.path.exists(PPO_CHECKPOINT_DIR):
             os.makedirs(PPO_CHECKPOINT_DIR)
+
+        # WARNINGS about metrics differences vs old implementation
+        self.logger.warning(
+            "Switched to Idrees-style log-probabilities (no tanh squash correction). "
+            "Logged log_probs/entropy are NOT numerically comparable with the previous actor that used squash-correction."
+        )
+        self.logger.warning(
+            "Exploration std is FIXED unless you call set_action_std/decay_action_std. "
+            "Entropy will not naturally anneal from a learnable log_std anymore."
+        )
 
         self.logger.info("PPO Agent initialized.")
 
@@ -187,21 +163,29 @@ class PPOAgent:
     ##################################################################################################
 
     def select_action(self, state):
-        """Select an action and return its log probability."""
-        state = torch.tensor(state, dtype=torch.float32).to(device).unsqueeze(0)
+        """Select an action and return its log probability (from frozen old policy)."""
+        st = torch.tensor(state, dtype=torch.float32, device=device).unsqueeze(0)
 
-        if state.shape[1] != self.input_dim:
+        if st.shape[1] != self.input_dim:
             raise ValueError(
-                f"Expected input dimension {self.input_dim}, but got {state.shape[1]}"
+                f"Expected input dimension {self.input_dim}, but got {st.shape[1]}"
             )
 
-        if torch.isnan(state).any():
-            raise ValueError(f"NaN detected in input state: {state}")
+        if torch.isnan(st).any():
+            raise ValueError(f"NaN detected in input state: {st}")
 
         with torch.no_grad():
-            action, log_prob = self.actor.sample_action(state)
+            # Sample in model domain (can exceed [-1,1] because MVN is unbounded)
+            model_action, log_prob = self.old_ac.get_action_and_log_prob(st)
+            # ✅ Clamp to keep PPO math consistent with env execution
+            model_action = model_action.clamp(-1.0, 1.0)
 
-        return action.cpu().numpy()[0], log_prob
+            # Map to environment semantics: steer∈[-1,1], throttle∈[0,1]
+            steer = model_action[:, 0:1]
+            throttle01 = (model_action[:, 1:2] + 1.0) / 2.0
+            env_action = torch.cat([steer, throttle01], dim=1)
+
+        return env_action.cpu().numpy()[0], log_prob.unsqueeze(0)  # keep [1]-like before
 
     ##################################################################################################
     #                                     STORE LAST EXPERIENCE
@@ -225,11 +209,12 @@ class PPOAgent:
     ##################################################################################################
 
     def save_model_and_optimizers(self, directory):
-        self.logger.info("Saving model + optimizer...")
+        self.logger.info("Saving model + optimizer (ActorCritic unified)...")
         try:
+            os.makedirs(directory, exist_ok=True)
 
-            torch.save(self.actor.state_dict(), os.path.join(directory, "actor.pth"))
-            torch.save(self.critic.state_dict(), os.path.join(directory, "critic.pth"))
+            # Unified AC file instead of separate actor/critic files.
+            torch.save(self.ac.state_dict(), os.path.join(directory, "ac.pth"))
 
             torch.save(
                 self.actor_optimizer.state_dict(),
@@ -245,14 +230,13 @@ class PPOAgent:
             self.logger.info(f"❌ Error saving model + optimizer: {e}")
 
     def old_load_model_and_optimizers(self, directory):
+        # WARNING: legacy API retained, but we now use a single ac.pth
         self.logger.info(f"Loading model + optimizer from: {directory}")
         try:
-            self.actor.load_state_dict(
-                torch.load(os.path.join(directory, "actor.pth"), map_location=device)
+            self.ac.load_state_dict(
+                torch.load(os.path.join(directory, "ac.pth"), map_location=device)
             )
-            self.critic.load_state_dict(
-                torch.load(os.path.join(directory, "critic.pth"), map_location=device)
-            )
+            self.old_ac.load_state_dict(self.ac.state_dict())
 
             self.actor_optimizer.load_state_dict(
                 torch.load(
@@ -270,64 +254,13 @@ class PPOAgent:
             self.logger.info(f"❌ Error loading model and optimizer: {e}")
 
     def load_model_and_optimizers(self, directory):
-        """Load model weights only.
+        """Load model weights/optimizers.
 
-        Supports either passing a path to a single .pth file, or a directory
-        containing a single .pth file. The function expects a flat state_dict
-        using keys prefixed with 'actor.' and 'critic.' (e.g. 'actor.0.weight').
-        Optimizer states are intentionally ignored.
+        NOTE: Previously supported flat checkpoints with 'actor.'/'critic.' prefixes.
+        Now we expect a single 'ac.pth'. If you need backward compatibility,
+        add a translator here—do NOT guess formats.
         """
-        self.logger.info(f"Loading model weights from: {directory}")
-        try:
-            # Determine candidate checkpoint file
-            single = None
-            if os.path.isfile(directory) and directory.endswith('.pth'):
-                single = directory
-            elif os.path.isdir(directory):
-                pths = [f for f in os.listdir(directory) if f.endswith('.pth')]
-                # prefer a file that's not explicitly named actor.pth/critic.pth
-                for p in pths:
-                    if p not in ("actor.pth", "critic.pth"):
-                        single = os.path.join(directory, p)
-                        break
-                if single is None and pths:
-                    single = os.path.join(directory, pths[0])
-
-            if single is None:
-                raise FileNotFoundError(f"No .pth checkpoint file found at {directory}")
-
-            self.logger.info(f"Loading checkpoint: {single}")
-            data = torch.load(single, map_location=device)
-            # support nested 'state_dict'
-            if isinstance(data, dict) and 'state_dict' in data:
-                data = data['state_dict']
-
-            if not isinstance(data, dict):
-                raise RuntimeError("Checkpoint does not contain a state_dict-like mapping")
-
-            # build actor/critic sub-dicts by prefix
-            actor_sd = {k[len('actor.'):]: v for k, v in data.items() if isinstance(k, str) and k.startswith('actor.')}
-            critic_sd = {k[len('critic.'):]: v for k, v in data.items() if isinstance(k, str) and k.startswith('critic.')}
-
-            if actor_sd:
-                info = self.actor.load_state_dict(actor_sd, strict=False)
-                self.logger.info(f"Actor load: missing_keys={info.missing_keys}, unexpected_keys={info.unexpected_keys}")
-                if info.missing_keys:
-                    self.logger.warning("Actor missing keys after load; architecture may not match checkpoint")
-            else:
-                self.logger.warning("No 'actor.' prefixed keys found in checkpoint; actor not loaded")
-
-            if critic_sd:
-                info = self.critic.load_state_dict(critic_sd, strict=False)
-                self.logger.info(f"Critic load: missing_keys={info.missing_keys}, unexpected_keys={info.unexpected_keys}")
-                if info.missing_keys:
-                    self.logger.warning("Critic missing keys after load; architecture may not match checkpoint")
-            else:
-                self.logger.warning("No 'critic.' prefixed keys found in checkpoint; critic not loaded")
-
-            self.logger.info("Model weights loaded (optimizers were ignored).")
-        except Exception as e:
-            self.logger.info(f"❌ Error loading model weights: {e}")
+        return self.old_load_model_and_optimizers(directory)
 
     ##################################################################################################
     #                                       NORMALIZE ADVANTAGES
@@ -383,35 +316,33 @@ class PPOAgent:
         states = torch.as_tensor(
             np.array(self.states), dtype=torch.float32, device=device
         )
-        actions = torch.as_tensor(
+        env_actions = torch.as_tensor(
             np.array(self.actions), dtype=torch.float32, device=device
-        )
+        )  # steer[-1,1], throttle[0,1]
         rewards = torch.as_tensor(self.rewards, dtype=torch.float32, device=device)
         dones = torch.as_tensor(self.dones, dtype=torch.float32, device=device)
 
         # fresh value estimates (no need to store them in memory)
         with torch.no_grad():
-            values = self.critic(states).squeeze()
+            values_now = self.ac.get_value(states).squeeze(-1)  # [T]
             last_value = (
-                torch.zeros(1, device=device).squeeze()
+                torch.zeros((), device=device)
                 if dones[-1]
-                else self.critic(states[-1:]).squeeze()
+                else self.ac.get_value(states[-1:]).squeeze()
             )
 
-        assert values.ndim == 1, f"Expected values to be 1D, got {values.shape}"
-        assert last_value.ndim == 0 or last_value.shape == torch.Size(
-            []
-        ), f"Expected scalar last_value, got {last_value.shape}"
-
-        values = torch.cat([values, last_value.view(1)])
+        values = torch.cat([values_now, last_value.view(1)], dim=0)  # [T+1]
 
         advantages, returns = self.compute_gae(rewards, values, dones)
         returns = (returns - returns.mean()) / (returns.std() + 1e-8)
         old_log_probs = torch.cat(self.log_probs, dim=0).detach().view(-1, 1).to(device)
 
-        # assert torch.isfinite(advantages).all(), "\nNon-finite advantages!\n"
-        # assert torch.isfinite(values).all(), "\nNon-finite values!\n"
-        # assert torch.isfinite(rewards).all(), "\nNon-finite rewards!\n"
+        # Map env actions back to model domain for likelihood evaluation
+        steer = env_actions[:, 0:1]                     # already in [-1,1]
+        throttle_m1_1 = env_actions[:, 1:2] * 2.0 - 1.0 # [0,1] -> [-1,1]
+        model_actions = torch.cat([steer, throttle_m1_1], dim=1)
+        # ✅ Clamp to keep training eval consistent with acting & env execution
+        model_actions = model_actions.clamp(-1.0, 1.0)
 
         total_actor_loss = 0.0
         total_critic_loss = 0.0
@@ -419,24 +350,24 @@ class PPOAgent:
         num_batches = 0
 
         # Perform PPO optimization steps
+        N = len(states)
         for _ in range(NUM_EPOCHS):
-            indices = np.arange(len(states))
+            indices = np.arange(N)
             np.random.shuffle(indices)
-            for start in range(0, len(indices), MINIBATCH_SIZE):
+            for start in range(0, N, MINIBATCH_SIZE):
                 batch = indices[start : start + MINIBATCH_SIZE]
 
                 batch_states = states[batch]
-                batch_actions = actions[batch]
+                batch_actions_model = model_actions[batch]
                 batch_old_log_probs = old_log_probs[batch]
                 batch_advantages = advantages[batch].unsqueeze(1).detach()  # [B,1]
-                batch_returns = returns[batch].detach().unsqueeze(1)  # [B,1]
+                batch_returns = returns[batch].detach().unsqueeze(1)        # [B,1]
 
-                # ---- Actor update ----
-                new_log_probs, entropy = self.actor.evaluate_actions(
-                    batch_states, batch_actions
+                # ---- Actor update (new policy) ----
+                new_log_probs, _, entropy = self.ac.evaluate(
+                    batch_states, batch_actions_model
                 )
-                new_log_probs = new_log_probs.view(-1, 1)  # ensure shape [B,1]
-                state_values = self.critic(batch_states).squeeze()
+                new_log_probs = new_log_probs.view(-1, 1)  # [B,1]
 
                 # PPO ratio
                 ratio = torch.exp(new_log_probs - batch_old_log_probs)
@@ -455,16 +386,16 @@ class PPOAgent:
 
                 self.actor_optimizer.zero_grad()
                 actor_loss.backward()
-                torch.nn.utils.clip_grad_norm_(self.actor.parameters(), 0.5)
+                torch.nn.utils.clip_grad_norm_(self.ac.actor.parameters(), 0.5)
                 self.actor_optimizer.step()
 
                 # ---- Critic update ----
-                values_pred = self.critic(batch_states).view(-1, 1)
+                values_pred = self.ac.critic(batch_states).view(-1, 1)
                 critic_loss = F.mse_loss(values_pred, batch_returns)
 
                 self.critic_optimizer.zero_grad()
                 critic_loss.backward()
-                torch.nn.utils.clip_grad_norm_(self.critic.parameters(), 0.5)
+                torch.nn.utils.clip_grad_norm_(self.ac.critic.parameters(), 0.5)
                 self.critic_optimizer.step()
 
                 total_actor_loss += actor_loss.item()
@@ -472,38 +403,26 @@ class PPOAgent:
                 total_entropy += entropy.mean().item()
                 num_batches += 1
 
+        # Sync frozen policy with current (Idrees-style)
+        self.old_ac.load_state_dict(self.ac.state_dict())
         self.learn_step_counter += 1
 
         if self.summary_writer is not None:
             with torch.no_grad():
-                current_log_std = self.actor.log_std.detach().cpu().numpy()
-                current_action_std = (
-                    torch.exp(self.actor.log_std.detach()).cpu().numpy()
-                )
-
+                # NOTE: no per-dim log_std anymore; we expose fixed std from cov_var.
+                current_action_std = self.ac.cov_var.detach().cpu().numpy()
                 self.logger.info(
-                    f"[Learn Step {self.learn_step_counter}] log_std: {current_log_std}, action_std: {current_action_std}"
+                    f"[Learn Step {self.learn_step_counter}] fixed action_std per dim: {current_action_std}"
                 )
-                # Per-dimension logging
-                for i, (ls, std) in enumerate(zip(current_log_std, current_action_std)):
-                    self.summary_writer.add_scalar(
-                        f"Exploration/log_std_dim_{i}", ls, self.learn_step_counter
-                    )
+                for i, std in enumerate(current_action_std):
                     self.summary_writer.add_scalar(
                         f"Exploration/std_dim_{i}", std, self.learn_step_counter
                     )
-                # Overall logging
-                self.summary_writer.add_scalar(
-                    "Exploration/mean log std",
-                    current_log_std.mean(),
-                    self.learn_step_counter,
-                )
                 self.summary_writer.add_scalar(
                     "Exploration/mean std",
                     current_action_std.mean(),
                     self.learn_step_counter,
                 )
-                # self.summary_writer.add_scalar("KL/mean_kl_div", kl.item(), self.learn_step_counter)
                 self.summary_writer.add_scalar(
                     "Exploration/entropy_coef",
                     self.entropy_coef,
@@ -518,17 +437,24 @@ class PPOAgent:
             self.vals,
             self.rewards,
             self.dones,
-        ) = (
-            [],
-            [],
-            [],
-            [],
-            [],
-            [],
-        )
+        ) = ([], [], [], [], [], [])
+
         # Return averaged metrics
         return (
-            total_actor_loss / num_batches,
-            total_critic_loss / num_batches,
-            total_entropy / num_batches,
+            total_actor_loss / max(1, num_batches),
+            total_critic_loss / max(1, num_batches),
+            total_entropy / max(1, num_batches),
         )
+
+    # === Optional: keep API symmetry and expose std control like Idrees ===
+    def set_action_std(self, new_action_std: float):
+        """Manually set fixed exploration std (Idrees-style)."""
+        self.ac.set_action_std(new_action_std)
+        self.old_ac.set_action_std(new_action_std)
+
+    def decay_action_std(self, action_std_decay_rate: float, min_action_std: float):
+        """Linearly decay fixed std. No guessing beyond linear clip."""
+        cur = float(self.ac.cov_var[0].item())
+        cur = max(min_action_std, cur - action_std_decay_rate)
+        self.set_action_std(cur)
+        return cur

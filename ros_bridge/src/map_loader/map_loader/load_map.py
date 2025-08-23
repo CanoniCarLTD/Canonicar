@@ -124,7 +124,7 @@ class LoadMapNode(Node):
             self.get_logger().info("Map setup complete.")
 
             # Visualize waypoints with better information
-            self.visualize_track()
+            # self.visualize_track()
             self.extract_track_waypoints()
             self.get_logger().info(f"Extracted {len(self.track_waypoints)} waypoints from track")
             self.get_logger().info(f"Track length: {self.track_length:.2f} meters")

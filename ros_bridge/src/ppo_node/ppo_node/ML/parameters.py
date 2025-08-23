@@ -31,7 +31,7 @@ SAVE_EVERY_N_TIMESTEPS = LEARN_EVERY_N_STEPS * 2  # Save model every 2 policy up
 EPISODES = 1e8  # Not in use
 
 # PPO-specific hyperparameters
-PPO_INPUT_DIM = 198
+PPO_INPUT_DIM = 101
 TOTAL_TIMESTEPS = 2e8  # Total number of timesteps for training
 
 # Exploration settings (action noise)

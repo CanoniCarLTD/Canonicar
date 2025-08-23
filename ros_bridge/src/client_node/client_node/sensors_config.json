@@ -16,9 +16,9 @@
                 "type": "sensor.camera.semantic_segmentation",
                 "id": "segmentation_front",
                 "spawn_point": {"x": 4.0, "y": 0.0, "z": 2.0, "roll": 0.0, "pitch": -10.0, "yaw": 0.0},
-                "image_size_x": 640,
-                "image_size_y": 480,
-                "fov": 100.0
+                "image_size_x": 160,
+                "image_size_y": 80,
+                "fov": 125.0
             },
             {
                 "type": "sensor.lidar.ray_cast",
