@@ -50,7 +50,7 @@ class DataCollector(Node):
         self.imu_mean = np.zeros(6, dtype=np.float32)
         self.imu_var = np.ones(6, dtype=np.float32)
         self.imu_count = 1e-4  # avoid div by zero
-        self.prev_time = 0
+        self.prev_time = None
         # concat 5 more values: velocity, throttle, previous steer, dev from center and angle
         
         self.velocity = 0.0
@@ -319,8 +319,8 @@ class DataCollector(Node):
 
     def aggregate_state_vector(self, vision_features):
         """Aggregate features into a single state vector."""
-        # Total vector size: 95 (vision) + 6 (IMU) = 101
-        state_vector = np.zeros(101, dtype=np.float32)
+        # Total vector size: 95 (vision) + 5 (speed etc.) = 100
+        state_vector = np.zeros(100, dtype=np.float32)
 
         # Fill with vision features (fused Segmentation + LiDAR)
         state_vector[:95] = vision_features

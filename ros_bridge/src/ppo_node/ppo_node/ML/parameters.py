@@ -9,7 +9,7 @@ MODEL_LOAD = True
 PPO_CHECKPOINT_DIR = "/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models"
 
 # Set to None unless you're continuing an exact run (same version/run folder)
-CHECKPOINT_FILE = "/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models/v4.0.2/run_20250821_0001"
+CHECKPOINT_FILE = "/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models/v4.0.2/run_20250825_0002"
 
 VERSION = "v4.0.2"
 
@@ -31,11 +31,12 @@ SAVE_EVERY_N_TIMESTEPS = LEARN_EVERY_N_STEPS * 2  # Save model every 2 policy up
 EPISODES = 1e8  # Not in use
 
 # PPO-specific hyperparameters
-PPO_INPUT_DIM = 101
+PPO_INPUT_DIM = 100
 TOTAL_TIMESTEPS = 2e8  # Total number of timesteps for training
+USE_MONTE_CARLO = True  # try MC; set False to go back to GAE
 
 # Exploration settings (action noise)
-ACTION_STD_INIT = 0.3
+ACTION_STD_INIT = 0.2
 ACTION_STD_DECAY_RATE = 0.0  # Not used as we are currently using learnable action std
 MIN_ACTION_STD = 0.1
 

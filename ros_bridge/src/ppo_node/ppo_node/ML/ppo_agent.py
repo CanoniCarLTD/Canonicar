@@ -32,8 +32,8 @@ class ActorCritic(nn.Module):
         self.obs_dim = obs_dim
         self.action_dim = action_dim
 
-        # Fixed diagonal covariance; registered so .to(device) moves it.
-        self.register_buffer("cov_var", torch.full((action_dim,), float(action_std_init)))
+        # in ActorCritic.__init__(...), replace the two register_buffer lines:
+        self.register_buffer("cov_var", torch.full((action_dim,), float(action_std_init) ** 2))
         self.register_buffer("cov_mat", torch.diag(self.cov_var).unsqueeze(dim=0))  # [1,A,A]
 
         # actor
@@ -63,9 +63,9 @@ class ActorCritic(nn.Module):
         raise NotImplementedError  # defensive: use explicit methods below
 
     def set_action_std(self, new_action_std: float):
-        # updates registered buffers
         with torch.no_grad():
-            self.cov_var.fill_(float(new_action_std))
+            var = float(new_action_std) ** 2
+            self.cov_var.fill_(var)
             self.cov_mat.copy_(torch.diag(self.cov_var).unsqueeze(0))
 
     @torch.no_grad()
@@ -103,7 +103,7 @@ class ActorCritic(nn.Module):
 ##################################################################################################
 
 class PPOAgent:
-    def __init__(self, input_dim=197, action_dim=2, summary_writer=None, logger=None):
+    def __init__(self, input_dim=100, action_dim=2, summary_writer=None, logger=None):
         self.logger = logger
         if self.logger is None:
             raise ValueError("Logger not provided. Please provide a logger instance.")
@@ -136,7 +136,6 @@ class PPOAgent:
             self.states,
             self.actions,
             self.log_probs,
-            self.vals,
             self.rewards,
             self.dones,
         ) = ([], [], [], [], [], [])
@@ -175,30 +174,51 @@ class PPOAgent:
             raise ValueError(f"NaN detected in input state: {st}")
 
         with torch.no_grad():
-            # Sample in model domain (can exceed [-1,1] because MVN is unbounded)
-            model_action, log_prob = self.old_ac.get_action_and_log_prob(st)
-            # ✅ Clamp to keep PPO math consistent with env execution
-            model_action = model_action.clamp(-1.0, 1.0)
+            # sample from old policy
+            mean = self.old_ac.actor(st)
+            cov = self.old_ac.cov_mat.expand(mean.shape[0], self.action_dim, self.action_dim)
+            dist = MultivariateNormal(mean, cov)
+            model_action = dist.sample()
 
-            # Map to environment semantics: steer∈[-1,1], throttle∈[0,1]
+            # clamp to model range and recompute logprob for the clamped action
+            model_action = model_action.clamp(-1.0, 1.0)
+            log_prob = dist.log_prob(model_action)
+
+            # map to env semantics
             steer = model_action[:, 0:1]
             throttle01 = (model_action[:, 1:2] + 1.0) / 2.0
             env_action = torch.cat([steer, throttle01], dim=1)
 
-        return env_action.cpu().numpy()[0], log_prob.unsqueeze(0)  # keep [1]-like before
+        return env_action.cpu().numpy()[0], log_prob.unsqueeze(0)
 
+    @torch.no_grad()
+    # For evaluation
+    def act_deterministic(self, state_tensor: torch.Tensor):
+        if state_tensor.ndim == 1:
+            state_tensor = state_tensor.unsqueeze(0)
+        mean = self.ac.actor(state_tensor.to(device)).clamp(-1.0, 1.0)
+        steer = mean[:, 0:1]
+        throttle01 = (mean[:, 1:2] + 1.0) / 2.0
+        env_action = torch.cat([steer, throttle01], dim=1)
+        return env_action[0]  # tensor on device
+    
+    
     ##################################################################################################
     #                                     STORE LAST EXPERIENCE
     ##################################################################################################
 
     def store_transition(self, state, action, log_prob, val, reward, done):
-        """Store experience for PPO updates. (every stored data will be used in the next update)"""
         self.states.append(state)
-        self.actions.append(action)
+
+        # action arrives as [steer in -1..1, throttle in 0..1]; convert to model domain
+        a = np.asarray(action, dtype=np.float32).copy()
+        a[1] = a[1] * 2.0 - 1.0  # throttle -> model domain
+        self.actions.append(a)
+
         if not isinstance(log_prob, torch.Tensor):
             lp = torch.tensor([log_prob], dtype=torch.float32, device=device)
         else:
-            lp = log_prob.detach()  # shape [1]
+            lp = log_prob.detach()
         self.log_probs.append(lp)
         self.vals.append(val)
         self.rewards.append(reward)
@@ -233,21 +253,52 @@ class PPOAgent:
         # WARNING: legacy API retained, but we now use a single ac.pth
         self.logger.info(f"Loading model + optimizer from: {directory}")
         try:
-            self.ac.load_state_dict(
-                torch.load(os.path.join(directory, "ac.pth"), map_location=device)
-            )
+            ac_path = os.path.join(directory, "ac.pth")
+            checkpoint = torch.load(ac_path, map_location=device)
+
+            # Support a few checkpoint conventions: either a raw state_dict or a dict with
+            # keys like 'ac', 'model_state_dict', or 'state_dict'. Fall back to the object
+            # itself if nothing obvious is found.
+            model_state = None
+            if isinstance(checkpoint, dict):
+                for k in ("ac", "model_state_dict", "state_dict", "model"):
+                    if k in checkpoint:
+                        model_state = checkpoint[k]
+                        break
+                if model_state is None:
+                    # Could be a raw state_dict saved as a dict; use it as-is.
+                    model_state = checkpoint
+            else:
+                model_state = checkpoint
+
+            # Try strict load first; if it fails (missing/extraneous keys), retry with strict=False
+            try:
+                self.ac.load_state_dict(model_state, strict=True)
+            except Exception as e_strict:
+                self.logger.warning(
+                    f"Strict model load failed ({e_strict}); retrying with strict=False"
+                )
+                # This will ignore missing keys like cov_var/cov_mat and keep the defaults
+                self.ac.load_state_dict(model_state, strict=False)
+
+            # Sync frozen policy
             self.old_ac.load_state_dict(self.ac.state_dict())
 
-            self.actor_optimizer.load_state_dict(
-                torch.load(
-                    os.path.join(directory, "actor_optim.pth"), map_location=device
-                )
-            )
-            self.critic_optimizer.load_state_dict(
-                torch.load(
-                    os.path.join(directory, "critic_optim.pth"), map_location=device
-                )
-            )
+            # Helper to load optimizers if present; tolerate failures.
+            def try_load_optim(opt, filename):
+                p = os.path.join(directory, filename)
+                if os.path.exists(p):
+                    try:
+                        opt_state = torch.load(p, map_location=device)
+                        opt.load_state_dict(opt_state)
+                        self.logger.info(f"Loaded optimizer state from {filename}")
+                    except Exception as e_opt:
+                        self.logger.warning(f"Failed loading {filename}: {e_opt}")
+                else:
+                    self.logger.info(f"Optimizer file {filename} not found; skipping")
+
+            try_load_optim(self.actor_optimizer, "actor_optim.pth")
+            try_load_optim(self.critic_optimizer, "critic_optim.pth")
 
             self.logger.info("Model and optimizer states loaded successfully.")
         except Exception as e:
@@ -274,7 +325,7 @@ class PPOAgent:
             return advantages
 
     ##################################################################################################
-    #                                           COMPUTE GAE
+    #                                           COMPUTE GAE or monte-carlo returns
     ##################################################################################################
 
     def compute_gae(self, rewards, values, dones, gamma=GAMMA, lam=LAMBDA_GAE):
@@ -295,6 +346,17 @@ class PPOAgent:
         advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
         return advantages, returns
 
+    def compute_mc_returns(self, rewards, dones, gamma=GAMMA):
+        T = rewards.size(0)
+        returns = torch.zeros(T, device=device)
+        G = 0.0
+        for t in reversed(range(T)):
+            G = rewards[t] + gamma * G * (1.0 - dones[t])
+            returns[t] = G
+        advantages = returns - self.ac.get_value(self.states_tensor)[...,0].detach()  # or recompute values_now
+        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+        return advantages, returns
+    
     ##################################################################################################
     #                                       NORMALIZE REWARDS
     ##################################################################################################
@@ -333,8 +395,11 @@ class PPOAgent:
 
         values = torch.cat([values_now, last_value.view(1)], dim=0)  # [T+1]
 
-        advantages, returns = self.compute_gae(rewards, values, dones)
-        returns = (returns - returns.mean()) / (returns.std() + 1e-8)
+        if USE_MONTE_CARLO:
+            advantages, returns = self.compute_mc_returns(rewards, dones)
+        else:
+            advantages, returns = self.compute_gae(rewards, values, dones)
+        # returns = (returns - returns.mean()) / (returns.std() + 1e-8)
         old_log_probs = torch.cat(self.log_probs, dim=0).detach().view(-1, 1).to(device)
 
         # Map env actions back to model domain for likelihood evaluation
@@ -354,54 +419,52 @@ class PPOAgent:
         for _ in range(NUM_EPOCHS):
             indices = np.arange(N)
             np.random.shuffle(indices)
+
             for start in range(0, N, MINIBATCH_SIZE):
-                batch = indices[start : start + MINIBATCH_SIZE]
+                b = indices[start:start + MINIBATCH_SIZE]
 
-                batch_states = states[batch]
-                batch_actions_model = model_actions[batch]
-                batch_old_log_probs = old_log_probs[batch]
-                batch_advantages = advantages[batch].unsqueeze(1).detach()  # [B,1]
-                batch_returns = returns[batch].detach().unsqueeze(1)        # [B,1]
+                # Slice and fix shapes to [B,1] where needed
+                b_states      = states[b]                                  # [B, S]
+                b_actions     = model_actions[b]                           # [B, A]  (MODEL domain: steer[-1,1], throttle[-1,1])
+                b_old_logprob = old_log_probs[b].detach().view(-1, 1)      # [B, 1]
+                b_adv         = advantages[b].detach().view(-1, 1)         # [B, 1]  (already normalized; keep as-is)
+                b_returns     = returns[b].detach().view(-1, 1)            # [B, 1]  (DO NOT normalize)
 
-                # ---- Actor update (new policy) ----
-                new_log_probs, _, entropy = self.ac.evaluate(
-                    batch_states, batch_actions_model
-                )
-                new_log_probs = new_log_probs.view(-1, 1)  # [B,1]
+                # ---- Forward new policy ----
+                # evaluate() must return: logprobs [B], values [B,1], entropy [B] (or broadcastable)
+                new_logprob, values, dist_entropy = self.ac.evaluate(b_states, b_actions)
+                new_logprob = new_logprob.view(-1, 1)                      # [B,1]
 
-                # PPO ratio
-                ratio = torch.exp(new_log_probs - batch_old_log_probs)
+                # ---- PPO ratio ----
+                ratio = torch.exp(new_logprob - b_old_logprob)             # [B,1]
 
-                # PPO loss terms
-                surr1 = ratio * batch_advantages
-                surr2 = (
-                    torch.clamp(ratio, 1 - POLICY_CLIP, 1 + POLICY_CLIP)
-                    * batch_advantages
-                )
+                # ---- Clipped surrogate ----
+                surr1 = ratio * b_adv
+                surr2 = torch.clamp(ratio, 1 - POLICY_CLIP, 1 + POLICY_CLIP) * b_adv
+                actor_loss = -torch.min(surr1, surr2).mean()
 
-                # Actor loss
-                actor_loss = -(
-                    torch.min(surr1, surr2).mean() + self.entropy_coef * entropy.mean()
-                )
+                # ---- Critic loss (no return normalization) ----
+                critic_loss = F.mse_loss(values, b_returns) * VF_COEF
 
-                self.actor_optimizer.zero_grad()
-                actor_loss.backward()
+                # ---- Entropy bonus as a separate term ----
+                entropy_loss = -self.entropy_coef * dist_entropy.mean()
+
+                # ---- Joint backward/update ----
+                loss = actor_loss + critic_loss + entropy_loss
+
+                self.actor_optimizer.zero_grad(set_to_none=True)
+                self.critic_optimizer.zero_grad(set_to_none=True)
+                loss.backward()
                 torch.nn.utils.clip_grad_norm_(self.ac.actor.parameters(), 0.5)
-                self.actor_optimizer.step()
-
-                # ---- Critic update ----
-                values_pred = self.ac.critic(batch_states).view(-1, 1)
-                critic_loss = F.mse_loss(values_pred, batch_returns)
-
-                self.critic_optimizer.zero_grad()
-                critic_loss.backward()
                 torch.nn.utils.clip_grad_norm_(self.ac.critic.parameters(), 0.5)
+                self.actor_optimizer.step()
                 self.critic_optimizer.step()
 
                 total_actor_loss += actor_loss.item()
                 total_critic_loss += critic_loss.item()
-                total_entropy += entropy.mean().item()
+                total_entropy += dist_entropy.mean().item()
                 num_batches += 1
+
 
         # Sync frozen policy with current (Idrees-style)
         self.old_ac.load_state_dict(self.ac.state_dict())
