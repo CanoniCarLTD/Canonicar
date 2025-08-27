@@ -188,7 +188,7 @@ class SpawnVehicleNode(Node):
             )
 
             self.spawn_transform = spawn_waypoint.transform
-            self.spawn_transform.location.z += 3
+            self.spawn_transform.location.z += 1.5
 
             self.vehicle = self.world.try_spawn_actor(vehicle_bp, self.spawn_transform)
             if not self.vehicle:

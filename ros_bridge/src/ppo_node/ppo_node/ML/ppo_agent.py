@@ -138,7 +138,7 @@ class PPOAgent:
             self.log_probs,
             self.rewards,
             self.dones,
-        ) = ([], [], [], [], [], [])
+        ) = ([], [], [], [], [])
 
         self.learn_step_counter = 0  # Track PPO updates
 
@@ -207,7 +207,7 @@ class PPOAgent:
     #                                     STORE LAST EXPERIENCE
     ##################################################################################################
 
-    def store_transition(self, state, action, log_prob, val, reward, done):
+    def store_transition(self, state, action, log_prob, reward, done):
         self.states.append(state)
 
         # action arrives as [steer in -1..1, throttle in 0..1]; convert to model domain
@@ -220,7 +220,6 @@ class PPOAgent:
         else:
             lp = log_prob.detach()
         self.log_probs.append(lp)
-        self.vals.append(val)
         self.rewards.append(reward)
         self.dones.append(done)
 
@@ -229,25 +228,17 @@ class PPOAgent:
     ##################################################################################################
 
     def save_model_and_optimizers(self, directory):
-        self.logger.info("Saving model + optimizer (ActorCritic unified)...")
+        # Simplified save: only save the policy (ActorCritic state) to a single file
+        # named `ppo_policy_12.pth`. Do NOT save optimizer state.
+        self.logger.info("Saving policy only (ppo_policy_12.pth) - no optimizers...")
         try:
             os.makedirs(directory, exist_ok=True)
-
-            # Unified AC file instead of separate actor/critic files.
-            torch.save(self.ac.state_dict(), os.path.join(directory, "ac.pth"))
-
-            torch.save(
-                self.actor_optimizer.state_dict(),
-                os.path.join(directory, "actor_optim.pth"),
-            )
-            torch.save(
-                self.critic_optimizer.state_dict(),
-                os.path.join(directory, "critic_optim.pth"),
-            )
-
-            self.logger.info(f"Model + optimizer saved to {directory}")
+            out_path = os.path.join(directory, "ppo_policy_12.pth")
+            # Save a dict with a clear key for forward compatibility
+            torch.save({"ac": self.ac.state_dict()}, out_path)
+            self.logger.info(f"Policy saved to {out_path}")
         except Exception as e:
-            self.logger.info(f"❌ Error saving model + optimizer: {e}")
+            self.logger.info(f"❌ Error saving policy: {e}")
 
     def old_load_model_and_optimizers(self, directory):
         # WARNING: legacy API retained, but we now use a single ac.pth
@@ -305,13 +296,34 @@ class PPOAgent:
             self.logger.info(f"❌ Error loading model and optimizer: {e}")
 
     def load_model_and_optimizers(self, directory):
-        """Load model weights/optimizers.
+        """Load policy saved by `save_model_and_optimizers`.
 
-        NOTE: Previously supported flat checkpoints with 'actor.'/'critic.' prefixes.
-        Now we expect a single 'ac.pth'. If you need backward compatibility,
-        add a translator here—do NOT guess formats.
+        Expect a file named `ppo_policy_12.pth` inside `directory`. The file
+        should contain either a raw state_dict or a dict with key 'ac'.
+        This function only loads the model weights (no optimizers).
         """
-        return self.old_load_model_and_optimizers(directory)
+        self.logger.info(f"Loading policy from: {directory}")
+        try:
+            p = os.path.join(directory, "ppo_policy_12.pth")
+            checkpoint = torch.load(p, map_location=device)
+
+            # Support either {'ac': state_dict} or a raw state_dict
+            if isinstance(checkpoint, dict) and "ac" in checkpoint:
+                model_state = checkpoint["ac"]
+            else:
+                model_state = checkpoint
+
+            try:
+                self.ac.load_state_dict(model_state, strict=False)
+            except Exception as e_load:
+                self.logger.warning(f"Strict load failed: {e_load}; retrying with strict=False")
+                self.ac.load_state_dict(model_state, strict=False)
+
+            # Sync frozen policy 
+            self.old_ac.load_state_dict(self.ac.state_dict())
+            self.logger.info("Policy loaded into ActorCritic.")
+        except Exception as e:
+            self.logger.info(f"❌ Error loading policy: {e}")
 
     ##################################################################################################
     #                                       NORMALIZE ADVANTAGES
@@ -497,10 +509,9 @@ class PPOAgent:
             self.states,
             self.actions,
             self.log_probs,
-            self.vals,
             self.rewards,
             self.dones,
-        ) = ([], [], [], [], [], [])
+        ) = ([], [], [], [], [])
 
         # Return averaged metrics
         return (

@@ -552,8 +552,8 @@ class PPOModelNode(Node):
 
         if self.timestep_counter < self.total_timesteps:
             self.state = np.array(msg.data, dtype=np.float32)
-            self.state[96:97] = self.action[0] if self.action is not None else 0.0 #prev steer
-            self.state[97:98] = self.action[1] if self.action is not None else 0.0 #prev throttle
+            self.state[96:97] = self.action[1] if self.action is not None else 0.0 #prev throttle
+            self.state[97:98] = self.action[0] if self.action is not None else 0.0 #prev steer
             # deviation from centerline
             self.state[98:99] = self.lateral_deviation
             # heading deviation
