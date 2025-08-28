@@ -229,11 +229,11 @@ class PPOAgent:
 
     def save_model_and_optimizers(self, directory):
         # Simplified save: only save the policy (ActorCritic state) to a single file
-        # named `ppo_policy_12.pth`. Do NOT save optimizer state.
-        self.logger.info("Saving policy only (ppo_policy_12.pth) - no optimizers...")
+        # named `ppo_policy_12_.pth`. Do NOT save optimizer state.
+        self.logger.info("Saving policy only (ppo_policy_12_.pth) - no optimizers...")
         try:
             os.makedirs(directory, exist_ok=True)
-            out_path = os.path.join(directory, "ppo_policy_12.pth")
+            out_path = os.path.join(directory, "ppo_policy_12_.pth")
             # Save a dict with a clear key for forward compatibility
             torch.save({"ac": self.ac.state_dict()}, out_path)
             self.logger.info(f"Policy saved to {out_path}")
@@ -298,13 +298,13 @@ class PPOAgent:
     def load_model_and_optimizers(self, directory):
         """Load policy saved by `save_model_and_optimizers`.
 
-        Expect a file named `ppo_policy_12.pth` inside `directory`. The file
+        Expect a file named `ppo_policy_12_.pth` inside `directory`. The file
         should contain either a raw state_dict or a dict with key 'ac'.
         This function only loads the model weights (no optimizers).
         """
         self.logger.info(f"Loading policy from: {directory}")
         try:
-            p = os.path.join(directory, "ppo_policy_12.pth")
+            p = os.path.join(directory, "ppo_policy_12_.pth")
             checkpoint = torch.load(p, map_location=device)
 
             # Support either {'ac': state_dict} or a raw state_dict
