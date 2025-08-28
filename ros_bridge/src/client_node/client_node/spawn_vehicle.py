@@ -156,17 +156,17 @@ class SpawnVehicleNode(Node):
                 return
 
             main_road_id = list(road_ids)[0] if len(road_ids) == 1 else min(road_ids)
-
+                        
             lane_ids = set(wp.lane_id for wp in waypoints if wp.road_id == main_road_id)
-            driving_lane_id = next(
-                (id for id in lane_ids if id < 0),
-                next((id for id in lane_ids if id > 0), 0),
-            )
+
+            driving_lane_id = 1
+            self.get_logger().info(f"lanes id: {lane_ids}, driving lane id: {driving_lane_id}")
+
 
             if driving_lane_id == 0:
                 self.get_logger().error("No valid driving lane found!")
                 return
-
+            
             road_waypoints = [
                 wp
                 for wp in waypoints
@@ -180,7 +180,7 @@ class SpawnVehicleNode(Node):
 
             road_waypoints.sort(key=lambda wp: wp.s)
             
-            spawn_waypoint = road_waypoints[30]
+            spawn_waypoint = road_waypoints[1]
 
 
             self.get_logger().info(
