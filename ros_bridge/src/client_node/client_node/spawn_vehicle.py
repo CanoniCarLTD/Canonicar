@@ -180,7 +180,7 @@ class SpawnVehicleNode(Node):
 
             road_waypoints.sort(key=lambda wp: wp.s)
             
-            spawn_waypoint = road_waypoints[2]
+            spawn_waypoint = road_waypoints[30]
 
 
             self.get_logger().info(

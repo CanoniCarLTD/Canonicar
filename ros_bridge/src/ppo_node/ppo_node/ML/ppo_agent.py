@@ -390,6 +390,9 @@ class PPOAgent:
         states = torch.as_tensor(
             np.array(self.states), dtype=torch.float32, device=device
         )
+        # expose states as an attribute for compatibility with compute_mc_returns
+        # compute_mc_returns expects self.states_tensor to exist when using Monte-Carlo returns
+        self.states_tensor = states
         env_actions = torch.as_tensor(
             np.array(self.actions), dtype=torch.float32, device=device
         )  # steer[-1,1], throttle[0,1]
