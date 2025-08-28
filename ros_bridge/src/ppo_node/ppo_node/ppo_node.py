@@ -26,8 +26,8 @@ from .ML.parameters import *
 
 # os.environ["CUDA_LAUNCH_BLOCKING"] = "1"  # might reduce performance time! Uncomment for debugging CUDA errors
 
-# from .db.mongo_connection import init_db, close_db
-from .db import mongo_connection
+# # from .db.mongo_connection import init_db, close_db
+# from .db import mongo_connection
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -52,17 +52,17 @@ class PPOModelNode(Node):
 
         self.train = TRAIN
 
-        try:
-            self.db = mongo_connection.init_db()
-            if self.db:
-                self.get_logger().info("MongoDB connection established")
-            else:
-                self.get_logger().warn(
-                    "MongoDB not available - metrics will not be stored"
-                )
-        except Exception as e:
-            self.get_logger().warn(f"Failed to connect to MongoDB: {e}")
-            self.db = None
+        # try:
+        #     self.db = mongo_connection.init_db()
+        #     if self.db:
+        #         self.get_logger().info("MongoDB connection established")
+        #     else:
+        #         self.get_logger().warn(
+        #             "MongoDB not available - metrics will not be stored"
+        #         )
+        # except Exception as e:
+        #     self.get_logger().warn(f"Failed to connect to MongoDB: {e}")
+        #     self.db = None
 
         self.current_step_in_episode = 0
 
@@ -812,26 +812,26 @@ class PPOModelNode(Node):
 
         except Exception as e:
             self.get_logger().error(f"Failed to log step metrics: {e}")
-            self.log_error("log_every_learn_step_metrics", str(e))
+            # self.log_error("log_every_learn_step_metrics", str(e))
 
-    def save_to_mongodb(self, schema):
-        if self.db is not None:
-            collection = self.db["episodes"]
-            collection.insert_one(schema)
-            self.get_logger().info(f"✅ Step metrics saved to MongoDB: {schema}")
-        else:
-            self.get_logger().error("❌ MongoDB connection is not initialized.")
+    # def save_to_mongodb(self, schema):
+    #     if self.db is not None:
+    #         collection = self.db["episodes"]
+    #         collection.insert_one(schema)
+    #         self.get_logger().info(f"✅ Step metrics saved to MongoDB: {schema}")
+    #     else:
+    #         self.get_logger().error("❌ MongoDB connection is not initialized.")
 
-    def log_error(self, component, message):
-        """Log error to MongoDB through DB service"""
-        try:
-            error_data = {"component": f"ppo_node.{component}", "message": message}
+    # def log_error(self, component, message):
+    #     """Log error to MongoDB through DB service"""
+    #     try:
+    #         error_data = {"component": f"ppo_node.{component}", "message": message}
 
-            msg = String()
-            msg.data = json.dumps(error_data)
-            self.error_logs_pub.publish(msg)
-        except Exception as e:
-            self.get_logger().error(f"Failed to publish error log: {e}")
+    #         msg = String()
+    #         msg.data = json.dumps(error_data)
+    #         self.error_logs_pub.publish(msg)
+    #     except Exception as e:
+    #         self.get_logger().error(f"Failed to publish error log: {e}")
 
     def log_episode_metrics(self):
         log_file = os.path.join(
@@ -1503,8 +1503,8 @@ class PPOModelNode(Node):
         except Exception as e:
             self.get_logger().error(f"Error waiting for background tasks: {e}")
 
-        if hasattr(self, "db"):
-            mongo_connection.close_db()
+        # if hasattr(self, "db"):
+        #     mongo_connection.close_db()
 
 
 def main(args=None):

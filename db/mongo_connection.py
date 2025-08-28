@@ -30,7 +30,12 @@ def init_db():
     """Initialize MongoDB connection"""
     global _client, _db
     
+    # Load environment and allow disabling MongoDB entirely
     load_dotenv()
+    mongo_enabled = os.getenv("MONGO_ENABLED", "true").lower() in ("1", "true", "yes")
+    if not mongo_enabled:
+        logger.info("MONGO_ENABLED is false - skipping MongoDB initialization (DB functions will return None). Set MONGO_ENABLED=true to enable.")
+        return None
     try:
         print("hello from init_db")
         # Use Atlas connection string from env
@@ -40,29 +45,29 @@ def init_db():
             retryWrites=True,
             w="majority",
             connectTimeoutMS=5000,
-            serverSelectionTimeoutMS=5000
+            serverSelectionTimeoutMS=5000,
         )
-        
+
         # Test connection
-        _client.admin.command('ping')
-        
+        _client.admin.command("ping")
+
         # Set database
         _db = _client["canonicar"]
-        
+
         # Initialize collections with indexes
         _db.episodes.create_index([("episode_id", ASCENDING)], unique=True)
         _db.training_metrics.create_index([("episode", ASCENDING), ("step", ASCENDING)])
         _db.checkpoints.create_index([("checkpoint_id", ASCENDING)], unique=True)
         _db.performance.create_index([("performance_id", ASCENDING)], unique=True)
         _db.error_logs.create_index([("timestamp", ASCENDING)])
-        
+
         logger.info("Successfully connected to MongoDB Atlas")
-        return True
+        return _db
     except Exception as e:
         logger.error(f"An error occurred while connecting to MongoDB Atlas: {e}")
         _client = None
         _db = None
-        return False
+        return None
 
 def close_db():
     """Close MongoDB connection"""

@@ -33,8 +33,10 @@ class ActorCritic(nn.Module):
         self.action_dim = action_dim
 
         # in ActorCritic.__init__(...), replace the two register_buffer lines:
-        self.register_buffer("cov_var", torch.full((action_dim,), float(action_std_init) ** 2))
-        self.register_buffer("cov_mat", torch.diag(self.cov_var).unsqueeze(dim=0))  # [1,A,A]
+        self.cov_var = torch.full((self.action_dim,), action_std_init)
+
+        # Create the covariance matrix
+        self.cov_mat = torch.diag(self.cov_var).unsqueeze(dim=0)
 
         # actor
         self.actor = nn.Sequential(
@@ -63,28 +65,23 @@ class ActorCritic(nn.Module):
         raise NotImplementedError  # defensive: use explicit methods below
 
     def set_action_std(self, new_action_std: float):
-        with torch.no_grad():
-            var = float(new_action_std) ** 2
-            self.cov_var.fill_(var)
-            self.cov_mat.copy_(torch.diag(self.cov_var).unsqueeze(0))
+        self.cov_var = torch.full((self.action_dim,), new_action_std)
+                
 
-    @torch.no_grad()
     def get_value(self, obs):
         if isinstance(obs, np.ndarray):
             obs = torch.tensor(obs, dtype=torch.float32, device=device)
         return self.critic(obs)
 
-    @torch.no_grad()
     def get_action_and_log_prob(self, obs):
         # mean in [-1,1] due to tanh head
         if isinstance(obs, np.ndarray):
             obs = torch.tensor(obs, dtype=torch.float32, device=device)
         mean = self.actor(obs)
-        cov = self.cov_mat.expand(mean.shape[0], self.action_dim, self.action_dim)
-        dist = MultivariateNormal(mean, cov)
+        dist = MultivariateNormal(mean, self.cov_mat)
         action = dist.sample()           # NOT squashed; can exceed [-1,1]
         log_prob = dist.log_prob(action) # scalar per batch element
-        return action, log_prob
+        return action.detach(), log_prob.detach()
 
     def evaluate(self, obs, action):
         # action is expected in model domain [-1,1]
@@ -120,16 +117,20 @@ class PPOAgent:
 
         self.summary_writer = summary_writer
         self.entropy_coef = ENTROPY_COEF
+        self.lr = PPO_LEARNING_RATE
 
         # === unified Idrees-style module + frozen copy for sampling (old policy) ===
         action_std_init = float(globals().get("ACTION_STD_INIT", 0.2))
-        self.ac = ActorCritic(self.input_dim, self.action_dim, action_std_init).to(device)
-        self.old_ac = ActorCritic(self.input_dim, self.action_dim, action_std_init).to(device)
-        self.old_ac.load_state_dict(self.ac.state_dict())
+        self.policy = ActorCritic(self.input_dim, self.action_dim, action_std_init)
 
-        # Keep separate optimizers (actor/critic) like before
-        self.actor_optimizer = optim.Adam(self.ac.actor.parameters(), lr=ACTOR_LEARNING_RATE)
-        self.critic_optimizer = optim.Adam(self.ac.critic.parameters(), lr=CRITIC_LEARNING_RATE)
+        self.action_std = action_std_init
+        self.optimizer = torch.optim.Adam([
+                        {'params': self.policy.actor.parameters(), 'lr': self.lr},
+                        {'params': self.policy.critic.parameters(), 'lr': self.lr}])
+        
+        self.old_policy = ActorCritic(self.input_dim, self.action_dim, self.action_std)
+        self.old_policy.load_state_dict(self.policy.state_dict())
+        self.MseLoss = nn.MSELoss()
 
         # Experience storage (unchanged)
         (
@@ -161,35 +162,14 @@ class PPOAgent:
     #                                        SELECT ACTION
     ##################################################################################################
 
-    def select_action(self, state):
+    def select_action(self, obs):
         """Select an action and return its log probability (from frozen old policy)."""
-        st = torch.tensor(state, dtype=torch.float32, device=device).unsqueeze(0)
-
-        if st.shape[1] != self.input_dim:
-            raise ValueError(
-                f"Expected input dimension {self.input_dim}, but got {st.shape[1]}"
-            )
-
-        if torch.isnan(st).any():
-            raise ValueError(f"NaN detected in input state: {st}")
-
         with torch.no_grad():
-            # sample from old policy
-            mean = self.old_ac.actor(st)
-            cov = self.old_ac.cov_mat.expand(mean.shape[0], self.action_dim, self.action_dim)
-            dist = MultivariateNormal(mean, cov)
-            model_action = dist.sample()
+            if isinstance(obs, np.ndarray):
+                obs = torch.tensor(obs, dtype=torch.float)
+            action, logprob = self.old_policy.get_action_and_log_prob(obs.to(device))
 
-            # clamp to model range and recompute logprob for the clamped action
-            model_action = model_action.clamp(-1.0, 1.0)
-            log_prob = dist.log_prob(model_action)
-
-            # map to env semantics
-            steer = model_action[:, 0:1]
-            throttle01 = (model_action[:, 1:2] + 1.0) / 2.0
-            env_action = torch.cat([steer, throttle01], dim=1)
-
-        return env_action.cpu().numpy()[0], log_prob.unsqueeze(0)
+        return action.detach().cpu().numpy().flatten()
 
     @torch.no_grad()
     # For evaluation
@@ -393,36 +373,14 @@ class PPOAgent:
         # expose states as an attribute for compatibility with compute_mc_returns
         # compute_mc_returns expects self.states_tensor to exist when using Monte-Carlo returns
         self.states_tensor = states
-        env_actions = torch.as_tensor(
-            np.array(self.actions), dtype=torch.float32, device=device
-        )  # steer[-1,1], throttle[0,1]
         rewards = torch.as_tensor(self.rewards, dtype=torch.float32, device=device)
         dones = torch.as_tensor(self.dones, dtype=torch.float32, device=device)
 
-        # fresh value estimates (no need to store them in memory)
-        with torch.no_grad():
-            values_now = self.ac.get_value(states).squeeze(-1)  # [T]
-            last_value = (
-                torch.zeros((), device=device)
-                if dones[-1]
-                else self.ac.get_value(states[-1:]).squeeze()
-            )
+        advantages, returns = self.compute_mc_returns(rewards, dones)
 
-        values = torch.cat([values_now, last_value.view(1)], dim=0)  # [T+1]
-
-        if USE_MONTE_CARLO:
-            advantages, returns = self.compute_mc_returns(rewards, dones)
-        else:
-            advantages, returns = self.compute_gae(rewards, values, dones)
         # returns = (returns - returns.mean()) / (returns.std() + 1e-8)
         old_log_probs = torch.cat(self.log_probs, dim=0).detach().view(-1, 1).to(device)
 
-        # Map env actions back to model domain for likelihood evaluation
-        steer = env_actions[:, 0:1]                     # already in [-1,1]
-        throttle_m1_1 = env_actions[:, 1:2] * 2.0 - 1.0 # [0,1] -> [-1,1]
-        model_actions = torch.cat([steer, throttle_m1_1], dim=1)
-        # ✅ Clamp to keep training eval consistent with acting & env execution
-        model_actions = model_actions.clamp(-1.0, 1.0)
 
         total_actor_loss = 0.0
         total_critic_loss = 0.0
@@ -523,15 +481,14 @@ class PPOAgent:
             total_entropy / max(1, num_batches),
         )
 
-    # === Optional: keep API symmetry and expose std control like Idrees ===
-    def set_action_std(self, new_action_std: float):
-        """Manually set fixed exploration std (Idrees-style)."""
-        self.ac.set_action_std(new_action_std)
-        self.old_ac.set_action_std(new_action_std)
+    def set_action_std(self, new_action_std):
+        self.action_std = new_action_std
+        self.policy.set_action_std(new_action_std)
+        self.old_policy.set_action_std(new_action_std)
 
-    def decay_action_std(self, action_std_decay_rate: float, min_action_std: float):
-        """Linearly decay fixed std. No guessing beyond linear clip."""
-        cur = float(self.ac.cov_var[0].item())
-        cur = max(min_action_std, cur - action_std_decay_rate)
-        self.set_action_std(cur)
-        return cur
+    def decay_action_std(self, action_std_decay_rate, min_action_std):
+        self.action_std = self.action_std - action_std_decay_rate
+        if (self.action_std <= min_action_std):
+            self.action_std = min_action_std
+        self.set_action_std(self.action_std)
+        return self.action_std

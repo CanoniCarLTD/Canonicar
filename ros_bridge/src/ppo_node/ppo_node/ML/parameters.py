@@ -41,9 +41,8 @@ ACTION_STD_DECAY_RATE = 0.0  # Not used as we are currently using learnable acti
 MIN_ACTION_STD = 0.1
 
 # PPO optimization parameters
-ACTOR_LEARNING_RATE = 7.5e-5  # 0.000075
-CRITIC_LEARNING_RATE = 7.5e-5  # 0.000075
-POLICY_CLIP = 0.1  # CHANGED from 0.2 to 0.1
+PPO_LEARNING_RATE = 1e-4  # 0.000075
+POLICY_CLIP = 0.2  # CHANGED from 0.2 to 0.1
 ENTROPY_COEF = 0.01  # might wanna do 0.005 later
 LAMBDA_GAE = 0.95
 VF_COEF = 0.5  # Giving half the weight to critic loss relative to the summed losses
