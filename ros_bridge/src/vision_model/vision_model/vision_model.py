@@ -142,7 +142,7 @@ class VisionProcessor:
 
         # No need for RGB normalization since semantic segmentation is already in a standardized format
         # But we'll still preprocess to normalize to [0, 1] range
-        self.semantic_tensor = torch.zeros((1, 3, 80, 160), device=self.device)
+        self.semantic_tensor = torch.zeros((1, 3, 160, 80), device=self.device)
 
         # Create and load the model
         self.model = SensorFusionModel(
@@ -151,7 +151,7 @@ class VisionProcessor:
         self.model.eval()
 
         # Model warmup for more consistent timing
-        dummy_semantic = torch.zeros((1, 3, 80, 160), device=self.device)
+        dummy_semantic = torch.zeros((1, 3, 160, 80), device=self.device)
         # dummy_lidar = torch.zeros((1, 3, 64, 64), device=self.device)
         with torch.no_grad():
             self.model(dummy_semantic)
@@ -161,26 +161,29 @@ class VisionProcessor:
         # print("z shape: ", z.shape)
 
     def process_semantic(self, semantic_image):
-        """Process semantic segmentation image"""
-        if isinstance(semantic_image, np.ndarray):
-            # Resize using OpenCV for better performance
-            if semantic_image.shape[0] != 80 or semantic_image.shape[1] != 160:
-                resized = cv2.resize(
-                    semantic_image, (160, 80), interpolation=cv2.INTER_NEAREST
-                )  # cv2 size is (width, height)
-            else:
-                resized = semantic_image
-            # Convert to tensor [0, 1] range
-            semantic_tensor = (
-                torch.from_numpy(resized)
-                .permute(2, 0, 1)
-                .float()
-                .div_(255.0)
-                .unsqueeze(0)
-                .to(self.device)
-            )
-            return semantic_tensor
-        return None
+        """Process semantic segmentation image to EXACTLY match Idrees' EncodeState.process().
+        Output tensor shape: [1, 3, 160, 80] (N, C, W, H) with raw 0..255 floats.
+        """
+        if not isinstance(semantic_image, np.ndarray):
+            return None
+
+        # Ensure (H, W) = (80, 160) like Idrees does before passing to VAE
+        if semantic_image.shape[0] != 80 or semantic_image.shape[1] != 160:
+            resized = cv2.resize(semantic_image, (160, 80), interpolation=cv2.INTER_NEAREST)
+        else:
+            resized = semantic_image
+
+        # Idrees: add batch first, then permute NHWC -> N C W H  (note W/H swap),
+        # and DO NOT divide by 255.0 (keep raw 0..255 floats).
+        semantic_tensor = (
+            torch.from_numpy(resized)
+            .float()
+            .unsqueeze(0)         # [1, H, W, C]
+            .permute(0, 3, 2, 1)  # [1, C, W, H] == [1, 3, 160, 80]
+            .to(self.device)
+        )
+        return semantic_tensor
+
 
     def lidar_to_bev(self, lidar_points):
         """
@@ -287,9 +290,9 @@ class VisionProcessor:
         # lidar_tensor = self.lidar_to_bev(lidar_points)
 
         # sanity-check the shapes are exactly what the model expects
-        assert semantic_tensor.shape == (1, 3, 80, 160), (
+        assert semantic_tensor.shape == (1, 3, 160, 80), (
             f"semantic_tensor wrong shape {semantic_tensor.shape}, "
-            "expected (1,3,80,160)"
+            "expected (1,3,160,80)"
         )
         # assert lidar_tensor.shape[1:] == (3, 64, 64), (
         #     f"lidar_tensor wrong shape {lidar_tensor.shape}, " "expected (_,3,64,64)"

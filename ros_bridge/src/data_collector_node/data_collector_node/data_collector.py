@@ -88,18 +88,18 @@ class DataCollector(Node):
         self.frame_id = 0
         self.saved_image_index = 1
         self.save_queue = Queue(maxsize=128)
-        if RECORD_SS_IMAGES:
-            ts = time.strftime("%Y%m%d")
-            self.run_dir = DATA_ROOT / f"raw_{ts}"
-            self.run_dir.mkdir(parents=True, exist_ok=True)  # Ensure directory exists
-            existing_files = list(self.run_dir.glob("*.png"))
-            if existing_files:
-                max_idx = max(
-                    [int(f.stem) for f in existing_files if f.stem.isdigit()], default=0
-                )
-                self.saved_image_index = max_idx + 1
-            self.writer_thread = threading.Thread(target=self._disk_writer, daemon=True)
-            self.writer_thread.start()
+        # if RECORD_SS_IMAGES:
+        #     ts = time.strftime("%Y%m%d")
+        #     self.run_dir = DATA_ROOT / f"raw_{ts}"
+        #     self.run_dir.mkdir(parents=True, exist_ok=True)  # Ensure directory exists
+        #     existing_files = list(self.run_dir.glob("*.png"))
+        #     if existing_files:
+        #         max_idx = max(
+        #             [int(f.stem) for f in existing_files if f.stem.isdigit()], default=0
+        #         )
+        #         self.saved_image_index = max_idx + 1
+        #     self.writer_thread = threading.Thread(target=self._disk_writer, daemon=True)
+        #     self.writer_thread.start()
 
         self.get_logger().info("DataCollector Node initialized. Waiting for vehicle...")
 
@@ -326,7 +326,8 @@ class DataCollector(Node):
         state_vector[:95] = vision_features
 
         # # Add IMU data
-        state_vector[95:96] = self.velocity
+        state_vector[96:97] = self.velocity
+        state_vector[97:98] = self.velocity / 22 # velocity/target speed
 
         return state_vector
 

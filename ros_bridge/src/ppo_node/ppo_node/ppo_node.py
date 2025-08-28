@@ -235,25 +235,12 @@ class PPOModelNode(Node):
         )
 
     ##################################################################################################
-    #                                       ACTION SELECTION
+    #                            ACTION SELECTION - moved to training loop
     ##################################################################################################
 
-    def get_action(self, data):
-        self.state = data  # might be redundant but just to make sure
-        self.action, self.log_prob = self.ppo_agent.select_action(data)
-
-    # For evaluation
-    def get_action_deterministic(self, state: np.ndarray):
-        """
-        Convert raw state → torch tensor → call actor.act_deterministic
-        and store result in self.action.
-        """
-        state_tensor = torch.tensor(
-            state, dtype=torch.float32, device=device
-        ).unsqueeze(0)
-        with torch.no_grad():
-            action = self.ppo_agent.actor.act_deterministic(state_tensor)
-        self.action = action
+    # def get_action(self, data):
+    #     self.state = data  # might be redundant but just to make sure
+    #     self.action, self.log_prob = self.ppo_agent.select_action(data)    
 
     ##################################################################################################
     #                                       ACTION PUBLISHING
@@ -278,46 +265,25 @@ class PPOModelNode(Node):
             self.get_logger().error(f"Invalid action format: {action_list}")
             return
 
-        # # Discretize steering: values properly sorted from most left to most right
-        # discrete_steer_values = [
-        #     -1.0,
-        #     -0.9,
-        #     -0.8,
-        #     -0.7,
-        #     -0.6,
-        #     -0.5,
-        #     -0.4,
-        #     -0.3,
-        #     -0.2,
-        #     -0.1,
-        #     0.0,
-        #     0.1,
-        #     0.2,
-        #     0.3,
-        #     0.4,
-        #     0.5,
-        #     0.6,
-        #     0.7,
-        #     0.8,
-        #     0.9,
-        #     1.0,
-        # ]
-        # # Discretize throttle: 0.0, 0.33, 0.66, 1.0
-        # discrete_throttle_values = [0.25, 0.5, 0.75]
+        # Keep persistent state on the node
+        if not hasattr(self, "_prev_steer"):  # initialize once
+            self._prev_steer = 0.0
+            self._prev_throttle = 0.0
 
-        # # Find closest discrete values
-        # steer_idx = min(
-        #     range(len(discrete_steer_values)),
-        #     key=lambda i: abs(discrete_steer_values[i] - steer),
-        # )
-        # throttle_idx = min(
-        #     range(len(discrete_throttle_values)),
-        #     key=lambda i: abs(discrete_throttle_values[i] - throttle),
-        # )
+        # unpack
+        steer, throttle = float(steer), float(throttle)
 
-        # # Get discrete actions
-        # discrete_steer = discrete_steer_values[steer_idx]
-        # discrete_throttle = discrete_throttle_values[throttle_idx]
+        # Idrees' mapping and clamps
+        steer = max(min(steer, 1.0), -1.0)
+        throttle = (throttle + 1.0) / 2.0
+        throttle = max(min(throttle, 1.0), 0.0)
+
+        # Idrees' low-pass smoothing (0.9/0.1)
+        # steer_cmd = self._prev_steer * 0.9 + steer * 0.1
+        # thr_cmd   = self._prev_throttle * 0.9 + throttle * 0.1
+
+        self._prev_steer = steer
+        self._prev_throttle = throttle
 
         action_msg = Float32MultiArray()
         action_msg.data = [steer, throttle, brake]
@@ -435,7 +401,7 @@ class PPOModelNode(Node):
 
         # progress along centerline (use your existing track_progress delta)
         progress_delta = self.track_progress - self.prev_progress_distance
-        progress_reward = 200.0 * max(0.0, progress_delta)  # reward forward only
+        progress_reward = 100.0 * max(0.0, progress_delta)  # reward forward only
 
         # small living penalty to discourage idle
         time_penalty = -0.01
@@ -552,8 +518,7 @@ class PPOModelNode(Node):
 
         if self.timestep_counter < self.total_timesteps:
             self.state = np.array(msg.data, dtype=np.float32)
-            self.state[96:97] = self.action[1] if self.action is not None else 0.0 #prev throttle
-            self.state[97:98] = self.action[0] if self.action is not None else 0.0 #prev steer
+            self.state[95:96] = self.action[1] if self.action is not None else 0.0 #prev throttle
             # deviation from centerline
             self.state[98:99] = self.lateral_deviation
             # heading deviation
@@ -579,7 +544,9 @@ class PPOModelNode(Node):
 
             if self.current_step_in_episode < self.episode_length:
                 self.current_step_in_episode += 1
-                self.get_action(self.state)
+                # self.get_action(self.state)
+                self.action, self.log_prob = self.ppo_agent.select_action(self.state)
+
                 self.publish_action()
 
                 self.prev_state = self.state
@@ -655,7 +622,7 @@ class PPOModelNode(Node):
         # self.t1 = datetime.now()
         if self.current_step_in_episode < self.episode_length:
             self.current_step_in_episode += 1
-            self.get_action_deterministic(self.state)
+            # self.get_action_deterministic(self.state) # deleted - replace it with another get action
             self.publish_action()
             # self.calculate_reward()
             if self.current_step_in_episode >= self.episode_length:
@@ -692,7 +659,7 @@ class PPOModelNode(Node):
 
     def save_training_metadata(self, state_dict_dir):
         try:
-            action_var = self.ppo_agent.ac.cov_var.detach().cpu().tolist()
+            action_var = self.ppo_agent.policy.cov_var.detach().cpu().tolist()
 
             meta = {
                 "episode_counter": self.episode_counter,
@@ -730,7 +697,7 @@ class PPOModelNode(Node):
                 if action_var_list is not None:
                     var_tensor = torch.tensor(action_var_list, dtype=torch.float32, device=device)
                     with torch.no_grad():
-                        for ac in (self.ppo_agent.ac, self.ppo_agent.old_ac):
+                        for ac in (self.ppo_agent.policy, self.ppo_agent.old_policy):
                             ac.cov_var.copy_(var_tensor)
                             ac.cov_mat.copy_(torch.diag(ac.cov_var).unsqueeze(0))
 
@@ -745,12 +712,9 @@ class PPOModelNode(Node):
         hparams = {
             "episode_length": EPISODE_LENGTH,
             "learn_every_N_steps": LEARN_EVERY_N_STEPS,
-            "minibatch_size": MINIBATCH_SIZE,
             "learn_epochs": NUM_EPOCHS,
-            "actor learning_rate": ACTOR_LEARNING_RATE,
-            "critic learning_rate": CRITIC_LEARNING_RATE,
+            "learning_rate": PPO_LEARNING_RATE,
             "gamma": GAMMA,
-            "lambda_gae": LAMBDA_GAE,
             "entropy_coef": ENTROPY_COEF,
             "policy_clip": POLICY_CLIP,
             "input_dim": PPO_INPUT_DIM,

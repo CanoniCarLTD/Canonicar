@@ -33,10 +33,10 @@ class ActorCritic(nn.Module):
         self.action_dim = action_dim
 
         # in ActorCritic.__init__(...), replace the two register_buffer lines:
-        self.cov_var = torch.full((self.action_dim,), action_std_init)
+        self.cov_var = torch.full((self.action_dim,), action_std_init, device=device)
 
         # Create the covariance matrix
-        self.cov_mat = torch.diag(self.cov_var).unsqueeze(dim=0)
+        self.cov_mat = torch.diag(self.cov_var).unsqueeze(dim=0).to(device)
 
         # actor
         self.actor = nn.Sequential(
@@ -65,8 +65,7 @@ class ActorCritic(nn.Module):
         raise NotImplementedError  # defensive: use explicit methods below
 
     def set_action_std(self, new_action_std: float):
-        self.cov_var = torch.full((self.action_dim,), new_action_std)
-                
+        self.cov_var = torch.full((self.action_dim,), new_action_std, device=device)
 
     def get_value(self, obs):
         if isinstance(obs, np.ndarray):
@@ -79,19 +78,18 @@ class ActorCritic(nn.Module):
             obs = torch.tensor(obs, dtype=torch.float32, device=device)
         mean = self.actor(obs)
         dist = MultivariateNormal(mean, self.cov_mat)
-        action = dist.sample()           # NOT squashed; can exceed [-1,1]
-        log_prob = dist.log_prob(action) # scalar per batch element
+        action = dist.sample()
+        log_prob = dist.log_prob(action)
         return action.detach(), log_prob.detach()
 
     def evaluate(self, obs, action):
-        # action is expected in model domain [-1,1]
         mean = self.actor(obs)
         cov_var = self.cov_var.expand_as(mean)
         cov_mat = torch.diag_embed(cov_var)
         dist = MultivariateNormal(mean, cov_mat)
-        logprobs = dist.log_prob(action)     # [B]
-        dist_entropy = dist.entropy()        # [B]
-        values = self.critic(obs)            # [B,1]
+        logprobs = dist.log_prob(action)
+        dist_entropy = dist.entropy()
+        values = self.critic(obs)
         return logprobs, values, dist_entropy
 
 
@@ -120,16 +118,18 @@ class PPOAgent:
         self.lr = PPO_LEARNING_RATE
 
         # === unified Idrees-style module + frozen copy for sampling (old policy) ===
-        action_std_init = float(globals().get("ACTION_STD_INIT", 0.2))
+        action_std_init = ACTION_STD_INIT
         self.policy = ActorCritic(self.input_dim, self.action_dim, action_std_init)
+        self.policy.to(device)
 
         self.action_std = action_std_init
         self.optimizer = torch.optim.Adam([
-                        {'params': self.policy.actor.parameters(), 'lr': self.lr},
-                        {'params': self.policy.critic.parameters(), 'lr': self.lr}])
+            {'params': self.policy.actor.parameters(), 'lr': self.lr},
+            {'params': self.policy.critic.parameters(), 'lr': self.lr}])
         
         self.old_policy = ActorCritic(self.input_dim, self.action_dim, self.action_std)
         self.old_policy.load_state_dict(self.policy.state_dict())
+        self.old_policy.to(device)
         self.MseLoss = nn.MSELoss()
 
         # Experience storage (unchanged)
@@ -169,20 +169,8 @@ class PPOAgent:
                 obs = torch.tensor(obs, dtype=torch.float)
             action, logprob = self.old_policy.get_action_and_log_prob(obs.to(device))
 
-        return action.detach().cpu().numpy().flatten()
+        return action.detach().cpu().numpy().flatten(), logprob.detach().cpu().numpy().flatten()
 
-    @torch.no_grad()
-    # For evaluation
-    def act_deterministic(self, state_tensor: torch.Tensor):
-        if state_tensor.ndim == 1:
-            state_tensor = state_tensor.unsqueeze(0)
-        mean = self.ac.actor(state_tensor.to(device)).clamp(-1.0, 1.0)
-        steer = mean[:, 0:1]
-        throttle01 = (mean[:, 1:2] + 1.0) / 2.0
-        env_action = torch.cat([steer, throttle01], dim=1)
-        return env_action[0]  # tensor on device
-    
-    
     ##################################################################################################
     #                                     STORE LAST EXPERIENCE
     ##################################################################################################
@@ -192,7 +180,6 @@ class PPOAgent:
 
         # action arrives as [steer in -1..1, throttle in 0..1]; convert to model domain
         a = np.asarray(action, dtype=np.float32).copy()
-        a[1] = a[1] * 2.0 - 1.0  # throttle -> model domain
         self.actions.append(a)
 
         if not isinstance(log_prob, torch.Tensor):
@@ -215,65 +202,10 @@ class PPOAgent:
             os.makedirs(directory, exist_ok=True)
             out_path = os.path.join(directory, "ppo_policy_12_.pth")
             # Save a dict with a clear key for forward compatibility
-            torch.save({"ac": self.ac.state_dict()}, out_path)
+            torch.save({"policy": self.policy.state_dict()}, out_path)
             self.logger.info(f"Policy saved to {out_path}")
         except Exception as e:
             self.logger.info(f"❌ Error saving policy: {e}")
-
-    def old_load_model_and_optimizers(self, directory):
-        # WARNING: legacy API retained, but we now use a single ac.pth
-        self.logger.info(f"Loading model + optimizer from: {directory}")
-        try:
-            ac_path = os.path.join(directory, "ac.pth")
-            checkpoint = torch.load(ac_path, map_location=device)
-
-            # Support a few checkpoint conventions: either a raw state_dict or a dict with
-            # keys like 'ac', 'model_state_dict', or 'state_dict'. Fall back to the object
-            # itself if nothing obvious is found.
-            model_state = None
-            if isinstance(checkpoint, dict):
-                for k in ("ac", "model_state_dict", "state_dict", "model"):
-                    if k in checkpoint:
-                        model_state = checkpoint[k]
-                        break
-                if model_state is None:
-                    # Could be a raw state_dict saved as a dict; use it as-is.
-                    model_state = checkpoint
-            else:
-                model_state = checkpoint
-
-            # Try strict load first; if it fails (missing/extraneous keys), retry with strict=False
-            try:
-                self.ac.load_state_dict(model_state, strict=True)
-            except Exception as e_strict:
-                self.logger.warning(
-                    f"Strict model load failed ({e_strict}); retrying with strict=False"
-                )
-                # This will ignore missing keys like cov_var/cov_mat and keep the defaults
-                self.ac.load_state_dict(model_state, strict=False)
-
-            # Sync frozen policy
-            self.old_ac.load_state_dict(self.ac.state_dict())
-
-            # Helper to load optimizers if present; tolerate failures.
-            def try_load_optim(opt, filename):
-                p = os.path.join(directory, filename)
-                if os.path.exists(p):
-                    try:
-                        opt_state = torch.load(p, map_location=device)
-                        opt.load_state_dict(opt_state)
-                        self.logger.info(f"Loaded optimizer state from {filename}")
-                    except Exception as e_opt:
-                        self.logger.warning(f"Failed loading {filename}: {e_opt}")
-                else:
-                    self.logger.info(f"Optimizer file {filename} not found; skipping")
-
-            try_load_optim(self.actor_optimizer, "actor_optim.pth")
-            try_load_optim(self.critic_optimizer, "critic_optim.pth")
-
-            self.logger.info("Model and optimizer states loaded successfully.")
-        except Exception as e:
-            self.logger.info(f"❌ Error loading model and optimizer: {e}")
 
     def load_model_and_optimizers(self, directory):
         """Load policy saved by `save_model_and_optimizers`.
@@ -287,20 +219,23 @@ class PPOAgent:
             p = os.path.join(directory, "ppo_policy_12_.pth")
             checkpoint = torch.load(p, map_location=device)
 
-            # Support either {'ac': state_dict} or a raw state_dict
-            if isinstance(checkpoint, dict) and "ac" in checkpoint:
-                model_state = checkpoint["ac"]
+            # Support either {'ac': ...}, {'policy': ...}, or a raw state_dict
+            if isinstance(checkpoint, dict) and ("ac" in checkpoint or "policy" in checkpoint):
+                model_state = checkpoint.get("policy", checkpoint.get("ac"))
             else:
                 model_state = checkpoint
 
             try:
-                self.ac.load_state_dict(model_state, strict=False)
+                self.policy.load_state_dict(model_state, strict=False)
             except Exception as e_load:
                 self.logger.warning(f"Strict load failed: {e_load}; retrying with strict=False")
-                self.ac.load_state_dict(model_state, strict=False)
+                self.policy.load_state_dict(model_state, strict=False)
+            # Ensure models are on the correct device after loading
+            self.policy.to(device)
 
-            # Sync frozen policy 
-            self.old_ac.load_state_dict(self.ac.state_dict())
+            # Sync frozen policy
+            self.old_policy.load_state_dict(self.policy.state_dict())
+            self.old_policy.to(device)
             self.logger.info("Policy loaded into ActorCritic.")
         except Exception as e:
             self.logger.info(f"❌ Error loading policy: {e}")
@@ -317,26 +252,8 @@ class PPOAgent:
             return advantages
 
     ##################################################################################################
-    #                                           COMPUTE GAE or monte-carlo returns
+    #                                           COMPUTE monte-carlo returns
     ##################################################################################################
-
-    def compute_gae(self, rewards, values, dones, gamma=GAMMA, lam=LAMBDA_GAE):
-        """
-        rewards, values, dones are 1-D tensors of length T
-        values already contains V(s_t) for t=0..T  (last extra element is V(s_T) or 0)
-        returns both advantage and return tensors of length T
-        """
-        T = rewards.size(0)
-        advantages = torch.zeros(T, device=device)
-        lastgaelam = 0.0
-        for t in reversed(range(T)):
-            next_nonterminal = 1.0 - dones[t]
-            delta = rewards[t] + gamma * values[t + 1] * next_nonterminal - values[t]
-            lastgaelam = delta + gamma * lam * next_nonterminal * lastgaelam
-            advantages[t] = lastgaelam
-        returns = advantages + values[:-1]  # drop the bootstrap value
-        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
-        return advantages, returns
 
     def compute_mc_returns(self, rewards, dones, gamma=GAMMA):
         T = rewards.size(0)
@@ -345,7 +262,7 @@ class PPOAgent:
         for t in reversed(range(T)):
             G = rewards[t] + gamma * G * (1.0 - dones[t])
             returns[t] = G
-        advantages = returns - self.ac.get_value(self.states_tensor)[...,0].detach()  # or recompute values_now
+        advantages = returns - self.policy.get_value(self.states_tensor)[...,0].detach()  # or recompute values_now
         advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
         return advantages, returns
     
@@ -361,7 +278,7 @@ class PPOAgent:
     #                                       MAIN PPO ALGORITHM
     ##################################################################################################
 
-    def learn(self):
+    def learn(self): # **FIX LOOP - REMOVE MINIBATCHES AND FIX MONTE CARLO RETURNS**
         """
         Perform PPO training using stored experiences (from latest batch).
         returns: actor_loss, critic_loss, entropy
@@ -373,6 +290,9 @@ class PPOAgent:
         # expose states as an attribute for compatibility with compute_mc_returns
         # compute_mc_returns expects self.states_tensor to exist when using Monte-Carlo returns
         self.states_tensor = states
+        model_actions = torch.as_tensor(
+            np.array(self.actions), dtype=torch.float32, device=device
+        )
         rewards = torch.as_tensor(self.rewards, dtype=torch.float32, device=device)
         dones = torch.as_tensor(self.dones, dtype=torch.float32, device=device)
 
@@ -405,7 +325,7 @@ class PPOAgent:
 
                 # ---- Forward new policy ----
                 # evaluate() must return: logprobs [B], values [B,1], entropy [B] (or broadcastable)
-                new_logprob, values, dist_entropy = self.ac.evaluate(b_states, b_actions)
+                new_logprob, values, dist_entropy = self.policy.evaluate(b_states, b_actions)
                 new_logprob = new_logprob.view(-1, 1)                      # [B,1]
 
                 # ---- PPO ratio ----
@@ -425,13 +345,11 @@ class PPOAgent:
                 # ---- Joint backward/update ----
                 loss = actor_loss + critic_loss + entropy_loss
 
-                self.actor_optimizer.zero_grad(set_to_none=True)
-                self.critic_optimizer.zero_grad(set_to_none=True)
+                self.optimizer.zero_grad(set_to_none=True)
                 loss.backward()
-                torch.nn.utils.clip_grad_norm_(self.ac.actor.parameters(), 0.5)
-                torch.nn.utils.clip_grad_norm_(self.ac.critic.parameters(), 0.5)
-                self.actor_optimizer.step()
-                self.critic_optimizer.step()
+                torch.nn.utils.clip_grad_norm_(self.policy.actor.parameters(), 0.5)
+                torch.nn.utils.clip_grad_norm_(self.policy.critic.parameters(), 0.5)
+                self.optimizer.step()
 
                 total_actor_loss += actor_loss.item()
                 total_critic_loss += critic_loss.item()
@@ -440,13 +358,13 @@ class PPOAgent:
 
 
         # Sync frozen policy with current (Idrees-style)
-        self.old_ac.load_state_dict(self.ac.state_dict())
+        self.old_policy.load_state_dict(self.policy.state_dict())
         self.learn_step_counter += 1
 
         if self.summary_writer is not None:
             with torch.no_grad():
                 # NOTE: no per-dim log_std anymore; we expose fixed std from cov_var.
-                current_action_std = self.ac.cov_var.detach().cpu().numpy()
+                current_action_std = self.policy.cov_var.detach().cpu().numpy()
                 self.logger.info(
                     f"[Learn Step {self.learn_step_counter}] fixed action_std per dim: {current_action_std}"
                 )

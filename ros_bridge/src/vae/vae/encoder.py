@@ -37,7 +37,8 @@ class VariationalEncoder(nn.Module):
         self.N = torch.distributions.Normal(0, 1)
         self.N.loc = self.N.loc.to(device)
         self.N.scale = self.N.scale.to(device)
-
+        self.kl = 0
+                
     def forward(self, x):
         x = x.to(device)
         x = self.encoder_layer1(x)
@@ -49,7 +50,7 @@ class VariationalEncoder(nn.Module):
         mu = self.mu(x)
         sigma = torch.exp(self.sigma(x))
         z = mu + sigma * self.N.sample(mu.shape)
-        self.kl = (sigma**2 + mu**2 - torch.log(sigma) - 1 / 2).sum()
+        self.kl = (sigma**2 + mu**2 - torch.log(sigma) - 1/2).sum()
         return z
 
     def save(self):
