@@ -96,7 +96,7 @@ class PPOModelNode(Node):
         self.summary_writer = None
 
         # seed = int(time.time()) % (2**32 - 1)
-        seed = 42  # Fixed seed for reproducibility
+        seed = 0  # Fixed seed for reproducibility
         self.set_global_seed(seed)
         self.set_deterministic_cudnn(deterministic_cudnn=DETERMINISTIC_CUDNN)
 
@@ -140,6 +140,7 @@ class PPOModelNode(Node):
         self.lap_completed = False
         self.lap_count = 0
         self.vehicle_location = None
+        self.vehicle_rotation = None
         self.lap_start_time = None
         self.lap_end_time = None
         self.lap_time = None
@@ -149,7 +150,8 @@ class PPOModelNode(Node):
         self.lateral_deviation = 0.0
         self.heading_deviation = 0.0
         self.vehicle_heading = 0.0
-
+        self._prev_throttle = 0.0
+        
         self.episode_start_time = datetime.now()
         self.current_step_in_episode = 0
         self.last_actor_loss = None
@@ -277,10 +279,6 @@ class PPOModelNode(Node):
         steer = max(min(steer, 1.0), -1.0)
         throttle = (throttle + 1.0) / 2.0
         throttle = max(min(throttle, 1.0), 0.0)
-
-        # Idrees' low-pass smoothing (0.9/0.1)
-        # steer_cmd = self._prev_steer * 0.9 + steer * 0.1
-        # thr_cmd   = self._prev_throttle * 0.9 + throttle * 0.1
 
         self._prev_steer = steer
         self._prev_throttle = throttle
@@ -507,7 +505,21 @@ class PPOModelNode(Node):
             return
         self.get_logger().debug(f"Task added to queue: {task.__name__}")
         self.task_queue.put((task, args, kwargs))
-
+        
+    def concat_state(self):
+        if self.state is None:
+            self.get_logger().error("State is None, cannot concatenate")
+            return
+        if len(self.state) != PPO_INPUT_DIM:
+            self.get_logger().error(f"State length {len(self.state)} does not match expected {PPO_INPUT_DIM}")
+            return
+        
+        vision_features = self.state[:95]
+        navigation_obs = torch.tensor(nav_obs_arr, dtype=torch.float).to(self.device)
+        observation = torch.cat((vision_features, navigation_obs), -1)
+        
+        
+        
     ##################################################################################################
     #                                       TRAINING
     ##################################################################################################
@@ -518,11 +530,7 @@ class PPOModelNode(Node):
 
         if self.timestep_counter < self.total_timesteps:
             self.state = np.array(msg.data, dtype=np.float32)
-            self.state[95:96] = self.action[1] if self.action is not None else 0.0 #prev throttle
-            # deviation from centerline
-            self.state[98:99] = self.lateral_deviation
-            # heading deviation
-            self.state[99:100] = self.heading_deviation
+            self.concat_state()
 
             self.calculate_reward()  # compute reward for previous transition
             reward_to_store = self.reward
@@ -1096,7 +1104,9 @@ class PPOModelNode(Node):
         previous_location = self.vehicle_location
 
         # Extract vehicle location
-        self.vehicle_location = (msg.data[0], msg.data[1])
+        self.vehicle_location = (msg.data[0], msg.data[1], msg.data[2])
+        self.vehicle_rotation = msg.data[3]
+
 
         # Experimetal
 
@@ -1226,9 +1236,12 @@ class PPOModelNode(Node):
         self.lateral_deviation = self.calculate_distance(
             self.vehicle_location, projection
         )
+        
 
         track_vector = (wp_next[0] - wp_current[0], wp_next[1] - wp_current[1])
         track_angle = math.atan2(track_vector[1], track_vector[0])
+
+        
 
         if hasattr(self, "vehicle_heading"):
             # Calculate angle difference (normalized to [-π, π])

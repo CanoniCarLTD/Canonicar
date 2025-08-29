@@ -215,8 +215,10 @@ class DataCollector(Node):
         self.process_imu(imu_msg)
         # Extract semantic segmentation image directly (already processed by carla_semantic_image_to_ros_image)
         raw_image = np.frombuffer(image_msg.data, dtype=np.uint8).reshape(
-            (image_msg.height, image_msg.width, 3)  # BGR format from semantic converter
+            (image_msg.width, image_msg.height, 4)  # BGR format from semantic converter
         )
+        if raw_image.shape[2] == 4:  # BGRA format
+            raw_image = raw_image[:, :, :3]  # Remove alpha channel
 
         # ─── NEW: queue saving ───────────────────────────────────────────────
         if RECORD_SS_IMAGES and (self.frame_id % SAVE_EVERY_N_FRAMES == 0):
@@ -238,27 +240,8 @@ class DataCollector(Node):
 
         # Process using vision model - note that we're passing raw_image directly
         # which is now a semantic segmentation image
-        vision_features = self.vision_processor.process_sensor_data(raw_image, points)
+        vision_features = self.vision_processor.EncodeState.process(raw_image)
         return self.aggregate_state_vector(vision_features)
-
-    def process_vision_data(self, image_msg, lidar_msg):
-        """Process both segmentation and LiDAR data using our fusion model."""
-        # Convert image_msg to numpy array
-        raw_image = np.frombuffer(image_msg.data, dtype=np.uint8).reshape(
-            (image_msg.height, image_msg.width, -1)
-        )
-        if raw_image.shape[2] == 4:  # BGRA format
-            raw_image = raw_image[:, :, :3]  # Remove alpha channel
-            raw_image = raw_image[:, :, ::-1].copy()  # Convert BGR to RGB
-        # Convert lidar_msg to point list
-        points = [
-            [point[0], point[1], point[2]]  # Extract x, y, z
-            for point in struct.iter_unpack("ffff", lidar_msg.data)
-        ]
-
-        # Process using our vision model
-        fused_features = self.vision_processor.process_sensor_data(raw_image, points)
-        return fused_features
 
 
     def update_velocity_from_imu(self, imu_msg):
@@ -324,10 +307,6 @@ class DataCollector(Node):
 
         # Fill with vision features (fused Segmentation + LiDAR)
         state_vector[:95] = vision_features
-
-        # # Add IMU data
-        state_vector[96:97] = self.velocity
-        state_vector[97:98] = self.velocity / 22 # velocity/target speed
 
         return state_vector
 

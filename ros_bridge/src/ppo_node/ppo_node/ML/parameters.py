@@ -17,7 +17,7 @@ VERSION = "v4.0.2"
 # Example: "/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models/v2.1.3/run_20250325_0001"
 LOAD_STATE_DICT_FROM_RUN = None
 
-DETERMINISTIC_CUDNN = False
+DETERMINISTIC_CUDNN = True
 
 TRAIN = True
 EPISODE_LENGTH = 7000  # Maximum timesteps per episode

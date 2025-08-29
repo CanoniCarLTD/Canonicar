@@ -9,7 +9,6 @@ def carla_semantic_image_to_ros_image(carla_image, header: Header) -> Image:
     """
     # Convert to CityScapesPalette using CARLA's ColorConverter
     carla_image.convert(carla.ColorConverter.CityScapesPalette)
-
     img_msg = Image()
     img_msg.header = header
     img_msg.height = carla_image.height

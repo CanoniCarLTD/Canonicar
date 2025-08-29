@@ -116,7 +116,7 @@ class LoadMapNode(Node):
             
             sleep(2)
             self.map = self.world.get_map()
-            self.world.set_weather(carla.WeatherParameters.ClearNoon)
+            self.world.set_weather(carla.WeatherParameters.CloudyNoon)
 
             request_msg = String()
             request_msg.data = "Map is loaded"

@@ -1,3 +1,5 @@
+import numpy as np
+import torch
 import rclpy #type: ignore
 from rclpy.node import Node #type: ignore
 import carla
@@ -64,6 +66,15 @@ class SpawnVehicleNode(Node):
         self.verify_sensor_timer = None
         self.spawn_transform = None
         self.ignore_collisions_until = 0.0
+        self.distance_traveled = 0.0
+        self.center_lane_deviation = 0.0
+        self.max_distance_from_center = 3
+        self.velocity = float(0.0)
+        self.distance_from_center = float(0.0)
+        self.angle = float(0.0)
+        self.center_lane_deviation = 0.0
+        self.distance_covered = 0.0
+
         
         self.toggle_spawn = True
         self.current_waypoint_index = 0
@@ -122,6 +133,70 @@ class SpawnVehicleNode(Node):
             msg = Float32MultiArray()
             msg.data = [steer]
             self.steer_publisher.publish(msg)
+
+        # Action space of our vehicle. It can make eight unique actions.
+    # Continuous actions are broken into discrete here!
+    def angle_diff(self, v0, v1):
+        angle = np.arctan2(v1[1], v1[0]) - np.arctan2(v0[1], v0[0])
+        if angle > np.pi: angle -= 2 * np.pi
+        elif angle <= -np.pi: angle += 2 * np.pi
+        return angle
+
+
+    def distance_to_line(self, A, B, p):
+        num   = np.linalg.norm(np.cross(B - A, A - p))
+        denom = np.linalg.norm(B - A)
+        if np.isclose(denom, 0):
+            return np.linalg.norm(p - A)
+        return num / denom
+
+
+    def vector(self, v):
+        if isinstance(v, carla.Location) or isinstance(v, carla.Vector3D):
+            return np.array([v.x, v.y, v.z])
+        elif isinstance(v, carla.Rotation):
+            return np.array([v.pitch, v.yaw, v.roll])
+
+    def navigation_obs(self):
+        "vector of 5 values into the state: [throttle, velocity, previous steer, distance from center, angle deviation]"
+        nav_obs_arr = np.zeros(5, dtype=np.float32)
+        
+        velocity = self.vehicle.get_velocity()
+        self.velocity = np.sqrt(velocity.x**2 + velocity.y**2 + velocity.z**2) * 3.6  # convert to km/h
+        nav_obs_arr[1] = self.velocity
+        nav_obs_arr[2] = self.velocity / 22.0 # Normalized velocity
+    
+        self.rotation = self.vehicle.get_transform().rotation.yaw
+
+        # Location of the car
+        self.location = self.vehicle.get_location()
+
+
+        #transform = self.vehicle.get_transform()
+        # Keep track of closest waypoint on the route
+        waypoint_index = self.current_waypoint_index
+        for _ in range(len(self.route_waypoints)):
+            # Check if we passed the next waypoint along the route
+            next_waypoint_index = waypoint_index + 1
+            wp = self.route_waypoints[next_waypoint_index % len(self.route_waypoints)]
+            dot = np.dot(self.vector(wp.transform.get_forward_vector())[:2],self.vector(self.location - wp.transform.location)[:2])
+            if dot > 0.0:
+                waypoint_index += 1
+            else:
+                break
+
+        self.current_waypoint_index = waypoint_index
+        # Calculate deviation from center of the lane
+        self.current_waypoint = self.route_waypoints[ self.current_waypoint_index    % len(self.route_waypoints)]
+        self.next_waypoint = self.route_waypoints[(self.current_waypoint_index+1) % len(self.route_waypoints)]
+        self.distance_from_center = self.distance_to_line(self.vector(self.current_waypoint.transform.location),self.vector(self.next_waypoint.transform.location),self.vector(self.location))
+        self.center_lane_deviation += self.distance_from_center
+
+        # Get angle difference between closest waypoint and vehicle forward vector
+        fwd    = self.vector(self.vehicle.get_velocity())
+        wp_fwd = self.vector(self.current_waypoint.transform.rotation.get_forward_vector())
+        self.angle  = self.angle_diff(fwd, wp_fwd)
+        
             
     def spawn_objects_from_config(self):
 
@@ -234,8 +309,9 @@ class SpawnVehicleNode(Node):
     def publish_vehicle_location(self):
         if self.vehicle is not None and self.vehicle.is_alive:
             location = self.vehicle.get_location()
+            rotation = self.vehicle.get_transform().rotation.yaw
             msg = Float32MultiArray()
-            msg.data = [location.x, location.y, location.z]
+            msg.data = [location.x, location.y, location.z, rotation]
             self.location_publisher.publish(msg)
 
     def handle_system_state(self, msg):

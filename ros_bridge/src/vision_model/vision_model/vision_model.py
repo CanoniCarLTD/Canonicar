@@ -6,8 +6,9 @@ import torchvision.models as models
 from torchvision import transforms
 from torchvision.models.resnet import BasicBlock
 import cv2
-from vae.variational_encoder import VariationalEncoder
-
+import os
+import sys
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class LiDAREncoder(nn.Module):
     def __init__(self, in_ch=3, output_features=64):
@@ -40,86 +41,94 @@ class LiDAREncoder(nn.Module):
         x = self.pool(x).flatten(1)
         return self.fc(x)
 
+class VariationalEncoder(nn.Module):
+    def __init__(self, latent_dims):  
+        super(VariationalEncoder, self).__init__()
 
-# class SemanticEncoder(nn.Module):
-#     def __init__(self, output_features=128):
-#         super(SemanticEncoder, self).__init__()
-#         # Input is 3-channel BGR from the semantic segmentation
-#         # Use a more efficient network for semantic images since they're already preprocessed
-#         self.encoder = nn.Sequential(
-#             # Initial block
-#             nn.Conv2d(3, 32, kernel_size=3, stride=2, padding=1),
-#             nn.BatchNorm2d(32),
-#             nn.ReLU(inplace=True),
+        self.model_file = 'model/var_encoder_model.pth'
 
-#             # Block 1
-#             nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1),
-#             nn.BatchNorm2d(64),
-#             nn.ReLU(inplace=True),
+        self.encoder_layer1 = nn.Sequential(
+            nn.Conv2d(3, 32, 4, stride=2),  # 79, 39
+            nn.LeakyReLU())
 
-#             # Block 2
-#             nn.Conv2d(64, 96, kernel_size=3, stride=2, padding=1),
-#             nn.BatchNorm2d(96),
-#             nn.ReLU(inplace=True),
+        self.encoder_layer2 = nn.Sequential(
+            nn.Conv2d(32, 64, 3, stride=2, padding=1),  # 40, 20
+            nn.BatchNorm2d(64),
+            nn.LeakyReLU())
 
-#             # Block 3
-#             nn.Conv2d(96, 128, kernel_size=3, stride=2, padding=1),
-#             nn.BatchNorm2d(128),
-#             nn.ReLU(inplace=True),
-#         )
-#         self.global_pool = nn.AdaptiveAvgPool2d((1, 1))
-#         self.fc = nn.Linear(128, output_features)
+        self.encoder_layer3 = nn.Sequential(
+            nn.Conv2d(64, 128, 4, stride=2),  # 19, 9
+            nn.LeakyReLU())
 
+        self.encoder_layer4 = nn.Sequential(
+            nn.Conv2d(128, 256, 3, stride=2),  # 9, 4
+            nn.BatchNorm2d(256),
+            nn.LeakyReLU())
 
-# def forward(self, x):
-#     x = self.encoder(x)
-#     x = self.global_pool(x)
-#     x = torch.flatten(x, 1)
-#     x = self.fc(x)
-#     return x
+        self.linear = nn.Sequential(
+            nn.Linear(9*4*256, 1024),
+            nn.LeakyReLU())
 
+        self.mu = nn.Linear(1024, latent_dims)
+        self.sigma = nn.Linear(1024, latent_dims)
 
-class SensorFusionModel(nn.Module):
-    """Model that fuses Semantic and LiDAR data for autonomous driving."""
+        self.N = torch.distributions.Normal(0, 1)
+        self.N.loc = self.N.loc.to(device)
+        self.N.scale = self.N.scale.to(device)
+        self.kl = 0
 
-    def __init__(self,latent_dim=95, final_features=95):
-        super(SensorFusionModel, self).__init__()
-        # self.semantic_encoder = SemanticEncoder(output_features=semantic_features)
-        self.vae_encoder = VariationalEncoder(latent_dims=latent_dim)
-        try:
-            self.vae_encoder.load_state_dict(torch.load("/ros_bridge/src/vae/vae/model/var_encoder_model.pth"))
-        except FileNotFoundError:
-            print("VAE encoder weights not found. Please check the path.")
-        self.vae_encoder.eval()
-        for p in self.vae_encoder.parameters():
+    def forward(self, x):
+        x = x.to(device)
+        x = self.encoder_layer1(x)
+        x = self.encoder_layer2(x)
+        x = self.encoder_layer3(x)
+        x = self.encoder_layer4(x)
+        x = torch.flatten(x, start_dim=1)
+        x = self.linear(x)
+        mu =  self.mu(x)
+        sigma = torch.exp(self.sigma(x))
+        z = mu + sigma*self.N.sample(mu.shape)
+        self.kl = (sigma**2 + mu**2 - torch.log(sigma) - 1/2).sum()
+        return z
+
+    def save(self):
+        # ensure model folder exists
+        os.makedirs(os.path.dirname(self.model_file), exist_ok=True)
+        torch.save(self.state_dict(), self.model_file)
+
+    def load(self):
+        self.load_state_dict(torch.load(self.model_file, map_location=device))
+        self.eval()
+        for p in self.parameters():
             p.requires_grad = False
-        # self.lidar_encoder = LiDAREncoder(in_ch=3, output_features=lidar_features)
-        # Fusion layer to combine the features
-        self.fusion_layer = nn.Sequential(
-            nn.Linear(latent_dim, final_features), nn.ReLU()
-        )
 
-    def forward(self, semantic_image):
-        """
-        Forward pass through the model
+class EncodeState():
+    def __init__(self, latent_dim):
+        self.latent_dim = latent_dim
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        
+        try:
+            self.conv_encoder = VariationalEncoder(self.latent_dim).to(self.device)
+            self.conv_encoder.load()
+            self.conv_encoder.eval()
 
-        Args:
-            semantic_image (tensor): Semantic segmentation image [B, 3, H, W]
-            lidar_bev (tensor): LiDAR bird's eye view depth map [B, 3, H, W]
-
-        Returns:
-            tensor: Fused feature vector
-        """
-        semantic_features = self.vae_encoder(semantic_image)
-        # lidar_features = self.lidar_encoder(lidar_bev)
-
-        # Concatenate features
-        # fused_features = torch.cat([semantic_features, lidar_features], dim=1)
-
-        # Further compress features
-        fused_features = self.fusion_layer(semantic_features)
-
-        return fused_features
+            for params in self.conv_encoder.parameters():
+                params.requires_grad = False
+        except:
+            print('Encoder could not be initialized.')
+            sys.exit()
+    
+    def process(self, observation):
+        image_obs = torch.tensor(observation, dtype=torch.float).to(self.device)
+        image_obs = image_obs.unsqueeze(0)
+        image_obs = image_obs.permute(0,3,2,1)
+        image_obs = self.conv_encoder(image_obs)
+        
+        # navigation_obs = torch.tensor(observation[1], dtype=torch.float).to(self.device)
+        # observation = torch.cat((image_obs.view(-1), navigation_obs), -1)
+        
+        image_obs = image_obs.view(-1)
+        return image_obs
 
 
 class VisionProcessor:
@@ -137,7 +146,7 @@ class VisionProcessor:
             device: Torch device to run on
         """
         # self.lidar_grid_size = lidar_grid_size
-        self.height_range = height_range
+        # self.height_range = height_range
         self.device = device
 
         # No need for RGB normalization since semantic segmentation is already in a standardized format
@@ -145,44 +154,9 @@ class VisionProcessor:
         self.semantic_tensor = torch.zeros((1, 3, 160, 80), device=self.device)
 
         # Create and load the model
-        self.model = SensorFusionModel(
-            latent_dim=95, final_features=95
+        self.model = EncodeState(
+            latent_dim=95
         ).to(self.device)
-        self.model.eval()
-
-        # Model warmup for more consistent timing
-        dummy_semantic = torch.zeros((1, 3, 160, 80), device=self.device)
-        # dummy_lidar = torch.zeros((1, 3, 64, 64), device=self.device)
-        with torch.no_grad():
-            self.model(dummy_semantic)
-
-        # debugging
-        # z = self.model.vae_encoder(dummy_semantic)
-        # print("z shape: ", z.shape)
-
-    def process_semantic(self, semantic_image):
-        """Process semantic segmentation image to EXACTLY match Idrees' EncodeState.process().
-        Output tensor shape: [1, 3, 160, 80] (N, C, W, H) with raw 0..255 floats.
-        """
-        if not isinstance(semantic_image, np.ndarray):
-            return None
-
-        # Ensure (H, W) = (80, 160) like Idrees does before passing to VAE
-        if semantic_image.shape[0] != 80 or semantic_image.shape[1] != 160:
-            resized = cv2.resize(semantic_image, (160, 80), interpolation=cv2.INTER_NEAREST)
-        else:
-            resized = semantic_image
-
-        # Idrees: add batch first, then permute NHWC -> N C W H  (note W/H swap),
-        # and DO NOT divide by 255.0 (keep raw 0..255 floats).
-        semantic_tensor = (
-            torch.from_numpy(resized)
-            .float()
-            .unsqueeze(0)         # [1, H, W, C]
-            .permute(0, 3, 2, 1)  # [1, C, W, H] == [1, 3, 160, 80]
-            .to(self.device)
-        )
-        return semantic_tensor
 
 
     def lidar_to_bev(self, lidar_points):
@@ -272,34 +246,3 @@ class VisionProcessor:
         grid_tensor = torch.from_numpy(grid_combined).float().unsqueeze(0)
         return grid_tensor.to(self.device)
 
-    def process_sensor_data(self, semantic_image, lidar_points):
-        """
-        Process both semantic segmentation and LiDAR data and run inference
-
-        Args:
-            semantic_image: Semantic segmentation image as np.array [H, W, 3]
-            lidar_points: List of LiDAR points [x, y, z, intensity]
-
-        Returns:
-            np.array: Fused feature vector
-        """
-        # Process semantic image
-        semantic_tensor = self.process_semantic(semantic_image)
-
-        # Process LiDAR
-        # lidar_tensor = self.lidar_to_bev(lidar_points)
-
-        # sanity-check the shapes are exactly what the model expects
-        assert semantic_tensor.shape == (1, 3, 160, 80), (
-            f"semantic_tensor wrong shape {semantic_tensor.shape}, "
-            "expected (1,3,160,80)"
-        )
-        # assert lidar_tensor.shape[1:] == (3, 64, 64), (
-        #     f"lidar_tensor wrong shape {lidar_tensor.shape}, " "expected (_,3,64,64)"
-        # )
-
-        # Run inference
-        with torch.no_grad():
-            features = self.model(semantic_tensor)
-
-        return features.cpu().numpy()[0]  # Return as numpy array
