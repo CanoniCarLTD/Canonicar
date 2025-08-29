@@ -45,7 +45,7 @@ class VariationalEncoder(nn.Module):
     def __init__(self, latent_dims):  
         super(VariationalEncoder, self).__init__()
 
-        self.model_file = 'model/var_encoder_model.pth'
+        self.model_file = "/ros_bridge/src/vision_model/vision_model/model/var_encoder_model.pth"
 
         self.encoder_layer1 = nn.Sequential(
             nn.Conv2d(3, 32, 4, stride=2),  # 79, 39
