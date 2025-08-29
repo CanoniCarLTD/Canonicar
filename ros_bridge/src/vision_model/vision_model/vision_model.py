@@ -118,17 +118,16 @@ class EncodeState():
             print('Encoder could not be initialized.')
             sys.exit()
     
-    def process(self, observation):
+    def process(self, observation, nav_data):
         image_obs = torch.tensor(observation, dtype=torch.float).to(self.device)
         image_obs = image_obs.unsqueeze(0)
         image_obs = image_obs.permute(0,3,2,1)
         image_obs = self.conv_encoder(image_obs)
         
-        # navigation_obs = torch.tensor(observation[1], dtype=torch.float).to(self.device)
-        # observation = torch.cat((image_obs.view(-1), navigation_obs), -1)
+        navigation_obs = torch.tensor(nav_data, dtype=torch.float).to(self.device)
+        observation = torch.cat((image_obs.view(-1), navigation_obs), -1)
         
-        image_obs = image_obs.view(-1)
-        return image_obs
+        return observation
 
 
 class VisionProcessor:

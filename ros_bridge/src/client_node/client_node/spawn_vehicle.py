@@ -72,10 +72,11 @@ class SpawnVehicleNode(Node):
         self.velocity = float(0.0)
         self.distance_from_center = float(0.0)
         self.angle = float(0.0)
-        self.center_lane_deviation = 0.0
         self.distance_covered = 0.0
-
         
+        # self.route_waypoints = list()
+        self.road_waypoints = []
+
         self.toggle_spawn = True
         self.current_waypoint_index = 0
 
@@ -89,7 +90,13 @@ class SpawnVehicleNode(Node):
             Float32MultiArray, "/carla/vehicle/location", 10
         ) 
         self.timer = self.create_timer(0.1, self.publish_vehicle_location)
-        
+
+        self.navigation_publisher = self.create_publisher(
+            Float32MultiArray, "/carla/vehicle/navigation", 10
+        )
+
+        self.timer = self.create_timer(0.1, self.publish_vehicle_navigation)
+
         self.steer_publisher = self.create_publisher(
             Float32MultiArray, "/carla/vehicle/steer", 10
         ) 
@@ -160,25 +167,25 @@ class SpawnVehicleNode(Node):
     def navigation_obs(self):
         "vector of 5 values into the state: [throttle, velocity, previous steer, distance from center, angle deviation]"
         nav_obs_arr = np.zeros(5, dtype=np.float32)
-        
+        throttle = self.vehicle.get_control().throttle
+        nav_obs_arr[0] = throttle
         velocity = self.vehicle.get_velocity()
         self.velocity = np.sqrt(velocity.x**2 + velocity.y**2 + velocity.z**2) * 3.6  # convert to km/h
         nav_obs_arr[1] = self.velocity
-        nav_obs_arr[2] = self.velocity / 22.0 # Normalized velocity
+        nav_obs_arr[2] = 0.0 # previous steer
     
         self.rotation = self.vehicle.get_transform().rotation.yaw
 
         # Location of the car
         self.location = self.vehicle.get_location()
-
-
+                    
         #transform = self.vehicle.get_transform()
         # Keep track of closest waypoint on the route
         waypoint_index = self.current_waypoint_index
-        for _ in range(len(self.route_waypoints)):
+        for _ in range(len(self.road_waypoints)):
             # Check if we passed the next waypoint along the route
             next_waypoint_index = waypoint_index + 1
-            wp = self.route_waypoints[next_waypoint_index % len(self.route_waypoints)]
+            wp = self.road_waypoints[next_waypoint_index % len(self.road_waypoints)]
             dot = np.dot(self.vector(wp.transform.get_forward_vector())[:2],self.vector(self.location - wp.transform.location)[:2])
             if dot > 0.0:
                 waypoint_index += 1
@@ -187,17 +194,26 @@ class SpawnVehicleNode(Node):
 
         self.current_waypoint_index = waypoint_index
         # Calculate deviation from center of the lane
-        self.current_waypoint = self.route_waypoints[ self.current_waypoint_index    % len(self.route_waypoints)]
-        self.next_waypoint = self.route_waypoints[(self.current_waypoint_index+1) % len(self.route_waypoints)]
+        self.current_waypoint = self.road_waypoints[ self.current_waypoint_index    % len(self.road_waypoints)]
+        self.next_waypoint = self.road_waypoints[(self.current_waypoint_index+1) % len(self.road_waypoints)]
         self.distance_from_center = self.distance_to_line(self.vector(self.current_waypoint.transform.location),self.vector(self.next_waypoint.transform.location),self.vector(self.location))
         self.center_lane_deviation += self.distance_from_center
-
+        normalized_distance_from_center = self.distance_from_center / self.max_distance_from_center
+        nav_obs_arr[3] = normalized_distance_from_center
+        
         # Get angle difference between closest waypoint and vehicle forward vector
         fwd    = self.vector(self.vehicle.get_velocity())
         wp_fwd = self.vector(self.current_waypoint.transform.rotation.get_forward_vector())
         self.angle  = self.angle_diff(fwd, wp_fwd)
-        
-            
+        normalized_angle = abs(self.angle / np.deg2rad(20))
+        nav_obs_arr[4] = normalized_angle
+        return nav_obs_arr
+
+
+    def publish_vehicle_navigation(self):
+        nav_obs_arr = self.navigation_obs()
+        self.navigation_publisher.publish(Float32MultiArray(data=nav_obs_arr))
+
     def spawn_objects_from_config(self):
 
         self.get_logger().info("Waiting for map to fully load...")
@@ -242,20 +258,20 @@ class SpawnVehicleNode(Node):
                 self.get_logger().error("No valid driving lane found!")
                 return
             
-            road_waypoints = [
+            self.road_waypoints = [
                 wp
                 for wp in waypoints
                 if wp.road_id == main_road_id and wp.lane_id == driving_lane_id
             ]
-            if not road_waypoints:
+            if not self.road_waypoints:
                 self.get_logger().error(
                     "No waypoints found for the selected road/lane!"
                 )
                 return
 
-            road_waypoints.sort(key=lambda wp: wp.s)
+            self.road_waypoints.sort(key=lambda wp: wp.s)
             
-            spawn_waypoint = road_waypoints[1]
+            spawn_waypoint = self.road_waypoints[1]
 
 
             self.get_logger().info(

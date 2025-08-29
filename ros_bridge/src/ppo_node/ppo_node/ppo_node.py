@@ -506,20 +506,6 @@ class PPOModelNode(Node):
         self.get_logger().debug(f"Task added to queue: {task.__name__}")
         self.task_queue.put((task, args, kwargs))
         
-    def concat_state(self):
-        if self.state is None:
-            self.get_logger().error("State is None, cannot concatenate")
-            return
-        if len(self.state) != PPO_INPUT_DIM:
-            self.get_logger().error(f"State length {len(self.state)} does not match expected {PPO_INPUT_DIM}")
-            return
-        
-        vision_features = self.state[:95]
-        navigation_obs = torch.tensor(nav_obs_arr, dtype=torch.float).to(self.device)
-        observation = torch.cat((vision_features, navigation_obs), -1)
-        
-        
-        
     ##################################################################################################
     #                                       TRAINING
     ##################################################################################################
@@ -530,7 +516,6 @@ class PPOModelNode(Node):
 
         if self.timestep_counter < self.total_timesteps:
             self.state = np.array(msg.data, dtype=np.float32)
-            self.concat_state()
 
             self.calculate_reward()  # compute reward for previous transition
             reward_to_store = self.reward

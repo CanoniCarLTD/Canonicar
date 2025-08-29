@@ -58,9 +58,15 @@ class DataCollector(Node):
         self.velocity_y = 0.0
         self.velocity_z = 0.0
 
+        self.nav_data = [0.0]*5  # Initialize navigation data
+
         # Create state subscriber first to handle simulation status
         self.state_subscription = self.create_subscription(
             String, "/simulation/state", self.handle_system_state, 10
+        )
+
+        self.navigation_subscription = self.create_subscription(
+            Float32MultiArray, "/carla/vehicle/navigation", self.handle_navigation_data, 10
         )
 
         self.publish_to_PPO = self.create_publisher(
@@ -210,6 +216,17 @@ class DataCollector(Node):
         except Exception as e:
             self.get_logger().error(f"Error in sync callback: {e}")
 
+    def handle_navigation_data(self, msg):
+        """Handle incoming navigation data"""
+        self.nav_data = msg.data
+        if len(self.nav_data) != 5:
+            self.get_logger().warn(
+                f"Navigation data length mismatch. Expected 5, got {len(self.nav_data)}"
+            )
+            return
+        
+
+
     def process_data(self, image_msg, lidar_msg, imu_msg):
         """Process sensor data into state vector"""
         self.process_imu(imu_msg)
@@ -240,8 +257,8 @@ class DataCollector(Node):
 
         # Process using vision model - note that we're passing raw_image directly
         # which is now a semantic segmentation image
-        vision_features = self.vision_processor.EncodeState.process(raw_image)
-        return self.aggregate_state_vector(vision_features)
+        vision_features = self.vision_processor.EncodeState.process(raw_image,self.nav_data)
+        return vision_features
 
 
     def update_velocity_from_imu(self, imu_msg):
