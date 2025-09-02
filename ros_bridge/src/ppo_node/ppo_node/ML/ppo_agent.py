@@ -69,13 +69,13 @@ class ActorCritic(nn.Module):
 
     def get_value(self, obs):
         if isinstance(obs, np.ndarray):
-            obs = torch.tensor(obs, dtype=torch.float32, device=device)
+            obs = torch.tensor(obs, dtype=torch.float, device=device)
         return self.critic(obs)
 
     def get_action_and_log_prob(self, obs):
         # mean in [-1,1] due to tanh head
         if isinstance(obs, np.ndarray):
-            obs = torch.tensor(obs, dtype=torch.float32, device=device)
+            obs = torch.tensor(obs, dtype=torch.float, device=device)
         mean = self.actor(obs)
         dist = MultivariateNormal(mean, self.cov_mat)
         action = dist.sample()
@@ -131,7 +131,9 @@ class PPOAgent:
         self.old_policy.load_state_dict(self.policy.state_dict())
         self.old_policy.to(device)
         self.MseLoss = nn.MSELoss()
-
+        
+        self.set_action_std(ACTION_STD_INIT)
+        
         # Experience storage (unchanged)
         (
             self.states,

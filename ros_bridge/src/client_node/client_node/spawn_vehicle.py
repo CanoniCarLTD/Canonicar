@@ -73,7 +73,8 @@ class SpawnVehicleNode(Node):
         self.distance_from_center = float(0.0)
         self.angle = float(0.0)
         self.distance_covered = 0.0
-        
+        self.target_speed = 22
+
         # self.route_waypoints = list()
         self.road_waypoints = []
 
@@ -172,7 +173,7 @@ class SpawnVehicleNode(Node):
         velocity = self.vehicle.get_velocity()
         self.velocity = np.sqrt(velocity.x**2 + velocity.y**2 + velocity.z**2) * 3.6  # convert to km/h
         nav_obs_arr[1] = self.velocity
-        nav_obs_arr[2] = 0.0 # previous steer
+        nav_obs_arr[2] = self.velocity/self.target_speed
     
         self.rotation = self.vehicle.get_transform().rotation.yaw
 

@@ -3,8 +3,10 @@ import rclpy
 import math
 import struct
 import time
+import weakref
 
 from carla import Client
+import carla
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import Image, PointCloud2, Imu, NavSatFix
@@ -38,6 +40,13 @@ class DataCollector(Node):
 
         # torch.autograd.set_detect_anomaly(True) # slows things down, so only enable it for debugging.
 
+        # Connect to CARLA client
+        self.carla_client = None
+        self.carla_world = None
+        self.camera_sensor = None
+        self.latest_camera_data = None
+        self.connection_in_progress = False  # Flag to prevent multiple connection attempts
+        
         # Flag to track collector readiness
         self.ready_to_collect = False
         self.vehicle_id = None
@@ -59,6 +68,9 @@ class DataCollector(Node):
         self.velocity_z = 0.0
 
         self.nav_data = [0.0]*5  # Initialize navigation data
+
+        # Connect to CARLA
+        self._connect_to_carla()
 
         # Create state subscriber first to handle simulation status
         self.state_subscription = self.create_subscription(
@@ -86,7 +98,8 @@ class DataCollector(Node):
         # )
         # # ───────────────────────────────────────────────────────────
 
-        self.image_sub = Subscriber(self, Image, "/carla/segmentation_front/image")
+        # Use direct CARLA connection for camera instead of ROS topic
+        # self.image_sub = Subscriber(self, Image, "/carla/segmentation_front/image")
         self.lidar_sub = Subscriber(self, PointCloud2, "/carla/lidar/points")
         self.imu_sub = Subscriber(self, Imu, "/carla/imu/imu")
 
@@ -94,21 +107,34 @@ class DataCollector(Node):
         self.frame_id = 0
         self.saved_image_index = 1
         self.save_queue = Queue(maxsize=128)
-        # if RECORD_SS_IMAGES:
-        #     ts = time.strftime("%Y%m%d")
-        #     self.run_dir = DATA_ROOT / f"raw_{ts}"
-        #     self.run_dir.mkdir(parents=True, exist_ok=True)  # Ensure directory exists
-        #     existing_files = list(self.run_dir.glob("*.png"))
-        #     if existing_files:
-        #         max_idx = max(
-        #             [int(f.stem) for f in existing_files if f.stem.isdigit()], default=0
-        #         )
-        #         self.saved_image_index = max_idx + 1
-        #     self.writer_thread = threading.Thread(target=self._disk_writer, daemon=True)
-        #     self.writer_thread.start()
+        
+        if RECORD_SS_IMAGES:
+            ts = time.strftime("%Y%m%d")
+            self.run_dir = DATA_ROOT / f"raw_{ts}"
+            self.run_dir.mkdir(parents=True, exist_ok=True)  # Ensure directory exists
+            existing_files = list(self.run_dir.glob("*.png"))
+            if existing_files:
+                max_idx = max(
+                    [int(f.stem) for f in existing_files if f.stem.isdigit()], default=0
+                )
+                self.saved_image_index = max_idx + 1
+            self.writer_thread = threading.Thread(target=self._disk_writer, daemon=True)
+            self.writer_thread.start()
 
         self.get_logger().info("DataCollector Node initialized. Waiting for vehicle...")
 
+    def _connect_to_carla(self):
+        """Connect to CARLA client"""
+        try:
+            self.carla_client = Client('10.0.0.21', 2000)
+            self.carla_client.set_timeout(10.0)
+            self.carla_world = self.carla_client.get_world()
+            self.get_logger().info("Connected to CARLA server")
+        except Exception as e:
+            self.get_logger().error(f"Failed to connect to CARLA: {e}")
+            self.carla_client = None
+            self.carla_world = None
+            
     # Helper functions for VAE training
     def _disk_writer(self):
         """Runs in background; receives (img, path) tuples from queue."""
@@ -202,16 +228,17 @@ class DataCollector(Node):
             # Publish to PPO node for training/inference
             response = Float32MultiArray()
             response.data = processed_data.tolist()
+            self.publish_to_PPO.publish(response)
 
-            if not np.isnan(processed_data).any():
-                if self.steps_counter % 5 == 0:
-                    self.publish_to_PPO.publish(response)
-                self.steps_counter += 1
-                if self.steps_counter == 100000:
-                    # reset the counter to avoid overflow
-                    self.steps_counter = 0
-            else:
-                self.get_logger().warn("State vector contains NaN values. Skipping...")
+            # if not np.isnan(processed_data).any():
+            #     if self.steps_counter % 5 == 0:
+            #         self.publish_to_PPO.publish(response)
+            #     self.steps_counter += 1
+            #     if self.steps_counter == 100000:
+            #         # reset the counter to avoid overflow
+            #         self.steps_counter = 0
+            # else:
+            #     self.get_logger().warn("State vector contains NaN values. Skipping...")
 
         except Exception as e:
             self.get_logger().error(f"Error in sync callback: {e}")
@@ -230,12 +257,11 @@ class DataCollector(Node):
     def process_data(self, image_msg, lidar_msg, imu_msg):
         """Process sensor data into state vector"""
         self.process_imu(imu_msg)
-        # Extract semantic segmentation image directly (already processed by carla_semantic_image_to_ros_image)
-        raw_image = np.frombuffer(image_msg.data, dtype=np.uint8).reshape(
-            (image_msg.width, image_msg.height, 4)  # BGR format from semantic converter
-        )
-        if raw_image.shape[2] == 4:  # BGRA format
-            raw_image = raw_image[:, :, :3]  # Remove alpha channel
+        # Extract semantic segmentation image using the same approach as your reference:
+        # Assume the ROS Image was created from a CARLA image that used CityScapesPalette
+        placeholder = np.frombuffer(image_msg.data, dtype=np.dtype("uint8"))
+        placeholder1 = placeholder.reshape((image_msg.height, image_msg.width, 4))
+        raw_image = placeholder1[:, :, :3]
 
         # ─── NEW: queue saving ───────────────────────────────────────────────
         if RECORD_SS_IMAGES and (self.frame_id % SAVE_EVERY_N_FRAMES == 0):
@@ -257,7 +283,7 @@ class DataCollector(Node):
 
         # Process using vision model - note that we're passing raw_image directly
         # which is now a semantic segmentation image
-        vision_features = self.vision_processor.EncodeState.process(raw_image,self.nav_data)
+        vision_features = self.vision_processor.model.process(raw_image, self.nav_data)
         return vision_features
 
 

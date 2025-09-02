@@ -151,6 +151,7 @@ class PPOModelNode(Node):
         self.heading_deviation = 0.0
         self.vehicle_heading = 0.0
         self._prev_throttle = 0.0
+        self._prev_steer = 0.0
         
         self.episode_start_time = datetime.now()
         self.current_step_in_episode = 0
@@ -267,11 +268,6 @@ class PPOModelNode(Node):
             self.get_logger().error(f"Invalid action format: {action_list}")
             return
 
-        # Keep persistent state on the node
-        if not hasattr(self, "_prev_steer"):  # initialize once
-            self._prev_steer = 0.0
-            self._prev_throttle = 0.0
-
         # unpack
         steer, throttle = float(steer), float(throttle)
 
@@ -279,7 +275,8 @@ class PPOModelNode(Node):
         steer = max(min(steer, 1.0), -1.0)
         throttle = (throttle + 1.0) / 2.0
         throttle = max(min(throttle, 1.0), 0.0)
-
+        steer= self._prev_steer*0.9 + steer*0.1
+        throttle= self._prev_throttle*0.9 + throttle*0.1
         self._prev_steer = steer
         self._prev_throttle = throttle
 

@@ -41,6 +41,105 @@ class LiDAREncoder(nn.Module):
         x = self.pool(x).flatten(1)
         return self.fc(x)
 
+
+class VariationalAutoencoder(nn.Module):
+    def __init__(self, latent_dims):
+        super(VariationalAutoencoder, self).__init__()
+        self.model_file = os.path.join('autoencoder/model', 'var_autoencoder.pth')
+        self.encoder = VariationalEncoder(latent_dims)
+        self.decoder = Decoder(latent_dims)
+
+    def forward(self, x):
+        x = x.to(device)
+        z = self.encoder(x)
+        return self.decoder(z)
+    
+    def save(self):
+        torch.save(self.state_dict(), self.model_file)
+        self.encoder.save()
+        self.decoder.save()
+    
+    def load(self):
+        self.load_state_dict(torch.load(self.model_file))
+        self.encoder.load()
+        self.decoder.load()
+
+# def main():
+
+#     data_dir = 'autoencoder/dataset/'
+
+#     test_transforms = transforms.Compose([transforms.ToTensor()])
+
+#     test_data = datasets.ImageFolder(data_dir+'test', transform=test_transforms)
+
+#     testloader = torch.utils.data.DataLoader(test_data, batch_size=BATCH_SIZE)
+    
+#     model = VariationalAutoencoder(latent_dims=LATENT_SPACE).to(device)
+#     model.load()
+#     count = 1
+#     with torch.no_grad(): # No need to track the gradients
+#         for x, _ in testloader:
+#             # Move tensor to the proper device
+#             x = x.to(device)
+#             # Decode data
+#             x_hat = model(x)
+#             x_hat = x_hat.cpu()
+#             x_hat = x_hat.squeeze(0)
+#             transform = transforms.ToPILImage()
+
+#             # convert the tensor to PIL image using above transform
+#             img = transform(x_hat)
+
+#             image_filename = str(count) +'.png'
+#             img.save('autoencoder/reconstructed/'+image_filename)
+#             count +=1
+
+
+# if __name__ == "__main__":
+#     try:
+#         main()
+#     except KeyboardInterrupt:
+#         sys.exit()
+#     finally:
+#         print('\nTerminating...')
+        
+class Decoder(nn.Module):
+    
+    def __init__(self, latent_dims):
+        super().__init__()
+        self.model_file = os.path.join('autoencoder/model', 'decoder_model.pth')
+        self.decoder_linear = nn.Sequential(
+            nn.Linear(latent_dims, 1024),
+            nn.LeakyReLU(),
+            nn.Linear(1024, 9 * 4 * 256),
+            nn.LeakyReLU()
+        )
+
+        self.unflatten = nn.Unflatten(dim=1, unflattened_size=(256,4,9))
+
+        self.decoder = nn.Sequential(
+            nn.ConvTranspose2d(256, 128, 3, stride=2),
+            nn.LeakyReLU(),
+            nn.ConvTranspose2d(128, 64, 4,  stride=2),
+            nn.LeakyReLU(),
+            nn.ConvTranspose2d(64, 32, 3, stride=2,
+                               padding=1),
+            nn.LeakyReLU(),
+            nn.ConvTranspose2d(32, 3, 4, stride=2),
+            nn.Sigmoid())
+        
+    def forward(self, x):
+        x = self.decoder_linear(x)
+        x = self.unflatten(x)
+        x = self.decoder(x)
+        return x
+
+    def save(self):
+        torch.save(self.state_dict(), self.model_file)
+
+    def load(self):
+        self.load_state_dict(torch.load(self.model_file))
+        
 class VariationalEncoder(nn.Module):
     def __init__(self, latent_dims):  
         super(VariationalEncoder, self).__init__()
@@ -98,23 +197,26 @@ class VariationalEncoder(nn.Module):
 
     def load(self):
         self.load_state_dict(torch.load(self.model_file, map_location=device))
-        self.eval()
-        for p in self.parameters():
-            p.requires_grad = False
 
-class EncodeState():
-    def __init__(self, latent_dim):
+class EncodeState(nn.Module):
+    def __init__(self, latent_dim, device=None):
+        super().__init__()
         self.latent_dim = latent_dim
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        
+        # allow explicit device or default to CUDA if available
+        if device is None:
+            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        else:
+            self.device = device
+
         try:
+            # create and load the pretrained VAE encoder
             self.conv_encoder = VariationalEncoder(self.latent_dim).to(self.device)
             self.conv_encoder.load()
             self.conv_encoder.eval()
 
             for params in self.conv_encoder.parameters():
                 params.requires_grad = False
-        except:
+        except Exception:
             print('Encoder could not be initialized.')
             sys.exit()
     
@@ -127,7 +229,8 @@ class EncodeState():
         navigation_obs = torch.tensor(nav_data, dtype=torch.float).to(self.device)
         observation = torch.cat((image_obs.view(-1), navigation_obs), -1)
         
-        return observation
+        # Convert to numpy array and move to CPU if on CUDA
+        return observation.cpu().numpy()
 
 
 class VisionProcessor:
@@ -150,13 +253,12 @@ class VisionProcessor:
 
         # No need for RGB normalization since semantic segmentation is already in a standardized format
         # But we'll still preprocess to normalize to [0, 1] range
-        self.semantic_tensor = torch.zeros((1, 3, 160, 80), device=self.device)
+        # self.semantic_tensor = torch.zeros((1, 3, 160, 80), device=self.device)
 
         # Create and load the model
-        self.model = EncodeState(
-            latent_dim=95
-        ).to(self.device)
-
+        # Create the EncodeState with explicit device; EncodeState is an nn.Module
+        # and will place its internal encoder on the requested device.
+        self.model = EncodeState(latent_dim=95, device=self.device)
 
     def lidar_to_bev(self, lidar_points):
         """
