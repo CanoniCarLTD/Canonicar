@@ -98,7 +98,7 @@ class DataCollector(Node):
     def _connect_to_carla(self):
         """Connect to CARLA client"""
         try:
-            self.carla_client = Client('10.0.0.21', 2000)
+            self.carla_client = Client('5.29.227.167', 2000)
             self.carla_client.set_timeout(10.0)
             self.carla_world = self.carla_client.get_world()
             self.get_logger().info("Connected to CARLA server")
