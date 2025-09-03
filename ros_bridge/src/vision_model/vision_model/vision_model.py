@@ -63,45 +63,6 @@ class VariationalAutoencoder(nn.Module):
         self.load_state_dict(torch.load(self.model_file))
         self.encoder.load()
         self.decoder.load()
-
-# def main():
-
-#     data_dir = 'autoencoder/dataset/'
-
-#     test_transforms = transforms.Compose([transforms.ToTensor()])
-
-#     test_data = datasets.ImageFolder(data_dir+'test', transform=test_transforms)
-
-#     testloader = torch.utils.data.DataLoader(test_data, batch_size=BATCH_SIZE)
-    
-#     model = VariationalAutoencoder(latent_dims=LATENT_SPACE).to(device)
-#     model.load()
-#     count = 1
-#     with torch.no_grad(): # No need to track the gradients
-#         for x, _ in testloader:
-#             # Move tensor to the proper device
-#             x = x.to(device)
-#             # Decode data
-#             x_hat = model(x)
-#             x_hat = x_hat.cpu()
-#             x_hat = x_hat.squeeze(0)
-#             transform = transforms.ToPILImage()
-
-#             # convert the tensor to PIL image using above transform
-#             img = transform(x_hat)
-
-#             image_filename = str(count) +'.png'
-#             img.save('autoencoder/reconstructed/'+image_filename)
-#             count +=1
-
-
-# if __name__ == "__main__":
-#     try:
-#         main()
-#     except KeyboardInterrupt:
-#         sys.exit()
-#     finally:
-#         print('\nTerminating...')
         
 class Decoder(nn.Module):
     

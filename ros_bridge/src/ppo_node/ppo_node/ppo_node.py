@@ -257,9 +257,9 @@ class PPOModelNode(Node):
         # Idrees' mapping and clamps
         steer = max(min(steer, 1.0), -1.0)
         throttle = (throttle + 1.0) / 2.0
-        throttle = max(min(throttle, 1.0), 0.0)
-        steer= self._prev_steer*0.9 + steer*0.1
-        throttle= self._prev_throttle*0.9 + throttle*0.1
+        throttle = max(min(throttle, 0.25), 0.0)
+        steer = self._prev_steer*0.9 + steer*0.1
+        throttle = self._prev_throttle*0.9 + throttle*0.1
         self._prev_steer = steer
         self._prev_throttle = throttle
 
@@ -409,7 +409,7 @@ class PPOModelNode(Node):
             return
 
         if self.timestep_counter < self.total_timesteps:
-            self.state = np.array(msg.data, dtype=np.float32)
+            self.state = np.array(msg.data[1:1+PPO_INPUT_DIM], dtype=np.float32)
 
             self.calculate_reward()  # compute reward for previous transition
             reward_to_store = self.reward
@@ -551,6 +551,7 @@ class PPOModelNode(Node):
                 
                 if self.done:
                     self.reset_run()
+                    torch.cuda.empty_cache()
                     self.episode_counter += 1
                     
                 self.get_logger().debug(f"Processed state from frame_id {frame_id}")

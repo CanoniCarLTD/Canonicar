@@ -66,6 +66,7 @@ class ActorCritic(nn.Module):
 
     def set_action_std(self, new_action_std: float):
         self.cov_var = torch.full((self.action_dim,), new_action_std, device=device)
+        self.cov_mat = torch.diag(self.cov_var).unsqueeze(0)
 
     def get_value(self, obs):
         if isinstance(obs, np.ndarray):
