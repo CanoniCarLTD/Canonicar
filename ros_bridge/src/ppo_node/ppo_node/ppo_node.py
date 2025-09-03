@@ -26,9 +26,6 @@ from .ML.parameters import *
 
 # os.environ["CUDA_LAUNCH_BLOCKING"] = "1"  # might reduce performance time! Uncomment for debugging CUDA errors
 
-# # from .db.mongo_connection import init_db, close_db
-# from .db import mongo_connection
-
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
@@ -51,18 +48,6 @@ class PPOModelNode(Node):
         self.model_lock = threading.Lock()
 
         self.train = TRAIN
-
-        # try:
-        #     self.db = mongo_connection.init_db()
-        #     if self.db:
-        #         self.get_logger().info("MongoDB connection established")
-        #     else:
-        #         self.get_logger().warn(
-        #             "MongoDB not available - metrics will not be stored"
-        #         )
-        # except Exception as e:
-        #     self.get_logger().warn(f"Failed to connect to MongoDB: {e}")
-        #     self.db = None
 
         self.current_step_in_episode = 0
 
@@ -95,16 +80,12 @@ class PPOModelNode(Node):
 
         self.summary_writer = None
 
-        # seed = int(time.time()) % (2**32 - 1)
         seed = 0  # Fixed seed for reproducibility
         
         random.seed(seed)
         np.random.seed(seed)
         torch.manual_seed(seed)
         torch.backends.cudnn.deterministic = True
-        
-        # self.set_global_seed(seed)
-        # self.set_deterministic_cudnn(deterministic_cudnn=DETERMINISTIC_CUDNN)
 
         # torch.autograd.set_detect_anomaly(True) # slows things down, so only enable it for debugging.
 
@@ -246,14 +227,6 @@ class PPOModelNode(Node):
         self.get_logger().info(
             "PPOModelNode initialized, Subscribed to data topic and PPO model loaded."
         )
-
-    ##################################################################################################
-    #                            ACTION SELECTION - moved to training loop
-    ##################################################################################################
-
-    # def get_action(self, data):
-    #     self.state = data  # might be redundant but just to make sure
-    #     self.action, self.log_prob = self.ppo_agent.select_action(data)    
 
     ##################################################################################################
     #                                       ACTION PUBLISHING
