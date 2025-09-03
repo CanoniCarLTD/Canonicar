@@ -19,12 +19,12 @@ LOAD_STATE_DICT_FROM_RUN = None
 
 DETERMINISTIC_CUDNN = True
 
-TRAIN = True
+TRAIN = False
 EPISODE_LENGTH = 7000  # Maximum timesteps per episode
 LEARN_EVERY_N_STEPS = 2048  # Number of timesteps collected before a policy update
 NUM_EPOCHS = 7  # PPO best practice is 3-10
 SAVE_EVERY_N_TIMESTEPS = LEARN_EVERY_N_STEPS * 2  # Save model every 2 policy updates
-ACTION_STD_INIT = 0.05
+ACTION_STD_INIT = 0.1
 PPO_INPUT_DIM = 100
 TOTAL_TIMESTEPS = 2e8  # Total number of timesteps for training
 EPISODES = 1e8  # Not in use
@@ -37,7 +37,7 @@ GAMMA = 0.99  # Discount Factor for future rewards
 VF_COEF = 0.5  # Value function coefficient for the loss calculation
 
 # Evaluation settings
-TEST_TIMESTEPS = 5e4
+TEST_TIMESTEPS = 5e5
 MINIBATCH_SIZE = 256
 # Experimental
 MIN_SPEED = 1.0  # m/s

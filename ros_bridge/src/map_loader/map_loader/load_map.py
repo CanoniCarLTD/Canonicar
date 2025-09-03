@@ -105,7 +105,7 @@ class LoadMapNode(Node):
             self.world = self.client.get_world()
             settings = self.world.get_settings()
             settings.synchronous_mode = False
-            # settings.fixed_delta_seconds = 0.025  # 40Hz simulation (4× sensor frequency)
+            # settings.fixed_delta_seconds = 0.05  # 40Hz simulation (4× sensor frequency)
             # settings.substepping = True
             # settings.max_substep_delta_time = 0.01  # 100Hz physics calculations
             # settings.max_substeps = 3  # Ensures 0.03 <= 0.01×3

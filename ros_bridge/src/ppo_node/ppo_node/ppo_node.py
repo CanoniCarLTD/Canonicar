@@ -97,8 +97,14 @@ class PPOModelNode(Node):
 
         # seed = int(time.time()) % (2**32 - 1)
         seed = 0  # Fixed seed for reproducibility
-        self.set_global_seed(seed)
-        self.set_deterministic_cudnn(deterministic_cudnn=DETERMINISTIC_CUDNN)
+        
+        random.seed(seed)
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+        torch.backends.cudnn.deterministic = True
+        
+        # self.set_global_seed(seed)
+        # self.set_deterministic_cudnn(deterministic_cudnn=DETERMINISTIC_CUDNN)
 
         # torch.autograd.set_detect_anomaly(True) # slows things down, so only enable it for debugging.
 
@@ -152,7 +158,11 @@ class PPOModelNode(Node):
         self.vehicle_heading = 0.0
         self._prev_throttle = 0.0
         self._prev_steer = 0.0
-        
+
+        self.last_processed_frame_id = -1
+        self.max_buffer_size = 100  # Prevent memory issues
+        self.state_buffer = []
+
         self.episode_start_time = datetime.now()
         self.current_step_in_episode = 0
         self.last_actor_loss = None
@@ -458,6 +468,20 @@ class PPOModelNode(Node):
         self.lap_completed = False
         self.track_progress = 0.0
         self.prev_progress_distance = 0.0
+        self._prev_throttle = 0.0
+        self._prev_steer = 0.0
+        self.vehicle_location = None
+        self.vehicle_rotation = None
+        self.lap_start_time = None
+        self.lap_end_time = None
+        self.lap_time = None
+        self.needs_track_waypoints = False
+        self.current_speed = 0.0
+        self.last_processed_frame_id = -1
+        self.max_buffer_size = 100
+        self.state_buffer.clear()
+        
+        
         self.termination_reason = "unknown"
         self.get_logger().info(f"Episode {self.episode_counter} finished. Resetting.")
 
@@ -607,24 +631,61 @@ class PPOModelNode(Node):
     def testing(self, msg):
         if not hasattr(self, "ready_to_collect") or not self.ready_to_collect:
             return
-
-        self.state = np.array(msg.data, dtype=np.float32)
-        # self.t1 = datetime.now()
-        if self.current_step_in_episode < self.episode_length:
-            self.current_step_in_episode += 1
-            # self.get_action_deterministic(self.state) # deleted - replace it with another get action
-            self.publish_action()
-            # self.calculate_reward()
-            if self.current_step_in_episode >= self.episode_length:
-                self.done = True
-                self.termination_reason = "episode_length"
-            self.timestep_counter += 1
-            self.current_ep_reward += self.reward
-            if self.done:
-                # self.t2 = datetime.now()
-                self.reset_run()
-                self.episode_counter += 1
-            return 1
+        
+        try:
+            # Extract frame_id from the first element of the message
+            if len(msg.data) < 2:  # Should have at least frame_id + some state data
+                self.get_logger().warn("Received message with insufficient data")
+                return
+                
+            current_frame_id = int(msg.data[0])
+            state_data = np.array(msg.data[1:], dtype=np.float32)  # Skip frame_id
+            
+            # Only process if this is a new frame
+            if current_frame_id != self.last_processed_frame_id:
+                # Add to buffer as tuple (frame_id, state_data)
+                self.state_buffer.append((current_frame_id, state_data))
+                self.last_processed_frame_id = current_frame_id
+                
+                # Limit buffer size to prevent memory issues
+                if len(self.state_buffer) > self.max_buffer_size:
+                    self.state_buffer.pop(0)  # Remove oldest
+                    
+                self.get_logger().info(f"Added new state with frame_id {current_frame_id} to buffer")
+            else:
+                self.get_logger().info(f"Ignoring duplicate frame_id {current_frame_id}")
+                return
+            
+            # Process states from buffer
+            if self.state_buffer and self.current_step_in_episode < self.episode_length:
+                # Pop the oldest state from buffer
+                frame_id, state = self.state_buffer.pop(0)
+                self.state = state
+                
+                self.current_step_in_episode += 1
+                
+                # Get action for this unique state
+                self.action, self.log_prob = self.ppo_agent.select_action(self.state)
+                self.publish_action()
+                
+                # Handle episode completion
+                if self.current_step_in_episode >= self.episode_length:
+                    self.done = True
+                    self.termination_reason = "episode_length"
+                
+                self.timestep_counter += 1
+                self.current_ep_reward += self.reward
+                
+                if self.done:
+                    self.reset_run()
+                    self.episode_counter += 1
+                    
+                self.get_logger().debug(f"Processed state from frame_id {frame_id}")
+                return 1
+                
+        except Exception as e:
+            self.get_logger().error(f"Error in testing method: {e}")
+            return 0
 
     ##################################################################################################
     #                                   CHECKPOINTING AND LOGGING

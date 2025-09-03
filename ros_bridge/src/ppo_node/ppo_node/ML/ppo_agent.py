@@ -185,7 +185,7 @@ class PPOAgent:
         self.actions.append(a)
 
         if not isinstance(log_prob, torch.Tensor):
-            lp = torch.tensor([log_prob], dtype=torch.float32, device=device)
+            lp = torch.tensor([log_prob], dtype=torch.float, device=device)
         else:
             lp = log_prob.detach()
         self.log_probs.append(lp)
