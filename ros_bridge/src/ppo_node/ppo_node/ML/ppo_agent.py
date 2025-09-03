@@ -198,12 +198,10 @@ class PPOAgent:
     ##################################################################################################
 
     def save_model_and_optimizers(self, directory):
-        # Simplified save: only save the policy (ActorCritic state) to a single file
-        # named `ppo_policy_12_.pth`. Do NOT save optimizer state.
-        self.logger.info("Saving policy only (ppo_policy_12_.pth) - no optimizers...")
+        self.logger.info("Saving policy only (ppo_.pth) - no optimizers...")
         try:
             os.makedirs(directory, exist_ok=True)
-            out_path = os.path.join(directory, "ppo_policy_12_.pth")
+            out_path = os.path.join(directory, "ppo_.pth")
             # Save a dict with a clear key for forward compatibility
             torch.save({"policy": self.policy.state_dict()}, out_path)
             self.logger.info(f"Policy saved to {out_path}")
@@ -213,13 +211,13 @@ class PPOAgent:
     def load_model_and_optimizers(self, directory):
         """Load policy saved by `save_model_and_optimizers`.
 
-        Expect a file named `ppo_policy_12_.pth` inside `directory`. The file
+        Expect a file named `ppo_.pth` inside `directory`. The file
         should contain either a raw state_dict or a dict with key 'ac'.
         This function only loads the model weights (no optimizers).
         """
         self.logger.info(f"Loading policy from: {directory}")
         try:
-            p = os.path.join(directory, "ppo_policy_12_.pth")
+            p = os.path.join(directory, "ppo_.pth")
             checkpoint = torch.load(p, map_location=device)
 
             # Support either {'ac': ...}, {'policy': ...}, or a raw state_dict
@@ -258,16 +256,19 @@ class PPOAgent:
     #                                           COMPUTE monte-carlo returns
     ##################################################################################################
 
-    def compute_mc_returns(self, rewards, dones, gamma=GAMMA):
-        T = rewards.size(0)
-        returns = torch.zeros(T, device=device)
-        G = 0.0
-        for t in reversed(range(T)):
-            G = rewards[t] + gamma * G * (1.0 - dones[t])
-            returns[t] = G
-        advantages = returns - self.policy.get_value(self.states_tensor)[...,0].detach()  # or recompute values_now
-        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
-        return advantages, returns
+    def compute_mc_returns(self, gamma=GAMMA):
+        """
+        Monte Carlo estimate of returns.
+        """
+        discounted_reward = 0.0
+        returns_list = []
+        for r, is_terminal in zip(reversed(self.rewards), reversed(self.dones)):
+            if is_terminal:
+                discounted_reward = 0.0
+            discounted_reward = r + gamma * discounted_reward
+            returns_list.insert(0, discounted_reward)
+
+        return torch.tensor(returns_list, dtype=torch.float32, device=device)
     
     ##################################################################################################
     #                                       NORMALIZE REWARDS
@@ -281,27 +282,23 @@ class PPOAgent:
     #                                       MAIN PPO ALGORITHM
     ##################################################################################################
 
-    def learn(self): # **FIX LOOP - REMOVE MINIBATCHES AND FIX MONTE CARLO RETURNS**
+    def learn(self):
         """
         Perform PPO training using stored experiences (from latest batch).
         returns: actor_loss, critic_loss, entropy
         """
-        # Convert lists to numpy arrays first
         states = torch.as_tensor(
             np.array(self.states), dtype=torch.float32, device=device
         )
-        # expose states as an attribute for compatibility with compute_mc_returns
-        # compute_mc_returns expects self.states_tensor to exist when using Monte-Carlo returns
-        self.states_tensor = states
-        model_actions = torch.as_tensor(
+        actions = torch.as_tensor(
             np.array(self.actions), dtype=torch.float32, device=device
         )
-        rewards = torch.as_tensor(self.rewards, dtype=torch.float32, device=device)
-        dones = torch.as_tensor(self.dones, dtype=torch.float32, device=device)
 
-        advantages, returns = self.compute_mc_returns(rewards, dones)
+        returns = self.compute_mc_returns()
+        returns = (returns - returns.mean()) / (returns.std() + 1e-7)
+        values = self.policy.get_value(states).detach().view(-1, 1)
+        advantages = returns.view(-1, 1) - values           
 
-        # returns = (returns - returns.mean()) / (returns.std() + 1e-8)
         old_log_probs = torch.cat(self.log_probs, dim=0).detach().view(-1, 1).to(device)
 
 
@@ -319,35 +316,27 @@ class PPOAgent:
             for start in range(0, N, MINIBATCH_SIZE):
                 b = indices[start:start + MINIBATCH_SIZE]
 
-                # Slice and fix shapes to [B,1] where needed
-                b_states      = states[b]                                  # [B, S]
-                b_actions     = model_actions[b]                           # [B, A]  (MODEL domain: steer[-1,1], throttle[-1,1])
-                b_old_logprob = old_log_probs[b].detach().view(-1, 1)      # [B, 1]
-                b_adv         = advantages[b].detach().view(-1, 1)         # [B, 1]  (already normalized; keep as-is)
-                b_returns     = returns[b].detach().view(-1, 1)            # [B, 1]  (DO NOT normalize)
+                b_states      = states[b]
+                b_actions     = actions[b]
+                b_old_logprob = old_log_probs[b].detach().view(-1, 1)
+                b_adv         = advantages[b].detach().view(-1, 1)
+                b_returns     = returns[b].detach().view(-1, 1)
 
-                # ---- Forward new policy ----
-                # evaluate() must return: logprobs [B], values [B,1], entropy [B] (or broadcastable)
                 new_logprob, values, dist_entropy = self.policy.evaluate(b_states, b_actions)
-                new_logprob = new_logprob.view(-1, 1)                      # [B,1]
+                new_logprob = new_logprob.view(-1, 1)
 
                 # ---- PPO ratio ----
-                ratio = torch.exp(new_logprob - b_old_logprob)             # [B,1]
+                ratio = torch.exp(new_logprob - b_old_logprob)
 
                 # ---- Clipped surrogate ----
                 surr1 = ratio * b_adv
                 surr2 = torch.clamp(ratio, 1 - POLICY_CLIP, 1 + POLICY_CLIP) * b_adv
                 actor_loss = -torch.min(surr1, surr2).mean()
 
-                # ---- Critic loss (no return normalization) ----
                 critic_loss = F.mse_loss(values, b_returns) * VF_COEF
-
-                # ---- Entropy bonus as a separate term ----
                 entropy_loss = -self.entropy_coef * dist_entropy.mean()
-
-                # ---- Joint backward/update ----
                 loss = actor_loss + critic_loss + entropy_loss
-
+                
                 self.optimizer.zero_grad(set_to_none=True)
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(self.policy.actor.parameters(), 0.5)
@@ -360,13 +349,12 @@ class PPOAgent:
                 num_batches += 1
 
 
-        # Sync frozen policy with current (Idrees-style)
+        # Sync frozen policy with current
         self.old_policy.load_state_dict(self.policy.state_dict())
         self.learn_step_counter += 1
 
         if self.summary_writer is not None:
             with torch.no_grad():
-                # NOTE: no per-dim log_std anymore; we expose fixed std from cov_var.
                 current_action_std = self.policy.cov_var.detach().cpu().numpy()
                 self.logger.info(
                     f"[Learn Step {self.learn_step_counter}] fixed action_std per dim: {current_action_std}"
@@ -395,7 +383,6 @@ class PPOAgent:
             self.dones,
         ) = ([], [], [], [], [])
 
-        # Return averaged metrics
         return (
             total_actor_loss / max(1, num_batches),
             total_critic_loss / max(1, num_batches),
