@@ -26,7 +26,7 @@ from queue import Queue
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-RECORD_SS_IMAGES = False  # flip to False when you just want PPO
+RECORD_SS_IMAGES = True  # flip to False when you just want PPO
 SAVE_EVERY_N_FRAMES = 1
 DATA_ROOT = Path(
     "/ros_bridge/src/data_collector_node/data_collector_node/VAE/images"
@@ -150,8 +150,8 @@ class DataCollector(Node):
             camera_bp.set_attribute('sensor_tick', '0.1')
             # Setup camera transform (front of vehicle)
             camera_transform = carla.Transform(
-                carla.Location(x=4, z=1.5), 
-                carla.Rotation(pitch=-10)
+                carla.Location(x=5.0, z=3.0), 
+                carla.Rotation(pitch=-12)
             )
 
             # Spawn camera sensor
