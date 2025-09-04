@@ -73,17 +73,14 @@ def main():
     ap.add_argument("--norm", choices=["none","01","n11","imagenet"], default="01", help="Input normalization")
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
 
-    # Encoder A (yours)
     ap.add_argument("--encA_file", required=True, help="Path to encoder .py (your encoder)")
     ap.add_argument("--encA_class", required=True, help="Class name (e.g., VariationalEncoder)")
     ap.add_argument("--encA_weights", required=True, help="Path to weights .pth for A")
 
-    # Encoder B (reference / Idrees)
     ap.add_argument("--encB_file", required=True, help="Path to encoder .py (reference)")
     ap.add_argument("--encB_class", required=True, help="Class name")
     ap.add_argument("--encB_weights", required=True, help="Path to weights .pth for B")
 
-    # Optional ctor kwargs
     ap.add_argument("--latent_dims", type=int, default=None, help="If your encoder needs latent size")
     ap.add_argument("--channels", type=int, default=3)
     args = ap.parse_args()

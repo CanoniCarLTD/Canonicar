@@ -1,7 +1,7 @@
 {
     "objects": [
       {
-        "type": "vehicle.formula.car",    
+        "type": "vehicle.tesla.model3",    
         "id": "ego_vehicle",            
         "spawn_point": {
           "x": -5.0,

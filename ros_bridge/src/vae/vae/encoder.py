@@ -10,7 +10,6 @@ class VariationalEncoder(nn.Module):
     def __init__(self, latent_dims=95):
         super().__init__()
         self.model_file = "model/encoder.pth"
-        # Conv layers from Idrees’s repo
         self.encoder_layer1 = nn.Sequential(
             nn.Conv2d(3, 32, 4, stride=2, padding=1), nn.LeakyReLU()  # → 80×40
         )

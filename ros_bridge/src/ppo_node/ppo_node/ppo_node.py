@@ -254,7 +254,6 @@ class PPOModelNode(Node):
         # unpack
         steer, throttle = float(steer), float(throttle)
 
-        # Idrees' mapping and clamps
         steer = max(min(steer, 1.0), -1.0)
         throttle = (throttle + 1.0) / 2.0
         throttle = max(min(throttle, 0.25), 0.0)

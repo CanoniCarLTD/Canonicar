@@ -18,13 +18,6 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 #                                       ACTOR AND CRITIC NETWORKS
 ##################################################################################################
 
-# NOTE:
-# - Idrees-style unified ActorCritic:
-#     * actor: MLP with Tanh head -> mean in [-1,1]^action_dim
-#     * critic: MLP -> V(s)
-#     * fixed diagonal covariance (no learnable log_std)
-#     * MultivariateNormal for sampling / logprob
-# - Explicit sampling/eval methods; forward() left unimplemented on purpose.
 
 class ActorCritic(nn.Module):
     def __init__(self, obs_dim, action_dim, action_std_init: float):
@@ -103,7 +96,7 @@ class PPOAgent:
         self.logger = logger
         if self.logger is None:
             raise ValueError("Logger not provided. Please provide a logger instance.")
-        self.logger.info("Initializing PPO Agent (Idrees-style policy/logprob/cov)...")
+        self.logger.info("Initializing PPO Agent")
         self.logger.info(f"device: {device}")
 
         self.input_dim = input_dim if PPO_INPUT_DIM is None else PPO_INPUT_DIM
@@ -118,7 +111,6 @@ class PPOAgent:
         self.entropy_coef = ENTROPY_COEF
         self.lr = PPO_LEARNING_RATE
 
-        # === unified Idrees-style module + frozen copy for sampling (old policy) ===
         action_std_init = ACTION_STD_INIT
         self.policy = ActorCritic(self.input_dim, self.action_dim, action_std_init)
         self.policy.to(device)
@@ -149,15 +141,6 @@ class PPOAgent:
         if not os.path.exists(PPO_CHECKPOINT_DIR):
             os.makedirs(PPO_CHECKPOINT_DIR)
 
-        # WARNINGS about metrics differences vs old implementation
-        self.logger.warning(
-            "Switched to Idrees-style log-probabilities (no tanh squash correction). "
-            "Logged log_probs/entropy are NOT numerically comparable with the previous actor that used squash-correction."
-        )
-        self.logger.warning(
-            "Exploration std is FIXED unless you call set_action_std/decay_action_std. "
-            "Entropy will not naturally anneal from a learnable log_std anymore."
-        )
 
         self.logger.info("PPO Agent initialized.")
 

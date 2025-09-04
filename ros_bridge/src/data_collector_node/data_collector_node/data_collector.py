@@ -150,8 +150,8 @@ class DataCollector(Node):
             camera_bp.set_attribute('sensor_tick', '0.1')
             # Setup camera transform (front of vehicle)
             camera_transform = carla.Transform(
-                carla.Location(x=5.0, z=3.0), 
-                carla.Rotation(pitch=-12)
+                carla.Location(x=4.0, z=1.5), 
+                carla.Rotation(pitch=-10)
             )
 
             # Spawn camera sensor
