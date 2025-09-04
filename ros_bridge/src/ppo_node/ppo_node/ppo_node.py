@@ -281,7 +281,7 @@ class PPOModelNode(Node):
             return
 
         progress_delta = self.track_progress - self.prev_progress_distance
-        progress_reward = 100.0 * max(0.0, progress_delta)
+        progress_reward = 10.0 * max(0.0, progress_delta)
 
         time_penalty = -0.01
 

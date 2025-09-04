@@ -9,7 +9,7 @@ MODEL_LOAD = True
 PPO_CHECKPOINT_DIR = "/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models"
 
 # Set to None unless you're continuing an exact run (same version/run folder)
-CHECKPOINT_FILE = "/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models/v4.0.2/run_20250828_0010"
+CHECKPOINT_FILE = "/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models/v4.0.2/run_20250904_0011"
 
 VERSION = "v4.0.2"
 
@@ -41,7 +41,6 @@ TEST_TIMESTEPS = 5e5
 MINIBATCH_SIZE = 256
 # Experimental
 MIN_SPEED = 1.0  # m/s
-TARGET_SPEED = 10.0  # m/s (choose your “cruise” speed)
-MAX_SPEED = 30.0  # m/s (or whatever Carla max is)
-MAX_DISTANCE_FROM_CENTER = 2.5  # meters
-ANGLE_THRESH_RAD = np.deg2rad(45)  # 45 degrees
+TARGET_SPEED = 22.0 
+MAX_DISTANCE_FROM_CENTER = 2  # meters
+ANGLE_THRESH_RAD = np.deg2rad(20)  # 20 degrees
