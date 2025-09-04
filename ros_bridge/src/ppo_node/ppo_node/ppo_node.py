@@ -551,7 +551,7 @@ class PPOModelNode(Node):
                 
                 if self.done:
                     self.reset_run()
-                    torch.cuda.empty_cache()
+                    # torch.cuda.empty_cache()
                     self.episode_counter += 1
                     
                 self.get_logger().debug(f"Processed state from frame_id {frame_id}")
