@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
+# We use this file in vision model file
 
 class VariationalEncoder(nn.Module):
     def __init__(self, latent_dims):  
