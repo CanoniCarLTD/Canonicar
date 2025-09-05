@@ -18,3 +18,6 @@ logs_from_old_log_settings/
 ros_bridge/src/data_collector_node/data_collector_node/VAE/images/raw_20250520/*
 
 vae_backup/
+previous_model/
+
+ros_bridge/src/data_collector_node/data_collector_node/VAE/images/raw_20250904

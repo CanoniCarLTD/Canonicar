@@ -10,7 +10,6 @@ class VariationalEncoder(nn.Module):
     def __init__(self, latent_dims=95):
         super().__init__()
         self.model_file = "model/encoder.pth"
-        # Conv layers from Idrees’s repo
         self.encoder_layer1 = nn.Sequential(
             nn.Conv2d(3, 32, 4, stride=2, padding=1), nn.LeakyReLU()  # → 80×40
         )
@@ -37,7 +36,8 @@ class VariationalEncoder(nn.Module):
         self.N = torch.distributions.Normal(0, 1)
         self.N.loc = self.N.loc.to(device)
         self.N.scale = self.N.scale.to(device)
-
+        self.kl = 0
+                
     def forward(self, x):
         x = x.to(device)
         x = self.encoder_layer1(x)
@@ -49,7 +49,7 @@ class VariationalEncoder(nn.Module):
         mu = self.mu(x)
         sigma = torch.exp(self.sigma(x))
         z = mu + sigma * self.N.sample(mu.shape)
-        self.kl = (sigma**2 + mu**2 - torch.log(sigma) - 1 / 2).sum()
+        self.kl = (sigma**2 + mu**2 - torch.log(sigma) - 1/2).sum()
         return z
 
     def save(self):

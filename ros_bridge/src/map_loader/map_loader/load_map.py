@@ -105,7 +105,7 @@ class LoadMapNode(Node):
             self.world = self.client.get_world()
             settings = self.world.get_settings()
             settings.synchronous_mode = False
-            # settings.fixed_delta_seconds = 0.025  # 40Hz simulation (4× sensor frequency)
+            # settings.fixed_delta_seconds = 0.05  # 40Hz simulation (4× sensor frequency)
             # settings.substepping = True
             # settings.max_substep_delta_time = 0.01  # 100Hz physics calculations
             # settings.max_substeps = 3  # Ensures 0.03 <= 0.01×3
@@ -116,7 +116,7 @@ class LoadMapNode(Node):
             
             sleep(2)
             self.map = self.world.get_map()
-            self.world.set_weather(carla.WeatherParameters.ClearNoon)
+            self.world.set_weather(carla.WeatherParameters.CloudyNoon)
 
             request_msg = String()
             request_msg.data = "Map is loaded"
@@ -124,7 +124,7 @@ class LoadMapNode(Node):
             self.get_logger().info("Map setup complete.")
 
             # Visualize waypoints with better information
-            self.visualize_track()
+            # self.visualize_track()
             self.extract_track_waypoints()
             self.get_logger().info(f"Extracted {len(self.track_waypoints)} waypoints from track")
             self.get_logger().info(f"Track length: {self.track_length:.2f} meters")

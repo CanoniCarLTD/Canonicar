@@ -26,9 +26,6 @@ from .ML.parameters import *
 
 # os.environ["CUDA_LAUNCH_BLOCKING"] = "1"  # might reduce performance time! Uncomment for debugging CUDA errors
 
-# from .db.mongo_connection import init_db, close_db
-from .db import mongo_connection
-
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
@@ -51,18 +48,6 @@ class PPOModelNode(Node):
         self.model_lock = threading.Lock()
 
         self.train = TRAIN
-
-        try:
-            self.db = mongo_connection.init_db()
-            if self.db:
-                self.get_logger().info("MongoDB connection established")
-            else:
-                self.get_logger().warn(
-                    "MongoDB not available - metrics will not be stored"
-                )
-        except Exception as e:
-            self.get_logger().warn(f"Failed to connect to MongoDB: {e}")
-            self.db = None
 
         self.current_step_in_episode = 0
 
@@ -95,10 +80,12 @@ class PPOModelNode(Node):
 
         self.summary_writer = None
 
-        # seed = int(time.time()) % (2**32 - 1)
-        seed = 42  # Fixed seed for reproducibility
-        self.set_global_seed(seed)
-        self.set_deterministic_cudnn(deterministic_cudnn=DETERMINISTIC_CUDNN)
+        seed = 0  # Fixed seed for reproducibility
+        
+        random.seed(seed)
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+        torch.backends.cudnn.deterministic = True
 
         # torch.autograd.set_detect_anomaly(True) # slows things down, so only enable it for debugging.
 
@@ -106,7 +93,7 @@ class PPOModelNode(Node):
         self.get_logger().info(f"Checkpoint directory: {PPO_CHECKPOINT_DIR}")
 
         self.state = None
-        self.action = None
+        self.action = [0.0, 0.0]
         self.reward = 0.0
         self.done = False
 
@@ -140,6 +127,7 @@ class PPOModelNode(Node):
         self.lap_completed = False
         self.lap_count = 0
         self.vehicle_location = None
+        self.vehicle_rotation = None
         self.lap_start_time = None
         self.lap_end_time = None
         self.lap_time = None
@@ -149,6 +137,12 @@ class PPOModelNode(Node):
         self.lateral_deviation = 0.0
         self.heading_deviation = 0.0
         self.vehicle_heading = 0.0
+        self._prev_throttle = 0.0
+        self._prev_steer = 0.0
+
+        self.last_processed_frame_id = -1
+        self.max_buffer_size = 100  # Prevent memory issues
+        self.state_buffer = []
 
         self.episode_start_time = datetime.now()
         self.current_step_in_episode = 0
@@ -235,27 +229,6 @@ class PPOModelNode(Node):
         )
 
     ##################################################################################################
-    #                                       ACTION SELECTION
-    ##################################################################################################
-
-    def get_action(self, data):
-        self.state = data  # might be redundant but just to make sure
-        self.action, self.log_prob = self.ppo_agent.select_action(data)
-
-    # For evaluation
-    def get_action_deterministic(self, state: np.ndarray):
-        """
-        Convert raw state → torch tensor → call actor.act_deterministic
-        and store result in self.action.
-        """
-        state_tensor = torch.tensor(
-            state, dtype=torch.float32, device=device
-        ).unsqueeze(0)
-        with torch.no_grad():
-            action = self.ppo_agent.actor.act_deterministic(state_tensor)
-        self.action = action
-
-    ##################################################################################################
     #                                       ACTION PUBLISHING
     ##################################################################################################
 
@@ -278,49 +251,19 @@ class PPOModelNode(Node):
             self.get_logger().error(f"Invalid action format: {action_list}")
             return
 
-        # Discretize steering: values properly sorted from most left to most right
-        discrete_steer_values = [
-            -1.0,
-            -0.9,
-            -0.8,
-            -0.7,
-            -0.6,
-            -0.5,
-            -0.4,
-            -0.3,
-            -0.2,
-            -0.1,
-            0.0,
-            0.1,
-            0.2,
-            0.3,
-            0.4,
-            0.5,
-            0.6,
-            0.7,
-            0.8,
-            0.9,
-            1.0,
-        ]
-        # Discretize throttle: 0.0, 0.33, 0.66, 1.0
-        discrete_throttle_values = [0.25, 0.5, 0.75]
+        # unpack
+        steer, throttle = float(steer), float(throttle)
 
-        # Find closest discrete values
-        steer_idx = min(
-            range(len(discrete_steer_values)),
-            key=lambda i: abs(discrete_steer_values[i] - steer),
-        )
-        throttle_idx = min(
-            range(len(discrete_throttle_values)),
-            key=lambda i: abs(discrete_throttle_values[i] - throttle),
-        )
-
-        # Get discrete actions
-        discrete_steer = discrete_steer_values[steer_idx]
-        discrete_throttle = discrete_throttle_values[throttle_idx]
+        steer = max(min(steer, 1.0), -1.0)
+        throttle = (throttle + 1.0) / 2.0
+        throttle = max(min(throttle, 0.25), 0.0)
+        steer = self._prev_steer*0.9 + steer*0.1
+        throttle = self._prev_throttle*0.9 + throttle*0.1
+        self._prev_steer = steer
+        self._prev_throttle = throttle
 
         action_msg = Float32MultiArray()
-        action_msg.data = [discrete_steer, discrete_throttle, brake]
+        action_msg.data = [steer, throttle, brake]
 
         # self.get_logger().info(f"Publishing | Steer: {discrete_steer} | Throttle: {discrete_throttle}")
 
@@ -331,112 +274,30 @@ class PPOModelNode(Node):
     ##################################################################################################
 
     def calculate_reward(self):
-        """Improved reward function with properly combined rewards"""
-        # Core reward parameters
-        progress_multiplier = 900.0
-        base_time_penalty = -0.05  # Base penalty when not moving
-        stagnation_factor = 0.05  # Increases penalty over time
-        backwards_penalty = -5.0  # Penalty for going backwards
-        collision_penalty = -40.0
-        lap_completion_bonus = 50.0
-
-        max_allowed_deviation = 2.5  # meters before applying harshest penalty
-        deviation_penalty_factor = -1.7  # scale the penalty
-        max_angle_deviation = math.pi / 5  # 36 degrees
-        angle_penalty_factor = -1.5
-
-        progress_reward = 0.0  # Initialize progress reward to 0
-        # Initialize the reward to 0
-        self.reward = 0.0
-
-        # Initialize stagnation counter if not exists
-        if not hasattr(self, "stagnation_counter"):
-            self.stagnation_counter = 0
-
-        # Handle collision case first
         if self.collision:
-            self.get_logger().info(f"Applied collision penalty: {collision_penalty}")
-            self.reward = collision_penalty
+            self.reward = -40.0
             self.done = True
-            self.stagnation_counter = 0
             return
 
-        # Calculate progress delta
         progress_delta = self.track_progress - self.prev_progress_distance
+        progress_reward = 10.0 * max(0.0, progress_delta)
 
-        if self.current_step_in_episode <= 1 and abs(progress_delta) > 0.1:
-            self.get_logger().warn(
-                f"Detected large progress delta {progress_delta:.6f} in first step - ignoring"
-            )
-            progress_delta = 0.0
+        time_penalty = -0.01
 
-        # Calculate the progress-based component of the reward
-        if progress_delta < -0.001:  # Moving backwards
-            progress_reward = backwards_penalty
-            self.stagnation_counter = 0
-            self.get_logger().info(
-                f"Moving backwards: {progress_delta:.6f}, reward = {backwards_penalty}"
-            )
-        elif progress_delta > 0.001:  # Moving forward
-            progress_reward = progress_multiplier * progress_delta
-            self.stagnation_counter = 0
-            self.get_logger().info(
-                f"Moving forward: {progress_delta:.6f}, reward = {progress_reward:.4f}"
-            )
+        dev_pen = -1.0 * min(self.lateral_deviation ** 2, 4.0)
+        ang_pen = -0.5 * min(abs(self.heading_deviation), np.pi/4)
 
-        # Start with the progress-based reward
-        self.reward = progress_reward
-
-        # Handle wrap-around at 1.0 (lap completion)
-        if progress_delta < -0.5:
-            progress_delta = (1.0 - self.prev_progress_distance) + self.track_progress
-            self.get_logger().info(
-                f"Lap progress wrap-around detected: {progress_delta:.4f}"
-            )
-
-        # Add centerline deviation penalty
-        if hasattr(self, "lateral_deviation") and self.lateral_deviation is not None:
-            normalized_deviation = min(
-                self.lateral_deviation / max_allowed_deviation, 1.0
-            )
-            deviation_penalty = deviation_penalty_factor * (normalized_deviation**2)
-            self.reward += deviation_penalty
-            self.get_logger().info(
-                f"Lateral deviation: {self.lateral_deviation:.4f}, penalty = {deviation_penalty:.4f}"
-            )
-
-        # Add heading angle deviation penalty
-        if hasattr(self, "heading_deviation") and self.heading_deviation is not None:
-            normalized_angle_dev = min(
-                self.heading_deviation / max_angle_deviation, 1.0
-            )
-            angle_penalty = angle_penalty_factor * (normalized_angle_dev**2)
-            self.reward += angle_penalty
-            self.get_logger().info(
-                f"Heading deviation: {self.heading_deviation:.4f}, penalty = {angle_penalty:.4f}"
-            )
-
-        # Add lap completion bonus if detected
-        if self.lap_completed:
-            self.reward += lap_completion_bonus
-            self.lap_completed = False
-            self.stagnation_counter = 0
-            self.get_logger().info(
-                f"Lap completion bonus applied: +{lap_completion_bonus}"
-            )
+        self.reward = float(progress_reward + time_penalty + dev_pen + ang_pen)
 
     ##################################################################################################
     #                                       STORE TRANSITION
     ##################################################################################################
 
-    def store_transition(
-        self, state=None, action=None, log_prob=None, reward=None, done=None
-    ):
+
+    def store_transition(self, state=None, action=None, log_prob=None, reward=None, done=None):
         state = self.state if state is None else state
         if self.current_sim_state in ["RESPAWNING", "MAP_SWAPPING"] or state is None:
-            self.get_logger().debug(
-                "Skipping transition storage during respawn or with None state"
-            )
+            self.get_logger().debug("Skipping transition storage during respawn or with None state")
             return
 
         action = self.action if action is None else action
@@ -446,14 +307,14 @@ class PPOModelNode(Node):
 
         assert action is not None, "Trying to store transition with None action!"
 
-        value = self.ppo_agent.critic(
-            torch.tensor(state, dtype=torch.float32).to(device).unsqueeze(0)
-        ).item()
+        # Normalize log_prob input type; PPOAgent.store_transition handles either
+        if isinstance(log_prob, torch.Tensor) and log_prob.numel() == 1:
+            lp = log_prob  # keep as tensor
+        else:
+            lp = float(log_prob)
 
-        if isinstance(log_prob, torch.Tensor):
-            log_prob = log_prob.item()
+        self.ppo_agent.store_transition(state, action, lp, reward, done)
 
-        self.ppo_agent.store_transition(state, action, log_prob, value, reward, done)
 
     ##################################################################################################
     #                                           RESET RUN
@@ -479,6 +340,20 @@ class PPOModelNode(Node):
         self.lap_completed = False
         self.track_progress = 0.0
         self.prev_progress_distance = 0.0
+        self._prev_throttle = 0.0
+        self._prev_steer = 0.0
+        self.vehicle_location = None
+        self.vehicle_rotation = None
+        self.lap_start_time = None
+        self.lap_end_time = None
+        self.lap_time = None
+        self.needs_track_waypoints = False
+        self.current_speed = 0.0
+        self.last_processed_frame_id = -1
+        self.max_buffer_size = 100
+        self.state_buffer.clear()
+        
+        
         self.termination_reason = "unknown"
         self.get_logger().info(f"Episode {self.episode_counter} finished. Resetting.")
 
@@ -523,7 +398,7 @@ class PPOModelNode(Node):
             return
         self.get_logger().debug(f"Task added to queue: {task.__name__}")
         self.task_queue.put((task, args, kwargs))
-
+        
     ##################################################################################################
     #                                       TRAINING
     ##################################################################################################
@@ -533,7 +408,7 @@ class PPOModelNode(Node):
             return
 
         if self.timestep_counter < self.total_timesteps:
-            self.state = np.array(msg.data, dtype=np.float32)
+            self.state = np.array(msg.data[1:1+PPO_INPUT_DIM], dtype=np.float32)
 
             self.calculate_reward()  # compute reward for previous transition
             reward_to_store = self.reward
@@ -555,7 +430,9 @@ class PPOModelNode(Node):
 
             if self.current_step_in_episode < self.episode_length:
                 self.current_step_in_episode += 1
-                self.get_action(self.state)
+                # self.get_action(self.state)
+                self.action, self.log_prob = self.ppo_agent.select_action(self.state)
+
                 self.publish_action()
 
                 self.prev_state = self.state
@@ -626,24 +503,62 @@ class PPOModelNode(Node):
     def testing(self, msg):
         if not hasattr(self, "ready_to_collect") or not self.ready_to_collect:
             return
-
-        self.state = np.array(msg.data, dtype=np.float32)
-        # self.t1 = datetime.now()
-        if self.current_step_in_episode < self.episode_length:
-            self.current_step_in_episode += 1
-            self.get_action_deterministic(self.state)
-            self.publish_action()
-            # self.calculate_reward()
-            if self.current_step_in_episode >= self.episode_length:
-                self.done = True
-                self.termination_reason = "episode_length"
-            self.timestep_counter += 1
-            self.current_ep_reward += self.reward
-            if self.done:
-                # self.t2 = datetime.now()
-                self.reset_run()
-                self.episode_counter += 1
-            return 1
+        
+        try:
+            # Extract frame_id from the first element of the message
+            if len(msg.data) < 2:  # Should have at least frame_id + some state data
+                self.get_logger().warn("Received message with insufficient data")
+                return
+                
+            current_frame_id = int(msg.data[0])
+            state_data = np.array(msg.data[1:], dtype=np.float32)  # Skip frame_id
+            
+            # Only process if this is a new frame
+            if current_frame_id != self.last_processed_frame_id:
+                # Add to buffer as tuple (frame_id, state_data)
+                self.state_buffer.append((current_frame_id, state_data))
+                self.last_processed_frame_id = current_frame_id
+                
+                # Limit buffer size to prevent memory issues
+                if len(self.state_buffer) > self.max_buffer_size:
+                    self.state_buffer.pop(0)  # Remove oldest
+                    
+                self.get_logger().info(f"Added new state with frame_id {current_frame_id} to buffer")
+            else:
+                self.get_logger().info(f"Ignoring duplicate frame_id {current_frame_id}")
+                return
+            
+            # Process states from buffer
+            if self.state_buffer and self.current_step_in_episode < self.episode_length:
+                # Pop the oldest state from buffer
+                frame_id, state = self.state_buffer.pop(0)
+                self.state = state
+                
+                self.current_step_in_episode += 1
+                
+                # Get action for this unique state
+                self.action, self.log_prob = self.ppo_agent.select_action(self.state)
+                self.publish_action()
+                
+                # Handle episode completion
+                if self.current_step_in_episode >= self.episode_length:
+                    self.done = True
+                    self.termination_reason = "episode_length"
+                
+                self.timestep_counter += 1
+                self.current_ep_reward += self.reward
+                
+                if self.done:
+                    self.reset_run()
+                    # torch.cuda.empty_cache()
+                    self.episode_counter += 1
+                    
+                self.get_logger().debug(f"Processed state from frame_id {frame_id}")
+                return 1
+                
+        except Exception as e:
+            self.get_logger().error(f"Error in testing method: {e}")
+            return 0
 
     ##################################################################################################
     #                                   CHECKPOINTING AND LOGGING
@@ -667,21 +582,19 @@ class PPOModelNode(Node):
         self.load_training_metadata(state_dict_dir)
 
     def save_training_metadata(self, state_dict_dir):
-        log_std = self.ppo_agent.actor.log_std
-        if not torch.isfinite(log_std).all():
-            raise RuntimeError(f"NaN/Inf detected in log_std: {log_std}")
-        log_std = log_std.detach().cpu().tolist()
-        meta = {
-            "episode_counter": self.episode_counter,
-            "timestep_counter": self.timestep_counter,
-            "log_std": log_std,
-            "current_ep_reward": self.current_ep_reward,
-            "current_step_in_episode": self.current_step_in_episode,
-            "learn_step_counter": self.ppo_agent.learn_step_counter,
-            "entropy_coef": self.ppo_agent.entropy_coef,
-        }
-        # self.save_to_mongodb(meta)
         try:
+            action_var = self.ppo_agent.policy.cov_var.detach().cpu().tolist()
+
+            meta = {
+                "episode_counter": self.episode_counter,
+                "timestep_counter": self.timestep_counter,
+                "action_var": action_var,
+                "current_ep_reward": self.current_ep_reward,
+                "current_step_in_episode": self.current_step_in_episode,
+                "learn_step_counter": self.ppo_agent.learn_step_counter,
+                "entropy_coef": self.ppo_agent.entropy_coef,
+            }
+
             meta_path = os.path.join(state_dict_dir, "meta.json")
             with open(meta_path, "w") as f:
                 json.dump(meta, f)
@@ -689,43 +602,43 @@ class PPOModelNode(Node):
         except Exception as e:
             self.get_logger().error(f"❌ Metadata not saved: {e}")
 
+
     def load_training_metadata(self, state_dict_dir):
         try:
             meta_path = os.path.join(state_dict_dir, "meta.json")
             if os.path.exists(meta_path):
                 with open(meta_path, "r") as f:
                     meta = json.load(f)
+
                 self.episode_counter = meta.get("episode_counter", 0)
                 self.timestep_counter = meta.get("timestep_counter", 0)
                 self.current_ep_reward = meta.get("current_ep_reward", 0)
                 self.current_step_in_episode = meta.get("current_step_in_episode", 0)
                 self.ppo_agent.learn_step_counter = meta.get("learn_step_counter", 0)
                 self.ppo_agent.entropy_coef = meta.get("entropy_coef", ENTROPY_COEF)
-                log_std_list = meta.get("log_std")
-                if log_std_list is not None:
-                    log_std_tensor = torch.tensor(
-                        log_std_list, dtype=torch.float32, device=device
-                    )
-                with torch.no_grad():
-                    self.ppo_agent.actor.log_std.copy_(log_std_tensor)
+
+                action_var_list = meta.get("action_var")
+                if action_var_list is not None:
+                    var_tensor = torch.tensor(action_var_list, dtype=torch.float32, device=device)
+                    with torch.no_grad():
+                        for ac in (self.ppo_agent.policy, self.ppo_agent.old_policy):
+                            ac.cov_var.copy_(var_tensor)
+                            ac.cov_mat.copy_(torch.diag(ac.cov_var).unsqueeze(0))
+
                 self.get_logger().info(f"Metadata loaded: {meta}")
             else:
-                self.get_logger().warn(
-                    f"No meta.json found in {state_dict_dir}. No metadata loaded."
-                )
+                self.get_logger().warn(f"No meta.json found in {state_dict_dir}. No metadata loaded.")
         except Exception as e:
             self.get_logger().error(f"❌ Metadata not loaded: {e}")
+
 
     def log_hyperparameters(self):
         hparams = {
             "episode_length": EPISODE_LENGTH,
             "learn_every_N_steps": LEARN_EVERY_N_STEPS,
-            "minibatch_size": MINIBATCH_SIZE,
             "learn_epochs": NUM_EPOCHS,
-            "actor learning_rate": ACTOR_LEARNING_RATE,
-            "critic learning_rate": CRITIC_LEARNING_RATE,
+            "learning_rate": PPO_LEARNING_RATE,
             "gamma": GAMMA,
-            "lambda_gae": LAMBDA_GAE,
             "entropy_coef": ENTROPY_COEF,
             "policy_clip": POLICY_CLIP,
             "input_dim": PPO_INPUT_DIM,
@@ -787,26 +700,26 @@ class PPOModelNode(Node):
 
         except Exception as e:
             self.get_logger().error(f"Failed to log step metrics: {e}")
-            self.log_error("log_every_learn_step_metrics", str(e))
+            # self.log_error("log_every_learn_step_metrics", str(e))
 
-    def save_to_mongodb(self, schema):
-        if self.db is not None:
-            collection = self.db["episodes"]
-            collection.insert_one(schema)
-            self.get_logger().info(f"✅ Step metrics saved to MongoDB: {schema}")
-        else:
-            self.get_logger().error("❌ MongoDB connection is not initialized.")
+    # def save_to_mongodb(self, schema):
+    #     if self.db is not None:
+    #         collection = self.db["episodes"]
+    #         collection.insert_one(schema)
+    #         self.get_logger().info(f"✅ Step metrics saved to MongoDB: {schema}")
+    #     else:
+    #         self.get_logger().error("❌ MongoDB connection is not initialized.")
 
-    def log_error(self, component, message):
-        """Log error to MongoDB through DB service"""
-        try:
-            error_data = {"component": f"ppo_node.{component}", "message": message}
+    # def log_error(self, component, message):
+    #     """Log error to MongoDB through DB service"""
+    #     try:
+    #         error_data = {"component": f"ppo_node.{component}", "message": message}
 
-            msg = String()
-            msg.data = json.dumps(error_data)
-            self.error_logs_pub.publish(msg)
-        except Exception as e:
-            self.get_logger().error(f"Failed to publish error log: {e}")
+    #         msg = String()
+    #         msg.data = json.dumps(error_data)
+    #         self.error_logs_pub.publish(msg)
+    #     except Exception as e:
+    #         self.get_logger().error(f"Failed to publish error log: {e}")
 
     def log_episode_metrics(self):
         log_file = os.path.join(
@@ -1107,7 +1020,9 @@ class PPOModelNode(Node):
         previous_location = self.vehicle_location
 
         # Extract vehicle location
-        self.vehicle_location = (msg.data[0], msg.data[1])
+        self.vehicle_location = (msg.data[0], msg.data[1], msg.data[2])
+        self.vehicle_rotation = msg.data[3]
+
 
         # Experimetal
 
@@ -1237,9 +1152,12 @@ class PPOModelNode(Node):
         self.lateral_deviation = self.calculate_distance(
             self.vehicle_location, projection
         )
+        
 
         track_vector = (wp_next[0] - wp_current[0], wp_next[1] - wp_current[1])
         track_angle = math.atan2(track_vector[1], track_vector[0])
+
+        
 
         if hasattr(self, "vehicle_heading"):
             # Calculate angle difference (normalized to [-π, π])
@@ -1478,8 +1396,8 @@ class PPOModelNode(Node):
         except Exception as e:
             self.get_logger().error(f"Error waiting for background tasks: {e}")
 
-        if hasattr(self, "db"):
-            mongo_connection.close_db()
+        # if hasattr(self, "db"):
+        #     mongo_connection.close_db()
 
 
 def main(args=None):

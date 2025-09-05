@@ -9,16 +9,17 @@ def carla_semantic_image_to_ros_image(carla_image, header: Header) -> Image:
     """
     # Convert to CityScapesPalette using CARLA's ColorConverter
     carla_image.convert(carla.ColorConverter.CityScapesPalette)
-
     img_msg = Image()
     img_msg.header = header
     img_msg.height = carla_image.height
     img_msg.width = carla_image.width
-    img_msg.encoding = "bgr8"  # 8-bit BGR image for ROS
-    img_msg.step = 3 * carla_image.width
+    img_msg.encoding = "bgra8"  # 8-bit BGRA image for ROS
+    img_msg.step = 4 * carla_image.width
     img_data = bytes(carla_image.raw_data)
-    # Remove alpha channel (BGRA -> BGR)
-    img_msg.data = b"".join([
-        img_data[i:i+3] for i in range(0, len(img_data), 4)
-    ])
+    # # Remove alpha channel (BGRA -> BGR)
+    # img_msg.data = b"".join([
+    #     img_data[i:i+3] for i in range(0, len(img_data), 4)
+    # ])
+    img_msg.data = img_data
+
     return img_msg

@@ -14,9 +14,15 @@ tensorboard --logdir=/ros_bridge/src/ppo_node/ppo_node/ML/preTrained_PPO_models/
 
 ## v1.0.0
 
+ - Initializations, project setup
+
 ### v1.1.0
 
+- Setting up environment, docker, nodes, files setup
+
 ### v1.1.1
+
+- Continue project setup - Tensorboard, Docker, PPO, Data Collection
 
 ## v2.0.0
 

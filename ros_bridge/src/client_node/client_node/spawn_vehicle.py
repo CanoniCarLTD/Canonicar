@@ -1,3 +1,5 @@
+import numpy as np
+import torch
 import rclpy #type: ignore
 from rclpy.node import Node #type: ignore
 import carla
@@ -64,7 +66,18 @@ class SpawnVehicleNode(Node):
         self.verify_sensor_timer = None
         self.spawn_transform = None
         self.ignore_collisions_until = 0.0
-        
+        self.distance_traveled = 0.0
+        self.center_lane_deviation = 0.0
+        self.max_distance_from_center = 3
+        self.velocity = float(0.0)
+        self.distance_from_center = float(0.0)
+        self.angle = float(0.0)
+        self.distance_covered = 0.0
+        self.target_speed = 22
+
+        # self.route_waypoints = list()
+        self.road_waypoints = []
+
         self.toggle_spawn = True
         self.current_waypoint_index = 0
 
@@ -78,7 +91,13 @@ class SpawnVehicleNode(Node):
             Float32MultiArray, "/carla/vehicle/location", 10
         ) 
         self.timer = self.create_timer(0.1, self.publish_vehicle_location)
-        
+
+        self.navigation_publisher = self.create_publisher(
+            Float32MultiArray, "/carla/vehicle/navigation", 10
+        )
+
+        self.timer = self.create_timer(0.1, self.publish_vehicle_navigation)
+
         self.steer_publisher = self.create_publisher(
             Float32MultiArray, "/carla/vehicle/steer", 10
         ) 
@@ -122,7 +141,80 @@ class SpawnVehicleNode(Node):
             msg = Float32MultiArray()
             msg.data = [steer]
             self.steer_publisher.publish(msg)
-            
+
+        # Action space of our vehicle. It can make eight unique actions.
+    # Continuous actions are broken into discrete here!
+    def angle_diff(self, v0, v1):
+        angle = np.arctan2(v1[1], v1[0]) - np.arctan2(v0[1], v0[0])
+        if angle > np.pi: angle -= 2 * np.pi
+        elif angle <= -np.pi: angle += 2 * np.pi
+        return angle
+
+
+    def distance_to_line(self, A, B, p):
+        num   = np.linalg.norm(np.cross(B - A, A - p))
+        denom = np.linalg.norm(B - A)
+        if np.isclose(denom, 0):
+            return np.linalg.norm(p - A)
+        return num / denom
+
+
+    def vector(self, v):
+        if isinstance(v, carla.Location) or isinstance(v, carla.Vector3D):
+            return np.array([v.x, v.y, v.z])
+        elif isinstance(v, carla.Rotation):
+            return np.array([v.pitch, v.yaw, v.roll])
+
+    def navigation_obs(self):
+        "vector of 5 values into the state: [throttle, velocity, previous steer, distance from center, angle deviation]"
+        nav_obs_arr = np.zeros(5, dtype=np.float32)
+        throttle = self.vehicle.get_control().throttle
+        nav_obs_arr[0] = throttle
+        velocity = self.vehicle.get_velocity()
+        self.velocity = np.sqrt(velocity.x**2 + velocity.y**2 + velocity.z**2) * 3.6  # convert to km/h
+        nav_obs_arr[1] = self.velocity
+        nav_obs_arr[2] = self.velocity/self.target_speed
+    
+        self.rotation = self.vehicle.get_transform().rotation.yaw
+
+        # Location of the car
+        self.location = self.vehicle.get_location()
+                    
+        #transform = self.vehicle.get_transform()
+        # Keep track of closest waypoint on the route
+        waypoint_index = self.current_waypoint_index
+        for _ in range(len(self.road_waypoints)):
+            # Check if we passed the next waypoint along the route
+            next_waypoint_index = waypoint_index + 1
+            wp = self.road_waypoints[next_waypoint_index % len(self.road_waypoints)]
+            dot = np.dot(self.vector(wp.transform.get_forward_vector())[:2],self.vector(self.location - wp.transform.location)[:2])
+            if dot > 0.0:
+                waypoint_index += 1
+            else:
+                break
+
+        self.current_waypoint_index = waypoint_index
+        # Calculate deviation from center of the lane
+        self.current_waypoint = self.road_waypoints[ self.current_waypoint_index    % len(self.road_waypoints)]
+        self.next_waypoint = self.road_waypoints[(self.current_waypoint_index+1) % len(self.road_waypoints)]
+        self.distance_from_center = self.distance_to_line(self.vector(self.current_waypoint.transform.location),self.vector(self.next_waypoint.transform.location),self.vector(self.location))
+        self.center_lane_deviation += self.distance_from_center
+        normalized_distance_from_center = self.distance_from_center / self.max_distance_from_center
+        nav_obs_arr[3] = normalized_distance_from_center
+        
+        # Get angle difference between closest waypoint and vehicle forward vector
+        fwd    = self.vector(self.vehicle.get_velocity())
+        wp_fwd = self.vector(self.current_waypoint.transform.rotation.get_forward_vector())
+        self.angle  = self.angle_diff(fwd, wp_fwd)
+        normalized_angle = abs(self.angle / np.deg2rad(20))
+        nav_obs_arr[4] = normalized_angle
+        return nav_obs_arr
+
+
+    def publish_vehicle_navigation(self):
+        nav_obs_arr = self.navigation_obs()
+        self.navigation_publisher.publish(Float32MultiArray(data=nav_obs_arr))
+
     def spawn_objects_from_config(self):
 
         self.get_logger().info("Waiting for map to fully load...")
@@ -148,6 +240,42 @@ class SpawnVehicleNode(Node):
             vehicle_bp = blueprint_library.find(vehicle_type)
 
             carla_map = self.world.get_map()
+            # waypoints = carla_map.generate_waypoints(2.0)
+
+            # road_ids = set(wp.road_id for wp in waypoints)
+            # if len(road_ids) == 0:
+            #     self.get_logger().error("No roads found in the map!")
+            #     return
+
+            # main_road_id = list(road_ids)[0] if len(road_ids) == 1 else min(road_ids)
+                        
+            # lane_ids = set(wp.lane_id for wp in waypoints if wp.road_id == main_road_id)
+
+            # driving_lane_id = 1
+            # self.get_logger().info(f"lanes id: {lane_ids}, driving lane id: {driving_lane_id}")
+
+
+            # if driving_lane_id == 0:
+            #     self.get_logger().error("No valid driving lane found!")
+            #     return
+            
+            # self.road_waypoints = [
+            #     wp
+            #     for wp in waypoints
+            #     if wp.road_id == main_road_id and wp.lane_id == driving_lane_id
+            # ]
+            # if not self.road_waypoints:
+            #     self.get_logger().error(
+            #         "No waypoints found for the selected road/lane!"
+            #     )
+            #     return
+
+            # self.road_waypoints.sort(key=lambda wp: wp.s)
+            
+            # spawn_waypoint = self.road_waypoints[1]
+            
+            ####################################################################################
+            
             waypoints = carla_map.generate_waypoints(2.0)
 
             road_ids = set(wp.road_id for wp in waypoints)
@@ -164,31 +292,32 @@ class SpawnVehicleNode(Node):
             )
 
             if driving_lane_id == 0:
-                self.get_logger().error("No valid driving lane found!")
+                self.get_logger().error("No valid driving laney found!")
                 return
 
-            road_waypoints = [
+            self.road_waypoints = [
                 wp
                 for wp in waypoints
                 if wp.road_id == main_road_id and wp.lane_id == driving_lane_id
             ]
-            if not road_waypoints:
+            if not self.road_waypoints:
                 self.get_logger().error(
                     "No waypoints found for the selected road/lane!"
                 )
                 return
 
-            road_waypoints.sort(key=lambda wp: wp.s)
+            self.road_waypoints.sort(key=lambda wp: wp.s)
+
+            spawn_waypoint = self.road_waypoints[2]
+
+            ############################################################################################
             
-            spawn_waypoint = road_waypoints[2]
-
-
             self.get_logger().info(
                 f"Using waypoint at s={spawn_waypoint.s:.1f} for spawn"
             )
 
             self.spawn_transform = spawn_waypoint.transform
-            self.spawn_transform.location.z += 3
+            self.spawn_transform.location.z += 1.5
 
             self.vehicle = self.world.try_spawn_actor(vehicle_bp, self.spawn_transform)
             if not self.vehicle:
@@ -234,8 +363,9 @@ class SpawnVehicleNode(Node):
     def publish_vehicle_location(self):
         if self.vehicle is not None and self.vehicle.is_alive:
             location = self.vehicle.get_location()
+            rotation = self.vehicle.get_transform().rotation.yaw
             msg = Float32MultiArray()
-            msg.data = [location.x, location.y, location.z]
+            msg.data = [location.x, location.y, location.z, rotation]
             self.location_publisher.publish(msg)
 
     def handle_system_state(self, msg):
