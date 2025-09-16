@@ -55,7 +55,7 @@ class ActorCritic(nn.Module):
         )
 
     def forward(self):
-        raise NotImplementedError  # defensive: use explicit methods below
+        raise NotImplementedError
 
     def set_action_std(self, new_action_std: float):
         self.cov_var = torch.full((self.action_dim,), new_action_std, device=device)
@@ -67,7 +67,6 @@ class ActorCritic(nn.Module):
         return self.critic(obs)
 
     def get_action_and_log_prob(self, obs):
-        # mean in [-1,1] due to tanh head
         if isinstance(obs, np.ndarray):
             obs = torch.tensor(obs, dtype=torch.float, device=device)
         mean = self.actor(obs)
@@ -103,7 +102,6 @@ class PPOAgent:
         self.logger.info(f"Action input dimension: {self.input_dim}")
         self.action_dim = action_dim
         if self.action_dim != 2:
-            # FATAL: this code assumes [steer, throttle] exactly
             raise ValueError("action_dim must be 2 (steer[-1,1], throttle[0,1]).")
         self.logger.info(f"Action output dimension: {self.action_dim}")
 
@@ -127,7 +125,6 @@ class PPOAgent:
         
         self.set_action_std(ACTION_STD_INIT)
         
-        # Experience storage (unchanged)
         (
             self.states,
             self.actions,
@@ -164,7 +161,6 @@ class PPOAgent:
     def store_transition(self, state, action, log_prob, reward, done):
         self.states.append(state)
 
-        # action arrives as [steer in -1..1, throttle in 0..1]; convert to model domain
         a = np.asarray(action, dtype=np.float32).copy()
         self.actions.append(a)
 
@@ -185,11 +181,10 @@ class PPOAgent:
         try:
             os.makedirs(directory, exist_ok=True)
             out_path = os.path.join(directory, "ppo_.pth")
-            # Save a dict with a clear key for forward compatibility
             torch.save({"policy": self.policy.state_dict()}, out_path)
             self.logger.info(f"Policy saved to {out_path}")
         except Exception as e:
-            self.logger.info(f"❌ Error saving policy: {e}")
+            self.logger.info(f"Error saving policy: {e}")
 
     def load_model_and_optimizers(self, directory):
         """Load policy saved by `save_model_and_optimizers`.
@@ -203,7 +198,6 @@ class PPOAgent:
             p = os.path.join(directory, "ppo_.pth")
             checkpoint = torch.load(p, map_location=device)
 
-            # Support either {'ac': ...}, {'policy': ...}, or a raw state_dict
             if isinstance(checkpoint, dict) and ("ac" in checkpoint or "policy" in checkpoint):
                 model_state = checkpoint.get("policy", checkpoint.get("ac"))
             else:
@@ -214,15 +208,13 @@ class PPOAgent:
             except Exception as e_load:
                 self.logger.warning(f"Strict load failed: {e_load}; retrying with strict=False")
                 self.policy.load_state_dict(model_state, strict=False)
-            # Ensure models are on the correct device after loading
             self.policy.to(device)
 
-            # Sync frozen policy
             self.old_policy.load_state_dict(self.policy.state_dict())
             self.old_policy.to(device)
             self.logger.info("Policy loaded into ActorCritic.")
         except Exception as e:
-            self.logger.info(f"❌ Error loading policy: {e}")
+            self.logger.info(f"Error loading policy: {e}")
 
     ##################################################################################################
     #                                       NORMALIZE ADVANTAGES
@@ -290,7 +282,6 @@ class PPOAgent:
         total_entropy = 0.0
         num_batches = 0
 
-        # Perform PPO optimization steps
         N = len(states)
         for _ in range(NUM_EPOCHS):
             indices = np.arange(N)
@@ -332,7 +323,6 @@ class PPOAgent:
                 num_batches += 1
 
 
-        # Sync frozen policy with current
         self.old_policy.load_state_dict(self.policy.state_dict())
         self.learn_step_counter += 1
 
@@ -357,7 +347,6 @@ class PPOAgent:
                     self.learn_step_counter,
                 )
 
-        # Clear stored experiences
         (
             self.states,
             self.actions,

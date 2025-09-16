@@ -152,7 +152,6 @@ class VariationalEncoder(nn.Module):
         return z
 
     def save(self):
-        # ensure model folder exists
         os.makedirs(os.path.dirname(self.model_file), exist_ok=True)
         torch.save(self.state_dict(), self.model_file)
 
@@ -163,14 +162,12 @@ class EncodeState(nn.Module):
     def __init__(self, latent_dim, device=None):
         super().__init__()
         self.latent_dim = latent_dim
-        # allow explicit device or default to CUDA if available
         if device is None:
             self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         else:
             self.device = device
 
         try:
-            # create and load the pretrained VAE encoder
             self.conv_encoder = VariationalEncoder(self.latent_dim).to(self.device)
             self.conv_encoder.load()
             self.conv_encoder.eval()
@@ -190,7 +187,6 @@ class EncodeState(nn.Module):
         navigation_obs = torch.tensor(nav_data, dtype=torch.float).to(self.device)
         observation = torch.cat((image_obs.view(-1), navigation_obs), -1)
         
-        # Convert to numpy array and move to CPU if on CUDA
         return observation.cpu().numpy()
 
 
@@ -212,13 +208,6 @@ class VisionProcessor:
         # self.height_range = height_range
         self.device = device
 
-        # No need for RGB normalization since semantic segmentation is already in a standardized format
-        # But we'll still preprocess to normalize to [0, 1] range
-        # self.semantic_tensor = torch.zeros((1, 3, 160, 80), device=self.device)
-
-        # Create and load the model
-        # Create the EncodeState with explicit device; EncodeState is an nn.Module
-        # and will place its internal encoder on the requested device.
         self.model = EncodeState(latent_dim=95, device=self.device)
 
     def lidar_to_bev(self, lidar_points):
@@ -260,36 +249,28 @@ class VisionProcessor:
         x_indices, y_indices = x_indices[mask], y_indices[mask]
         x, y, z, intensities = x[mask], y[mask], z[mask], intensities[mask]
 
-        # Pre-compute all distances once (faster than computing in loop)
         distances = np.sqrt(x**2 + y**2)
 
-        # Initialize grids - combined approach with vectorized operations where possible
         grid_occupancy = np.zeros(grid_size, dtype=np.float32)
         grid_distance = np.full(grid_size, 50.0, dtype=np.float32)
 
-        # Create flat indices for faster operations
         flat_indices = y_indices * grid_size[1] + x_indices
 
-        # For density, use numpy's bincount for faster counting
         grid_density_flat = np.bincount(
             flat_indices, minlength=grid_size[0] * grid_size[1]
         )
         grid_density = grid_density_flat.reshape(grid_size)
 
-        # Create a weighted occupancy that highlights closer barriers
         distance_weights = 1.0 - (distances / 50.0)
         distance_weights = np.clip(distance_weights, 0.1, 1.0)
 
-        # Use a combination of vectorized operations and a loop for occupancy and distance
         for i in range(len(flat_indices)):
             idx = flat_indices[i]
             y_idx, x_idx = y_indices[i], x_indices[i]
 
-            # Set weighted occupancy based on distance (closer = higher weight)
             if grid_occupancy[y_idx, x_idx] < distance_weights[i]:
                 grid_occupancy[y_idx, x_idx] = distance_weights[i]
 
-            # Update minimum distance
             if grid_distance[y_idx, x_idx] > distances[i]:
                 grid_distance[y_idx, x_idx] = distances[i]
 
@@ -301,7 +282,6 @@ class VisionProcessor:
         if max_density > 0:
             grid_density = grid_density / max_density
 
-        # Stack channels
         grid_combined = np.stack([grid_occupancy, grid_distance, grid_density], axis=0)
 
         # Convert to tensor [1, 3, H, W]
