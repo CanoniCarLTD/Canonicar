@@ -45,18 +45,15 @@ class DataCollector(Node):
         self.vehicle_actor = None
         self.latest_camera_data = None
         
-        # Flag to track collector readiness
         self.ready_to_collect = False
         self.vehicle_id = None
         self.last_sensor_timestamp = time.time()
 
         self.front_camera = list()
-        self.nav_data = [0.0] * 5  # Initialize navigation data
+        self.nav_data = [0.0] * 5
 
-        # Connect to CARLA
         self._connect_to_carla()
 
-        # Create state subscriber first to handle simulation status
         self.state_subscription = self.create_subscription(
             String, "/simulation/state", self.handle_system_state, 10
         )
@@ -69,7 +66,6 @@ class DataCollector(Node):
             Float32MultiArray, "/data_to_ppo", 10
         )
 
-        # Setup vision processing
         self.vision_processor = VisionProcessor(device=device)
 
         # Semantic segmentation and VAE training
@@ -98,7 +94,7 @@ class DataCollector(Node):
     def _connect_to_carla(self):
         """Connect to CARLA client"""
         try:
-            self.carla_client = Client('5.29.227.167', 2000)
+            self.carla_client = Client('127.0.0.1', 2000)
             self.carla_client.set_timeout(10.0)
             self.carla_world = self.carla_client.get_world()
             self.get_logger().info("Connected to CARLA server")
@@ -154,14 +150,12 @@ class DataCollector(Node):
                 carla.Rotation(pitch=-12)
             )
 
-            # Spawn camera sensor
             camera_sensor = self.carla_world.spawn_actor(
                 camera_bp, 
                 camera_transform, 
                 attach_to=vehicle_actor
             )
 
-            # Setup camera callback
             weak_self = weakref.ref(self)
             camera_sensor.listen(
                 lambda image: DataCollector._get_front_camera_data(weak_self, image)
@@ -225,7 +219,7 @@ class DataCollector(Node):
             
         except Exception as e:
             self.get_logger().error(f"Error checking dark top edge: {e}")
-            return True  # Assume dark/invalid if we can't check
+            return True
 
     def _is_frame_complete(self, image_array):
         """
@@ -283,13 +277,12 @@ class DataCollector(Node):
             placeholder1 = placeholder.reshape((image.height, image.width, 4))
             target = placeholder1[:, :, :3]
             
-            # Add slight delay to ensure data integrity
             time.sleep(0.005)
             
             # Check if frame is complete and doesn't have dark top edge
             if self._is_frame_complete(target):
                 # Frame is good - update data
-                self.latest_camera_data = target.copy()  # Make a copy to avoid reference issues
+                self.latest_camera_data = target.copy()
                 self.last_sensor_timestamp = time.time()
                     
             
@@ -305,7 +298,7 @@ class DataCollector(Node):
                 self.get_logger().info(
                     f"Reached the maximum number of images ({NUMBER_OF_IMAGES}). Stopping image saving."
                 )
-                break  # Exit the loop to stop saving images
+                break
             img, out_path = self.save_queue.get()
             try:
                 cv2.imwrite(str(out_path), img)
@@ -336,11 +329,9 @@ class DataCollector(Node):
             return
         
         try:
-            # Process the camera data through vision model
-            raw_image = self.latest_camera_data.copy()  # <— critical
+            raw_image = self.latest_camera_data.copy()
             processed_data = self.process_data(raw_image)
                         
-            # Publish to PPO node for training/inference
             response = Float32MultiArray()
             response.data = [float(self.frame_id)] + processed_data.tolist()
             self.publish_to_PPO.publish(response)
@@ -352,7 +343,6 @@ class DataCollector(Node):
         """Handle changes in simulation state"""
         state_msg = msg.data
 
-        # Parse state
         if ":" in state_msg:
             state_name, details = state_msg.split(":", 1)
         else:
@@ -377,15 +367,12 @@ class DataCollector(Node):
             # Check if we have details about vehicle readiness
             if "vehicle_" in details and "ready" in details:
                 try:
-                    # Extract vehicle_id from "vehicle_{id}_ready"
                     vehicle_id_str = details.split("vehicle_")[1].split("_ready")[0]
                     self.vehicle_id = int(vehicle_id_str)
                     self.last_sensor_timestamp = time.time()
                     
-                    # Find the vehicle in CARLA world
                     self.vehicle_actor = self._find_vehicle_by_id(self.vehicle_id)
                     if self.vehicle_actor:
-                        # Setup camera sensor for this vehicle
                         camera_sensor = self._setup_camera_sensor(self.vehicle_actor)
                         if camera_sensor:
                             self.start_processing()
@@ -414,7 +401,6 @@ class DataCollector(Node):
         # Use camera image directly (it's already processed by the callback)
         raw_image = camera_image
 
-        # Save images if recording is enabled
         if RECORD_SS_IMAGES and (self.frame_id % SAVE_EVERY_N_FRAMES == 0):
             run_dir = self.run_dir
             out_path = run_dir / f"{self.saved_image_index:06}.png"
@@ -425,7 +411,6 @@ class DataCollector(Node):
                 self.get_logger().warn("[VAE-rec] Save queue full, dropping frame")
         self.frame_id += 1
 
-        # Process using vision model
         vision_features = self.vision_processor.model.process(raw_image, self.nav_data)
         return vision_features
 

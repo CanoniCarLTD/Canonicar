@@ -57,7 +57,6 @@ class PPOModelNode(Node):
             self.training if self.train else self.testing,
             10,
         )
-        # Action publisher (Steering, Throttle)
         self.action_publisher = self.create_publisher(
             Float32MultiArray, "/carla/vehicle_control", 10
         )
@@ -166,7 +165,6 @@ class PPOModelNode(Node):
             String, "/episode_complete", 10
         )
 
-        # Check if the service is available
         while not self.waypoint_client.wait_for_service(timeout_sec=1.0):
             self.get_logger().info("Waiting for track waypoints service...")
         self.needs_progress_reset = False
@@ -202,7 +200,7 @@ class PPOModelNode(Node):
                 self.create_new_run_dir(load_from_run=LOAD_STATE_DICT_FROM_RUN)
                 state_dict_dir_path = os.path.join(
                     LOAD_STATE_DICT_FROM_RUN, "state_dict"
-                )  # add /state_dict to the path
+                )
                 self.ppo_agent.load_model_and_optimizers(state_dict_dir_path)
                 self.get_logger().info(
                     f"🆕 Started new run ({VERSION}), loaded weights from: {LOAD_STATE_DICT_FROM_RUN}"
@@ -251,7 +249,6 @@ class PPOModelNode(Node):
             self.get_logger().error(f"Invalid action format: {action_list}")
             return
 
-        # unpack
         steer, throttle = float(steer), float(throttle)
 
         steer = max(min(steer, 1.0), -1.0)
@@ -307,9 +304,8 @@ class PPOModelNode(Node):
 
         assert action is not None, "Trying to store transition with None action!"
 
-        # Normalize log_prob input type; PPOAgent.store_transition handles either
         if isinstance(log_prob, torch.Tensor) and log_prob.numel() == 1:
-            lp = log_prob  # keep as tensor
+            lp = log_prob
         else:
             lp = float(log_prob)
 
@@ -370,7 +366,6 @@ class PPOModelNode(Node):
                 if not callable(task):
                     self.get_logger().error(f"Task is not callable: {task}")
                     continue
-                # Execute the task
                 start_time = time.time()
                 task(*args, **kwargs)
                 duration = time.time() - start_time
@@ -430,7 +425,6 @@ class PPOModelNode(Node):
 
             if self.current_step_in_episode < self.episode_length:
                 self.current_step_in_episode += 1
-                # self.get_action(self.state)
                 self.action, self.log_prob = self.ppo_agent.select_action(self.state)
 
                 self.publish_action()
@@ -439,7 +433,6 @@ class PPOModelNode(Node):
                 self.prev_action = self.action
                 self.prev_log_prob = self.log_prob
 
-                # Mark episode as done if episode_length reached
                 if self.current_step_in_episode >= self.episode_length:
                     self.done = True
                     self.termination_reason = "episode_length"
@@ -680,7 +673,6 @@ class PPOModelNode(Node):
         self.summary_writer.add_scalar("Entropy", self.entropy, self.timestep_counter)
 
         try:
-            # Create metrics message
             metrics = {
                 "episode": self.episode_counter,
                 "step": self.timestep_counter,
@@ -702,24 +694,6 @@ class PPOModelNode(Node):
             self.get_logger().error(f"Failed to log step metrics: {e}")
             # self.log_error("log_every_learn_step_metrics", str(e))
 
-    # def save_to_mongodb(self, schema):
-    #     if self.db is not None:
-    #         collection = self.db["episodes"]
-    #         collection.insert_one(schema)
-    #         self.get_logger().info(f"✅ Step metrics saved to MongoDB: {schema}")
-    #     else:
-    #         self.get_logger().error("❌ MongoDB connection is not initialized.")
-
-    # def log_error(self, component, message):
-    #     """Log error to MongoDB through DB service"""
-    #     try:
-    #         error_data = {"component": f"ppo_node.{component}", "message": message}
-
-    #         msg = String()
-    #         msg.data = json.dumps(error_data)
-    #         self.error_logs_pub.publish(msg)
-    #     except Exception as e:
-    #         self.get_logger().error(f"Failed to publish error log: {e}")
 
     def log_episode_metrics(self):
         log_file = os.path.join(
@@ -733,8 +707,6 @@ class PPOModelNode(Node):
             "episode_length": self.current_step_in_episode,
             "termination_reason": self.termination_reason,
         }
-
-        # self.save_to_mongodb(schema=row)
 
         write_header = not os.path.exists(log_file)
         with open(log_file, "a", newline="") as f:
@@ -777,7 +749,7 @@ class PPOModelNode(Node):
     def log_and_publish_performance_metrics(self):
         performance = {
             "episode_id": f"ep_{self.episode_counter}",
-            "lap_times": [],  # Add actual lap times if available
+            "lap_times": [], 
             "track_progress": self.track_progress,
             "collisions": 1 if self.collision else 0,
             "lap_progress": self.track_progress,
@@ -824,7 +796,6 @@ class PPOModelNode(Node):
         """Handle state messages from the simulation coordinator"""
         state_msg = msg.data
 
-        # Parse state
         if ":" in state_msg:
             state_name, details = state_msg.split(":", 1)
         else:
@@ -846,7 +817,7 @@ class PPOModelNode(Node):
                 self.heading_deviation = 0.0
                 self.lateral_deviation = 0.0
                 self.vehicle_heading = 0.0
-                self.heading_buffer = []  # Reset heading buffer
+                self.heading_buffer = []
                 self.prev_progress_distance = 0.0
                 self.closest_waypoint_idx = 0
                 self.start_point = None
@@ -863,12 +834,10 @@ class PPOModelNode(Node):
             except Exception as e:
                 self.get_logger().error(f"Error handling vehicle ready state: {e}")
 
-        # Handle state transitions
         elif state_name == "RESPAWNING":
             self.ready_to_collect = False
             self.get_logger().info(f"Pausing PPO during respawn: {details}")
             if "collision" in details.lower():
-                # Only set collision flags if it's actually a collision
                 self.collision = True
                 self.done = True
                 self.termination_reason = "collision"
@@ -886,7 +855,6 @@ class PPOModelNode(Node):
                         done=True,
                     )
             elif "episode_complete" in details.lower():
-                # Episode completed normally - don't apply collision penalty
                 self.collision = False
                 self.done = True
                 self.get_logger().info(
@@ -916,12 +884,11 @@ class PPOModelNode(Node):
                     done=True,
                 )
             self.get_logger().info(f"Pausing PPO during map swap: {details}")
-            # Request fresh waypoints when the map changes
             self.needs_track_waypoints = True
             # Reset tracking variables for new map
             self.track_waypoints = []
             self.track_length = 0.0
-            self.vehicle_location = None  # Reset location too
+            self.vehicle_location = None
             self.get_logger().info(
                 "Reset track data, will request new waypoints after map swap"
             )
@@ -932,7 +899,7 @@ class PPOModelNode(Node):
             self.get_logger().info(
                 "Detected need for fresh track waypoints, requesting..."
             )
-            self.needs_track_waypoints = False  # Reset flag
+            self.needs_track_waypoints = False
             self.request_track_waypoints()
 
     def request_track_waypoints(self):
@@ -943,7 +910,6 @@ class PPOModelNode(Node):
         ):
             self.get_logger().info("Waypoint service not ready, will retry later")
             if hasattr(self, "retry_timer") and self.retry_timer:
-                # Cancel any existing timer
                 self.retry_timer.cancel()
             self.retry_timer = self.create_timer(1.0, self.retry_request_waypoints)
             return
@@ -977,7 +943,6 @@ class PPOModelNode(Node):
             self.track_length = response.track_length
             self.waypoint_count = len(self.track_waypoints)
 
-            # Reset progress trackers for the new track
             self.reset_progress_tracking()
         except Exception as e:
             self.retry_timer = self.create_timer(2.0, self.retry_request_waypoints)
@@ -1198,7 +1163,6 @@ class PPOModelNode(Node):
             elif progress_diff > 0.5:  # Unlikely large jump
                 progress_diff = -((1.0 - raw_progress) + self.prev_progress_distance)
 
-        # Update progress
         self.track_progress = raw_progress
 
         # Log progress occasionally
@@ -1327,9 +1291,9 @@ class PPOModelNode(Node):
         if torch.cuda.is_available():
             torch.cuda.manual_seed(seed)
             torch.cuda.manual_seed_all(seed)
-            self.get_logger().info("✅ CUDA is available.")
+            self.get_logger().info("CUDA is available.")
         else:
-            self.get_logger().info("⚠️ CUDA is not available. Running on CPU.")
+            self.get_logger().info("CUDA is not available. Running on CPU.")
 
         self.get_logger().info("Global seed setup complete.")
 
@@ -1350,10 +1314,10 @@ class PPOModelNode(Node):
                 torch.backends.cudnn.deterministic = False
                 torch.backends.cudnn.benchmark = True
                 self.get_logger().info(
-                    "⚠️ CuDNN benchmarking mode enabled (faster but nondeterministic)."
+                    "CuDNN benchmarking mode enabled (faster but nondeterministic)."
                 )
         else:
-            self.get_logger().info("⚠️ CuDNN is not enabled or available.")
+            self.get_logger().info("CuDNN is not enabled or available.")
 
     def create_new_run_dir(self, load_from_run=None):
 
