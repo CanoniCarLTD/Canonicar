@@ -1,5 +1,20 @@
 # Canonicar
 
+
+## System Diagram -  dataflow in the pipeline
+![System Diagram](Media/project_diagram.png)
+
+## Demo Videos
+
+[![Demo Video 1](https://img.youtube.com/vi/Dq6RqXCa_io/0.jpg)](https://www.youtube.com/watch?v=Dq6RqXCa_io)
+
+[![Demo Video 2](https://img.youtube.com/vi/ma8CookXiE8/0.jpg)](https://www.youtube.com/watch?v=ma8CookXiE8)
+
+
+---
+
+# Devolopers:
+
 # CARLA ROS 2 Client Setup
 
 This repository contains the setup and instructions to run the CARLA simulator with ROS 2 integration using Docker. Follow the steps below to get your environment up and running.
